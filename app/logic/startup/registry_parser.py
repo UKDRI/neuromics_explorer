@@ -248,7 +248,7 @@ def build_registry_index(registry_db_path: str, force_rebuild: bool = False):
         # print("Rebuilding gene_study_index - registry has been updated since last build...")
 
 
-    # Create index table with gene_symbol and metadata for filtering
+    # Create index table
     con.execute("""
         CREATE TABLE IF NOT EXISTS gene_study_index (
             gene_symbol  VARCHAR NOT NULL,
@@ -263,68 +263,106 @@ def build_registry_index(registry_db_path: str, force_rebuild: bool = False):
     """)
     con.execute("DELETE FROM gene_study_index;")  # clear for rebuild
 
-    # Populate by joining column_mappings to dataset_registry
+    # Extract datasets by joining table_mappings to dataset_registry
+    # Then pull distinct gene_symbol/canonical or original_name and insert into index table along w metadata for filtering
     datasets = con.execute("""
-        INSERT OR REPLACE INTO gene_study_index (gene_symbol, protein_id, study_id, lab_source, display_name, omic_type, db_path, actual_table, organism)
-        SELECT DISTINCT
-            cm.original_name AS gene_symbol,
-            MAX(CASE WHEN cm.canonical_name = 'protein_id' THEN cm.original_name END) AS protein_id,    -- original_name where canonical_name is protein_id
-            dr.study_id,
-            dr.lab_source,
-            dr.display_name,
-            dr.omic_type,
-            dr.db_path,
-            tm.actual_table,
-            MAX(CASE WHEN cm.canonical_name = 'organism' THEN cm.original_name END) AS organism
-        FROM column_mappings cm
-        JOIN dataset_registry dr ON cm.study_id = dr.study_id AND cm.lab_source = dr.lab_source
-        LEFT JOIN table_mappings tm ON cm.study_id = tm.study_id AND cm.lab_source = tm.lab_source AND tm.logical_table = 'expression'
-        WHERE cm.canonical_name IN ('gene_symbol', 'protein_id', 'organism', 'log2fc', 'padj')
-            GROUP BY gene_symbol, dr.study_id          -- grouping genes by study for querying with a given gene
-        -- is last two WHERE/GROUP commands needed???? tbc        
+        SELECT 
+            dr.study_id, 
+            dr.lab_source, 
+            dr.display_name, 
+            dr.omic_type, 
+            dr.db_path, 
+            tm.actual_table
+        FROM dataset_registry dr
+        LEFT JOIN table_mappings tm ON dr.study_id = tm.study_id
+            AND dr.lab_source = tm.lab_source
+            AND tm.logical_table = 'expression'
     """
+    #     """
+    #     INSERT OR REPLACE INTO gene_study_index (gene_symbol, protein_id, study_id, lab_source, display_name, omic_type, db_path, actual_table, organism)
+    #     SELECT DISTINCT
+    #         cm.original_name AS gene_symbol,
+    #         MAX(CASE WHEN cm.canonical_name = 'protein_id' THEN cm.original_name END) AS protein_id,    -- original_name where canonical_name is protein_id
+    #         dr.study_id,
+    #         dr.lab_source,
+    #         dr.display_name,
+    #         dr.omic_type,
+    #         dr.db_path,
+    #         tm.actual_table,
+    #         MAX(CASE WHEN cm.canonical_name = 'organism' THEN cm.original_name END) AS organism
+    #     FROM column_mappings cm
+    #     JOIN dataset_registry dr ON cm.study_id = dr.study_id AND cm.lab_source = dr.lab_source
+    #     LEFT JOIN table_mappings tm ON cm.study_id = tm.study_id AND cm.lab_source = tm.lab_source AND tm.logical_table = 'expression'
+    #     WHERE cm.canonical_name IN ('gene_symbol', 'protein_id', 'organism', 'log2fc', 'padj')
+    #         GROUP BY gene_symbol, dr.study_id          -- grouping genes by study for querying with a given gene
+    #     -- is last two WHERE/GROUP commands needed???? tbc        
+    # """
     ).fetchall()
-    # con.execute(
     #     ....
-    #        
     #     JOIN dataset_registry dr ON cm.study_id = dr.study_id AND cm.lab_source = dr.lab_source
     #     WHERE cm.canonical_name IN ('gene_symbol', 'protein_id', 'organism')
     #             GROUP BY gene_symbol, dr.study_id, dr.lab_source, dr.display_name, dr.omic_type
-
     print(f"gene_study_index built with {len(datasets)} entries.")
 
-    for (gene_symbol, protein_id, study_id, lab_source, 
-         display_name, omic_type, db_path, actual_table, organism) in datasets:
-        # Identify primary column as gene_symbol or, if unavailable, protein_id
+    for (study_id, lab_source, display_name, omic_type, db_path, actual_table) in datasets:
+        # Identify primary column/ canonical gene as `gene_symbol` or, if unavailable, protein_id
         gene_col = con.execute("""
             SELECT original_name FROM column_mappings
             WHERE study_id = ? AND lab_source = ? AND canonical_name = 'gene_symbol'
         """, [study_id, lab_source]).fetchone() #OR for row in datasets: ..... [row[2], row[3]]).fetchone()
+        protein_col = con.execute("""
+            SELECT original_name FROM column_mappings
+            WHERE study_id = ? AND lab_source = ? AND canonical_name = 'protein_id'
+        """, [study_id, lab_source]).fetchone()
+        organism_col = con.execute("""
+            SELECT original_name FROM column_mappings
+            WHERE study_id = ? AND lab_source = ? AND canonical_name = 'organism'
+        """, [study_id, lab_source]).fetchone()
         # Identify human gene column if available for cross-species mapping
         human_col = con.execute("""
             SELECT original_name FROM column_mappings
-            WHERE study_id = ? AND lab_source = ? AND canonical_role='human_gene'     
+            WHERE study_id = ? AND lab_source = ? AND canonical_name='human_gene'     
         """, [study_id, lab_source]).fetchone()
 
-        if not gene_col:
+        if not gene_col and not protein_col:
                 print(f"  WARNING: No gene_symbol mapping for study_id: {study_id}, lab: {lab_source}, skipping index.")
                 continue
-        gene_col = gene_col[0]
+        # Use gene_col if available, else protein_col
+        gene_col = gene_col[0] #if gene_col else None
+        protein_col = protein_col[0] #if protein_col else None
+        organism_col = organism_col[0] #if organism_col else None
 
-        # Query distinct genes from source db
-        view_name = f"{study_id}_{lab_source}".replace(" ", "_").replace("-", "_")
+
+        # Create semantic view for each dataset
+        # Insert and query distinct genes from source db into index
+        view_name = f"{lab_source}_{study_id}".replace(" ", "_").replace("-", "_")
         try:
             con.execute(f"""
-                -- CREATE OR REPLACE VIEW {view_name} AS
-                    """)
-            # TODO - for each dataset, create a view that maps original column names to canonical names, then query distinct gene symbols from that view to populate the index. This way we can handle different gene identifier types and also pull in metadata like organism for filtering.
-            # view_sql = f"""
-            #  CREATE OR REPLACE VIEW {view_name} AS SELECT {gene_col} AS gene_symbol
-        
+                CREATE OR REPLACE VIEW {view_name} AS
+                SELECT
+                    -- study_id,
+                    {gene_col} AS gene_symbol,
+                    {protein_col} AS protein_id,
+                    {organism_col} AS organism
+                FROM '{db_path}'.{actual_table}
+                -- WHERE study_id = {study_id}
+            """)
+            
         except Exception as e:
-            print(f"  ERROR building index for {study_id}_{lab_source}: {e}")
+            print(f"  ERROR creating view {view_name} while building index: {e}")
             continue
 
+        try:
+            rows = con.execute(f"""
+                INSERT INTO gene_study_index (gene_symbol, protein_id, study_id, lab_source, display_name, omic_type, organism)
+                SELECT DISTINCT gene_symbol, protein_id, {study_id}, {lab_source}, {display_name}, {omic_type}, organism
+                FROM {view_name}
+                WHERE gene_symbol IS NOT NULL OR protein_id IS NOT NULL
+            """)
+            print(f"  Inserted {rows.rowcount} rows into gene_study_index for view {view_name}")
+        except Exception as e:
+            print(f"ERROR inserting index for {view_name}: {e}")
+            continue
 
     # Create (composite) indexes for fast querying
     con.execute("""
@@ -349,18 +387,6 @@ def build_registry_index(registry_db_path: str, force_rebuild: bool = False):
 
 
 
-
-# view_sql = f"""
-#         CREATE OR REPLACE VIEW v_{ds['study_id']} AS
-#         SELECT
-#             -- study_id,
-#             {col_map.get('gene_symbol', 'NULL')} AS gene_symbol, 
-#                   OR {ds['columns']['gene']} AS gene,
-#             {ds['columns'].get('cluster', 'NULL')} AS cluster,
-#             *
-#         FROM {ds['table_name']};
-#     """
-#     conn.execute(view_sql)
 
 
 
