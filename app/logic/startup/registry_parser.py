@@ -10,29 +10,32 @@ Usage:
 import yaml
 import duckdb
 from datetime import datetime
-from pathlib import Path
+# from pathlib import Path
 
 
 # Every dataset gets mapped to these canonical names within the dictionary which also contains their categories.
 CANONICAL_NAMES = {
     # Gene / feature identifiers
-    "gene_symbol":      {"required": True,  "category": "feature"},
-    "human_gene":       {"required": False, "category": "feature"},
-    "protein_id":       {"required": False, "category": "feature"},
-    "ensembl_id":       {"required": False, "category": "feature"},
-    "entrez_id":        {"required": False, "category": "feature"},
-    "protein_name":     {"required": False, "category": "feature"},
-    "location":         {"required": False, "category": "feature"},
+    "gene_symbol":          {"required": True,  "category": "feature"},
+    "human_gene":           {"required": False, "category": "feature"},
+    "protein_id":           {"required": False, "category": "feature"},
+    "ensembl_id":           {"required": False, "category": "feature"},
+    "entrez_id":            {"required": False, "category": "feature"},
+    "protein_name":         {"required": False, "category": "feature"},
+    "feature_description":  {"required": False, "category": "feature"},
+    "location":             {"required": False, "category": "feature"},
+    "biotype":              {"required": False, "category": "feature"}, #?
 
     # Differential expression metrics
-    "log2fc":           {"required": True, "category": "metric"},
-    "pvalue":           {"required": False, "category": "metric"},
-    "padj":             {"required": False, "category": "metric"},
-    "abundance_a":      {"required": False, "category": "metric"},
-    "abundance_b":      {"required": False, "category": "metric"},
-    "pct_expressed_a":  {"required": False, "category": "metric"},
-    "pct_expressed_b":  {"required": False, "category": "metric"},
-    "expression_metric":{"required": False, "category": "metric"},
+    "log2fc":               {"required": True,  "category": "metric"},
+    "pvalue":               {"required": False, "category": "metric"},
+    "padj":                 {"required": False, "category": "metric"},
+    "abundance_a":          {"required": False, "category": "metric"},
+    "abundance_b":          {"required": False, "category": "metric"},
+    "pct_expressed_a":      {"required": False, "category": "metric"},
+    "pct_expressed_b":      {"required": False, "category": "metric"},
+    "expression_metric":    {"required": False, "category": "metric"},
+    "normalisation_method": {"required": False, "category": "metric"},
 
     # Sample / cell metadata 
     # Any columns that aren't a feature or metric is considered metadata and can be used in filtering or plotting
@@ -45,38 +48,48 @@ CANONICAL_NAMES = {
     "organism":         {"required": False, "category": "metadata"},
     "sex":              {"required": False, "category": "metadata"},
     "tissue":           {"required": False, "category": "metadata"},
+    "cell_line":        {"required": False, "category": "metadata"},
     "cluster_id":       {"required": False, "category": "metadata"},
     "cell_id":          {"required": False, "category": "metadata"},
 }
 
 # Map original names to the canonical names. First match is used.
 HEURISTIC_MAPPINGS = {
-    "gene_symbol":       ["Mouse_Gene", "Gene_Symbol", "gene_symbol", "gene", "symbol"],
-    "human_gene":        ["Human_Gene", "human_gene", "HGNC_Symbol"],
-    "protein_id":        ["Uniprot_id", "Uniprot_ID", "uniprot", "protein_id"],
-    "ensembl_id":        ["Ensembl_id", "ensembl_id", "ENSEMBL"],
-    "entrez_id":         ["Entrez_id", "entrez_id", "ENTREZID"],
-    "protein_name":      ["Protein_Name", "Protein_Description", "protein_name"],
-    "log2fc":            ["logFC", "logfc", "log2FC", "log2FoldChange", "lfc", "avg_log2FC"],
-    "pvalue":            ["pvalue", "PValue", "p_value", "pval", "p.value"],
-    "padj":              ["padj", "FDR", "adj.P.Val", "p_adj", "adjusted_pvalue"],
-    "abundance_a":       ["abundance_A", "mean_A", "avg_expr_A"],
-    "abundance_b":       ["abundance_B", "mean_B", "avg_expr_B"],
-    "pct_expressed_a":   ["pct_1", "pct.1", "pct_expressed_A"],
-    "pct_expressed_b":   ["pct_2", "pct.2", "pct_expressed_B"],
-    #"expression_metric": ["expression_metric", "avg_log2FC", "mean_expr"],
-    "cell_type":         ["cell_type", "Cell_Type", "celltype", "cell_label", "cluster_label", 
-                          "annotation"],
-    "sample_a":          ["Sample_or_condition_A", "condition_A", "group_A", "treatment"],
-    "sample_b":          ["Sample_or_condition_B", "condition_B", "group_B", "control"],
-    "age":               ["Age", "age", "age_years", "Age_group"],
-    "sex":               ["gender", "sex", "Sex", "Gender"],
-    "tissue":            ["Tissue", "tissue", "brain_region", "region"],
-    "cluster_id":        ["cluster_id", "seurat_clusters", "seurat_clust", "cluster", "clusters", 
-                          "leiden", "louvain"],
-    "cell_id":           ["Cell_ID", "cell_id", "barcode", "cell_barcode"],
-    "location":          ["Location", "location", "Subcellular_Location", "subcellular_location", 
-                          "localisation"],
+    "gene_symbol":          ["Mouse_Gene", "Gene_Symbol", "gene_symbol", "gene", "symbol"],
+    "human_gene":           ["Human_Gene", "human_gene", "HGNC_Symbol"],
+    "protein_id":           ["Uniprot_id", "Uniprot_ID", "uniprot", "protein_id"],
+    "ensembl_id":           ["Ensembl_id", "ensembl_id", "ENSEMBL"],
+    "entrez_id":            ["Entrez_id", "entrez_id", "ENTREZID"],
+    "protein_name":         ["Protein_Name", "Protein_Description", "protein_name"],
+    "feature_description":  ["Feature_Description", "feature_description", "gene_description", 
+                                "Gene_Description", "protein_description", "Protein_Description"],
+    "location":             ["Location", "location", "Subcellular_Location", "subcellular_location",
+                                "localisation"],
+    "biotype":              ["Biotype", "biotype", "gene_biotype", "Gene_Biotype"],
+    "log2fc":               ["logFC", "logfc", "log2FC", "log2FoldChange", "lfc", "avg_log2FC"],
+    "pvalue":               ["pvalue", "PValue", "p_value", "pval", "p.value"],
+    "padj":                 ["padj", "FDR", "adj.P.Val", "p_adj", "adjusted_pvalue"],
+    "abundance_a":          ["abundance_A", "mean_A", "avg_expr_A"],
+    "abundance_b":          ["abundance_B", "mean_B", "avg_expr_B"],
+    "pct_expressed_a":      ["pct_1", "pct.1", "pct_expressed_A"],
+    "pct_expressed_b":      ["pct_2", "pct.2", "pct_expressed_B"],
+    "expression_metric":    ["expression_metric", "avg_log2FC", "mean_expr"],
+    "normalisation_method": ["normalisation_method", "normalization_method", "norm_method", 
+                                "normalisation", "normalization", "normalisation_type", "normalization_type"],
+
+    "sample_a":             ["Sample_or_condition_A", "sample_A", "Sample_A"],
+    "sample_b":             ["Sample_or_condition_B", "sample_B", "Sample_B"],
+    "condition_a":          ["condition_a", "condition_A", "group_A", "treatment", "Condition_A"],
+    "condition_b":          ["condition_b", "condition_B", "group_B", "control", "Condition_B"],
+    "cell_type":            ["cell_type", "Cell_Type", "celltype", "cell_label", "cluster_label", 
+                                "annotation"],
+    "age":                  ["age", "Age", "age_years", "age_group", "Age_group", "Age_Group"],
+    "sex":                  ["gender", "sex", "Sex", "Gender"],
+    "tissue":               ["Tissue", "tissue", "brain_region", "region"],
+    "cell_line":            ["cell_line", "Cell_Line", "Cell_line", "cellLine"],
+    "cluster_id":           ["cluster_id", "seurat_clusters", "seurat_cluster", "seurat_clust", "cluster", "clusters", 
+                                "leiden", "louvain"],
+    "cell_id":              ["Cell_ID", "cell_id", "cellID", "CellID", "barcode", "cell_barcode"],
 }
 
 
@@ -94,7 +107,6 @@ def resolve_column_mappings(feature_cols: list, metric_cols: list,
             if candidate in all_cols:
                 resolved[role] = candidate
                 break  # use first match
-
     return resolved
 
 
@@ -104,7 +116,6 @@ def _infer_organism(gene_col: str) -> str:
         return "mouse"
     if "Human_Gene" in gene_col:
         return "human"
-
 
 
 
@@ -118,7 +129,7 @@ def parse_and_load_registry(yaml_path: str, registry_db_path: str):
 
     con = duckdb.connect(registry_db_path)
 
-    # Create registry tables - CHECK INDEXING (tbc)
+    # Create registry tables
     con.execute("""
         CREATE TABLE IF NOT EXISTS dataset_registry (
             study_id         INTEGER,           -- correspond to original sqlite db ids
@@ -212,7 +223,7 @@ def parse_and_load_registry(yaml_path: str, registry_db_path: str):
     print("Registry loaded successfully.")
 
 
-
+# NB for dev, always rebuild; for prod, check timestamps
 def build_registry_index(registry_db_path: str, force_rebuild: bool = False):
     """
     Create index table to enable fast lookup of which datasets contain a given gene.
@@ -238,6 +249,7 @@ def build_registry_index(registry_db_path: str, force_rebuild: bool = False):
             SELECT MAX(built_at) FROM index_build_log
             WHERE index_name = 'gene_study_index'
         """).fetchone()
+        
         print("Last gene_study_index build:", last_build)
         # In production, compare to registry file mtime. Skip if fresh.
         # db_mtime = con.execute("SELECT MAX(registered_at) FROM dataset_registry").fetchone()[0]
@@ -346,7 +358,7 @@ def build_registry_index(registry_db_path: str, force_rebuild: bool = False):
                     {organism_col} AS organism
                 FROM '{db_path}'.{actual_table}
                 -- WHERE study_id = {study_id}
-            """)
+            """)    #or FROM view_name
             
         except Exception as e:
             print(f"  ERROR creating view {view_name} while building index: {e}")
