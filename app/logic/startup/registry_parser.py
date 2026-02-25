@@ -10,8 +10,6 @@ Usage:
 import yaml
 import duckdb
 from datetime import datetime
-# from pathlib import Path
-
 
 # Every dataset gets mapped to these canonical names within the dictionary which also contains their categories.
 CANONICAL_NAMES = {
