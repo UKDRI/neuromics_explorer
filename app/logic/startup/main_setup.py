@@ -38,18 +38,27 @@ async def lifespan(app: FastAPI):
         duckdb_pool = DuckDBPool(
             db_path="data/neuromics_registry.duckdb", 
             attached_dbs={
-                'diaz': 'data/diaz_castro.duckdb',
-                'hong': 'data/hong.duckdb',
+                'src_diaz': 'data/diaz_castro.duckdb',  # key must match view alias name in registry_parser.py
+                'src_hong': 'data/hong.duckdb',
             }
         )
 
+        # Make pool available to endpoint modules via app state
+        # app.state.db_pool = duckdb_pool
+
         print("API ready.")
-        yield
+        yield   # application runs here; all requests are handled after this point
+
     except Exception as e:
         print(f"Startup failed: {e}")
+        raise   # re-raise so uvicorn reports the failure clearly
+
     # --- CLEANUP & SHUTDOWN ---
     finally:
-        get_conn(duckdb_pool) #.close_all()
+        if duckdb_pool is not None:
+            get_conn(duckdb_pool) #.close_all()
+            duckdb_pool.close_all()
+            print("Connection pool closed.")
 
 
 # Lifespan executes code once during startup, before application starts receiving requests

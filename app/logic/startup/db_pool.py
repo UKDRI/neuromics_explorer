@@ -4,6 +4,7 @@ It also includes startup and shutdown event handlers to manage the lifecycle of 
 """
 
 import duckdb
+import os
 from queue import Queue, Empty
 from contextlib import contextmanager
 import threading
@@ -20,12 +21,27 @@ class DuckDBPool:
             # Attach source databases to every connection in the pool
             if attached_dbs:
                 for alias, path in attached_dbs.items():
-                    con.execute(f"ATTACH '{path}' AS {alias} (READ_ONLY)")
+                    if not os.path.exists(path):
+                        print(f"   WARNING: source DB not found, skipping: {path}")
+                        continue
+                    try:
+                        con.execute(f"ATTACH '{path}' AS {alias} (READ_ONLY)")
+                    except duckdb.BinderException as e:
+                        if "already exists" in str(e).lower():
+                            pass
+                        else:
+                            raise
             self.pool.put(con)
     
     # Acquire connection from pool/ queue
     def acquire(self, timeout: float = 5.0):
-        return self.pool.get(timeout=timeout)
+        try:
+            return self.pool.get(timeout=timeout)
+        except Empty as e:
+            raise RuntimeError(
+                "DuckDB pool exhausted — all connections busy. "
+                "Consider increasing pool_size. Error:", str(e)
+            )
 
     # Release connection back to pool/ queue
     def release(self, con):
@@ -37,7 +53,7 @@ class DuckDBPool:
             con = self.pool.get_nowait()
             con.close()
 
-# Context manager ensure connections are opened/closed cleanly and handling errors, especially for multi-threaded async environments like FastAPI.
+# Context manager ensure connections are opened/closed automatically, cleanly and handling errors, especially for multi-threaded async environments like FastAPI.
 @contextmanager
 def get_conn(pool: DuckDBPool):
     con = pool.acquire()

@@ -18,16 +18,16 @@ sources:
 
     # Source-level defaults (can be overridden per dataset)
     defaults:
-      source_type: "sqlite"
+      source_type: "duckdb"
       db_path: "data/diaz_castro.duckdb"
     
-    # Datasets within this source - SQLite
+    # Datasets within this source - DuckDB
     datasets:
       Astrocyte_TurboID_vs_tdT:
         study_name: "Astrocyte_TurboID_vs_tdT"
         study_id: 1
         display_name: "Astrocyte - TurboID vs tdT"
-        source_type: "sqlite"    #overrides source-level defaults
+        source_type: "duckdb"    #overrides source-level defaults
         db_path: "data/diaz_castro.duckdb"
         omic_type: ["proteomics"] # as vector, not list
         tables:
@@ -53,7 +53,7 @@ sources:
         study_name: "Endfoot_LPS_vs_PBS"
         study_id: 2
         display_name: "Endfoot - LPS vs PBS"
-        source_type: "sqlite"
+        source_type: "duckdb"
         db_path: "data/diaz_castro.duckdb"
         omic_type: ["proteomics"]
         tables:
@@ -75,7 +75,7 @@ sources:
         study_name: "Endfoot_TurboID_vs_tdT"
         study_id: 3
         display_name: "Endfoot - TurboID vs tdT"
-        source_type: "sqlite"
+        source_type: "duckdb"
         db_path: "data/diaz_castro.duckdb"
         omic_type: ["proteomics"]
         tables:
@@ -97,7 +97,7 @@ sources:
         study_name: "Human_vessel_vs_bulk"
         study_id: 4
         display_name: "Human - vessel vs bulk"
-        source_type: "sqlite"
+        source_type: "duckdb"
         db_path: "data/diaz_castro.duckdb"
         omic_type: ["proteomics"]
         tables:
@@ -117,9 +117,9 @@ sources:
           - padj
       BEC_RNAseq:
         study_name: "BEC_RNAseq"
-        study_id: 1
+        study_id: 5
         display_name: "BEC bulk RNAseq "
-        source_type: "sqlite"    #overrides source-level defaults
+        source_type: "duckdb"    #overrides source-level defaults
         db_path: "data/diaz_castro.duckdb"
         omic_type: ["bulk"] # as vector, not list
         tables:
@@ -151,16 +151,16 @@ sources:
 
     # Source-level defaults (can be overridden per dataset)
     defaults:
-      source_type: "sqlite"
+      source_type: "duckdb"
       db_path: "data/hong.duckdb"
     
-    # Datasets within this source - SQLite
+    # Datasets within this source - DuckDB
     datasets:
       3KL_vs_WT_ME-Macs:
         study_name: "3KL_vs_WT_ME-Macs"
         study_id: 1
         display_name: "3KL vs WT - ME-Macs"
-        source_type: "sqlite"    #overrides source-level defaults
+        source_type: "duckdb"    #overrides source-level defaults
         db_path: "data/hong.duckdb"
         omic_type: ["scrna"]
         tables:
@@ -196,7 +196,7 @@ sources:
         study_name: "3KL_vs_WT_ME-Macs"
         study_id: 2
         display_name: "3KL vs WT - ME-Macs"
-        source_type: "sqlite"    #overrides source-level defaults
+        source_type: "duckdb"    #overrides source-level defaults
         db_path: "data/hong.duckdb"
         omic_type: ["proteomics"]
         tables:
@@ -225,7 +225,7 @@ sources:
     # Source-level defaults (can be overridden per dataset)
     defaults:
       source_type: "rds"
-      rds_path: "data/Williams/snrna/sce.RDS"
+      rds_path: "data/Williams/snrna/03_Seeker_sce_objects/*.RDS"
     
     # Datasets within this source - rds/sce object
     datasets:
