@@ -21,7 +21,7 @@ CANONICAL_NAMES = {
     "location":             {"required": False, "category": "feature"},
     "biotype":              {"required": False, "category": "feature"}, #?
 
-    # Differential expression metrics
+    # (Differential expression) Metrics
     "log2fc":               {"required": True,  "category": "metric"},
     "pvalue":               {"required": False, "category": "metric"},
     "padj":                 {"required": False, "category": "metric"},
@@ -46,6 +46,7 @@ CANONICAL_NAMES = {
     "cell_line":        {"required": False, "category": "metadata"},
     "cluster_id":       {"required": False, "category": "metadata"},
     "cell_id":          {"required": False, "category": "metadata"},
+    "doublet_scores":   {"required": False, "category": "metadata"},
 }
 
 # Map original names to the canonical names. First match is used.
@@ -85,6 +86,7 @@ HEURISTIC_MAPPINGS = {
     "cluster_id":           ["cluster_id", "seurat_clusters", "seurat_cluster", "seurat_clust", "cluster", "clusters", 
                                 "leiden", "louvain"],
     "cell_id":              ["Cell_ID", "cell_id", "cellID", "CellID", "barcode", "cell_barcode"],
+    "doublet_scores":       ["scDblFinder_score", "score"],
 }
 
 # Map table name → logical role mapping i.e.:
@@ -133,7 +135,7 @@ def resolve_column_mappings(feature_cols: list, metric_cols: list,
 
 def resolve_logical_table(yaml_key: str, actual_table: str, source_type: str) -> str:
     """
-    Map a YAML table key + actual table name to a canonical logical name.
+    Map a YAML table key + actual original table name to a canonical logical name.
     Logical tables will match those in Parquet files: 'expression', 'sample_metadata' &/or 'cell_metadata', 
         'counts', 'gene_annotations' &/or 'feature_annotations', 'extra_metadata' etc.
     Current yaml key in table dict: 'expression', 'metadata'
@@ -160,6 +162,24 @@ def _infer_organism(gene_col: str) -> str:
     return "unknown"
 
 
+def get_sql_col(col_name: str | None, fallback: str = "NULL") -> str:
+    """
+    Return a quoted SQL column from an original column name from column_mappings,
+    or a literal fallback if the name is None/ unmapped to prevent None or unquoted identifiers.
+
+    Used to safely embed original column names from column_mappings into
+    SQL strings without risk of injecting None or unquoted identifiers.
+
+    Examples:
+        get_sql_col("Mouse_Gene")          →  '"Mouse_Gene"'
+        get_sql_col("padj")                →  '"padj"'
+        get_sql_col(None)                  →  'NULL'
+        get_sql_col(None, "NULL::INTEGER") →  'NULL::INTEGER'
+    """
+    return f'"{col_name}"' if col_name else fallback
+
+
+
 def parse_and_load_registry(yaml_path: str, registry_db_path: str):
     """
     Parse Yaml and load into DuckDB. This is either run at startup, 
@@ -168,25 +188,7 @@ def parse_and_load_registry(yaml_path: str, registry_db_path: str):
     with open(yaml_path) as f:
         registry = yaml.safe_load(f)
 
-    # try:
-        con = duckdb.connect(registry_db_path)
-    # For locked files
-    # def _connect(registry_db_path: str, read_only: bool = False,
-    #          retries: int = 5, retry_delay: float = 1.0) -> duckdb.DuckDBPyConnection:
-    # last_exc = None
-    # for attempt in range(retries):
-    #     try:
-    #         return duckdb.connect(registry_db_path, read_only=read_only)
-    #     except duckdb.IOException as e:
-    #         if "could not set lock" not in str(e).lower():
-    #             raise   # different error — don't retry
-    #         last_exc = e
-    #         if attempt < retries - 1:
-    #             print(f"   Lock busy ({attempt + 1}/{retries}) — retrying in {retry_delay}s. "
-    #                   f"Run: lsof {db_path}")
-    #             time.sleep(retry_delay)
-    # raise last_exc
-
+    con = duckdb.connect(registry_db_path)
 
     try:
         con.execute("""
@@ -277,7 +279,6 @@ def parse_and_load_registry(yaml_path: str, registry_db_path: str):
                     continue
                 seen_keys.add(primary_key)
             
-                # omic_types = ds.get("omic_type", [])  # TBD
                 feature_cols = ds.get("feature_cols", [])
                 metric_cols  = ds.get("metric_cols", [])
                 meta_cols    = ds.get("annotations", [])
@@ -387,11 +388,9 @@ def build_registry_index(registry_db_path: str, force_rebuild: bool = False):
             db_mtime = con.execute("""
                 SELECT MAX(registered_at) FROM dataset_registry
             """).fetchone()[0]
-            
             print("   Last gene_study_index indexing built at:", last_index_build)
+
             # In production, compare index build to registry file mtime. Skip if fresh.
-            # if last_index_build and db_mtime and last_index_build[0] and db_mtime[0]:  # 
-            # if last_index_build[0] >= db_mtime[0]:
             if last_index_build and db_mtime and last_index_build >= db_mtime:
             # if last_index_build >= db_mtime:
                 print("    gene_study_index is up to date. Skip rebuild.")
@@ -429,8 +428,8 @@ def build_registry_index(registry_db_path: str, force_rebuild: bool = False):
                 AND tm.logical_table = 'expression'
         """
         ).fetchall()
-
         print(f"     gene_study_index built with {len(datasets)} dataset entries.")
+
         issue_rows   = []
         attached_dbs = {}
         row_count    = 0
@@ -461,6 +460,8 @@ def build_registry_index(registry_db_path: str, force_rebuild: bool = False):
                         print(f"   ERROR attaching DB {data_path} as {alias}: {e}")
                         continue  # removed since it skips view creation if it exists, prevents it from properly failing and recieving errror/for debugging
             
+            db_alias = attached_dbs[data_path] 
+
             # Identify primary column/ canonical gene as `gene_symbol` or, if unavailable, protein_id
             # gene_col = con.execute("""
             #     SELECT original_name FROM column_mappings
@@ -486,36 +487,40 @@ def build_registry_index(registry_db_path: str, force_rebuild: bool = False):
                     dataset_name, f"missing gene/ protein mapping for indexing"))
                 continue
 
+            # Primary gene column: COALESCE so Mouse_Gene NULLs it falls through to Human_Gene
+            gene_candidates = [get_sql_col(c) for c in [gene_col, protein_col, human_col] if c]         # build as a list and join
+            primary_gene_col = (f"COALESCE({', '.join(gene_candidates)})"
+                if len(gene_candidates) > 1
+                else gene_candidates[0])
+            print(f"[DEBUG] primary_gene_col: {primary_gene_col}    gene_candidates: {gene_candidates}  ")
+            # [DEBUG] primary_gene_col: COALESCE("Gene_Symbol", "Uniprot_ID")    gene_candidates: ['"Gene_Symbol"', '"Uniprot_ID"'] 
+            # or
             # Use gene_col or human_col if available, else protein_col
-            gene_col     = gene_col if gene_col else protein_col #None # if statement to avoid error if fetchone returns None or NULL?? gene_col[0]
-            protein_col  = protein_col if protein_col else "NULL" #None
-            organism_col = organism_col if organism_col else "unknown" #None
+            # gene_col     = gene_col if gene_col else protein_col #None # if statement to avoid error if fetchone returns None or NULL?? gene_col[0]
+            # protein_col  = protein_col if protein_col else "NULL" #None
+            # organism_col = organism_col if organism_col else "unknown" #None
             
-            primary_gene_col = (f'COALESCE("{gene_col}", "{human_col}")'  if gene_col and human_col
-                else f'"{gene_col}"' if gene_col
-                else f'"{human_col}"' if human_col
-                else f'"{protein_col}"')
-            # coalesce_gene = []
-            # if gene_col:    coalesce_gene.append(f'"{gene_col}"')
-            # if human_col:   coalesce_gene.append(f'"{human_col}"')
-            # if protein_col: coalesce_gene.append(f'"{protein_col}"')
-            # primary_gene_col = f"COALESCE({', '.join(coalesce_gene)})" 
-            # protein_expr = f'"{protein_col}"' if protein_col != "NULL" else "NULL"
+            # primary_gene_col = (f'COALESCE("{gene_col}", "{human_col}")'  if gene_col and human_col
+            #     else f'"{gene_col}"' if gene_col
+            #     else f'"{human_col}"' if human_col
+            #     else f'"{protein_col}"')
+            # # coalesce_gene = []
+            # # if gene_col:    coalesce_gene.append(f'"{gene_col}"')
+            # # if human_col:   coalesce_gene.append(f'"{human_col}"')
+            # # if protein_col: coalesce_gene.append(f'"{protein_col}"')
+            # # primary_gene_col = f"COALESCE({', '.join(coalesce_gene)})" 
+            # # protein_expr = f'"{protein_col}"' if protein_col != "NULL" else "NULL"
 
-            # print(f"[DEBUG] gene_col: {gene_col}    protein_col: {protein_col}  organism_col: {organism_col}")
-            # output: [DEBUG] gene_col: Mouse_Gene    protein_col: Uniprot_id  organism_col: unknown    (diaz)
-            # output: [DEBUG] gene_col: Gene_Symbol    protein_col: NULL  organism_col: unknown     (hong)
+            # # print(f"[DEBUG] gene_col: {gene_col}    protein_col: {protein_col}  organism_col: {organism_col}")
+            # # output: [DEBUG] gene_col: Mouse_Gene    protein_col: Uniprot_id  organism_col: unknown    (diaz)
+            # # output: [DEBUG] gene_col: Gene_Symbol    protein_col: NULL  organism_col: unknown     (hong)
+
 
             # Look up alias and create semantic view for each dataset, and insert
-            db_alias = attached_dbs[data_path] 
-            # db_alias = attached_dbs.get(data_path)
-            # safe_dname = dataset_name.replace("-", "_").replace(" ", "_")
-            # view_alias = f"src_{lab_source}_{study_id}_{omic_type}_{safe_dname}".replace("-", "_").replace(" ", "_")
-            # view_name  = f"v_{lab_source}_{study_id}_{omic_type}_{safe_dname}".replace(" ", "_").replace("-", "_")
             view_name = f"v_{lab_source}_{study_id}"
             print(f" [DEBUG] {lab_source} study_id={study_id} | alias={db_alias} | "
-                f"table={actual_table} | gene_col={gene_col} | protein_col={protein_col} | human_col={human_col} | view={view_name}")
-            # protein_col=Uniprot_id | protein_expr="Uniprot_id"
+                f"table={actual_table} | gene_col={gene_col} | primary_gene_col={primary_gene_col} | protein_col={protein_col} | human_col={human_col} | organism_col={organism_col} | view={view_name}")
+            # primary_gene_col="Gene_Symbol" | protein_col=Uniprot_id | protein_expr="Uniprot_id" 
 
             try:
                 #TODO: check "" colnames VS '' string e.g.      protein_expr = f'"{protein_col}"' if protein_col != "NULL" else "NULL"
@@ -524,10 +529,32 @@ def build_registry_index(registry_db_path: str, force_rebuild: bool = False):
                 con.execute(f"""
                     CREATE OR REPLACE VIEW {view_name} AS
                     SELECT
-                        {study_id}           AS study_id,
-                        {primary_gene_col}   AS gene_symbol,
-                        '"{protein_col}"'    AS protein_id,
-                        '{organism_col}'     AS organism
+                        {study_id}                  AS study_id,
+                        -- Feature identifiers
+                        {primary_gene_col}          AS gene_symbol,
+                        {get_sql_col(human_col)}    AS human_gene,
+                        {get_sql_col(protein_col)}  AS protein_id,      -- {protein_col} AS protein_id,
+                        '{organism_col}'            AS organism,
+                        -- Expression metrics
+                        {get_sql_col(name_mappings.get('log2fc'))}             AS log2fc,
+                        {get_sql_col(name_mappings.get('pvalue'))}             AS pvalue,
+                        {get_sql_col(name_mappings.get('padj'))}               AS padj,
+                        {get_sql_col(name_mappings.get('abundance_a'))}        AS abundance_a,
+                        {get_sql_col(name_mappings.get('abundance_b'))}        AS abundance_b,
+                        {get_sql_col(name_mappings.get('pct_expressed_a'))}    AS pct_expressed_a,
+                        {get_sql_col(name_mappings.get('pct_expressed_b'))}    AS pct_expressed_b,
+                        {get_sql_col(name_mappings.get('expression_metric'))}  AS expression_metric,
+                        -- Sample / cell metadata
+                        {get_sql_col(name_mappings.get('sample_a'))}           AS sample_a,
+                        {get_sql_col(name_mappings.get('sample_b'))}           AS sample_b,
+                        {get_sql_col(name_mappings.get('condition_a'))}        AS condition_a,
+                        {get_sql_col(name_mappings.get('condition_b'))}        AS condition_b,
+                        {get_sql_col(name_mappings.get('cell_type'))}          AS cell_type,
+                        {get_sql_col(name_mappings.get('cell_id'))}            AS cell_id,
+                        {get_sql_col(name_mappings.get('cluster_id'))}         AS cluster_id,
+                        {get_sql_col(name_mappings.get('tissue'))}             AS tissue,
+                        {get_sql_col(name_mappings.get('age'), 'NULL::INTEGER')} AS age,
+                        {get_sql_col(name_mappings.get('sex'))}                AS sex
                     FROM {db_alias}.main.{actual_table}
                     WHERE study_id = {study_id} AND {primary_gene_col} IS NOT NULL
                 """)    # '{source_id}'.main.{expression_table} OR '{data_path}'.{actual_table} OR attach_alias.main.actual_table
@@ -543,10 +570,19 @@ def build_registry_index(registry_db_path: str, force_rebuild: bool = False):
                 #TODO: check "" colnames VS '' string
                 con.execute(f"""
                     INSERT INTO gene_study_index (gene_symbol, protein_id, study_id, lab_source, dataset_name, omic_type, organism)
-                    SELECT DISTINCT gene_symbol, protein_id, study_id, '{lab_source}', '{dataset_name}', '{omic_type}', organism
+                    SELECT DISTINCT 
+                        gene_symbol,
+                        TO_JSON(LIST(DISTINCT protein_id)) AS protein_id,       -- e.g. '["Q9Z223","Q9Z224"]' for gene MOCS2
+                        study_id,
+                        '{lab_source}',
+                        '{dataset_name}',
+                        '{omic_type}',
+                        organism
                     FROM {view_name}
                     WHERE gene_symbol IS NOT NULL
-                """) #OR protein_id IS NOT NULL
+                    AND gene_symbol != ''
+                    GROUP BY gene_symbol, study_id, protein_id, organism
+                """) #OR protein_id IS NOT NULL ;   WHERE NULLIF(TRIM(gene_symbol), '') IS NOT NULL
 
                 inserted_rows = con.execute(f"""
                     SELECT COUNT(*) FROM gene_study_index
@@ -562,6 +598,10 @@ def build_registry_index(registry_db_path: str, force_rebuild: bool = False):
                 issue_rows.append((
                     datetime.now(timezone.utc), study_id, lab_source, dataset_name, 
                     f"index insert failed: {e}"))
+                con.execute("""
+                    INSERT INTO index_build_issues (logged_at, study_id, lab_source, dataset_name, issue)
+                    VALUES (?,?,?,?,?)
+                """, [datetime.now(timezone.utc), study_id, lab_source, dataset_name, issue_rows])
                 continue
 
         # Create (composite) indexes for fast querying
