@@ -466,7 +466,7 @@ def build_registry_index(registry_db_path: str, force_rebuild: bool = False):
             #     SELECT original_name FROM column_mappings
             #     WHERE study_id = ? AND lab_source = ? AND canonical_name = 'gene_symbol'
             # """, [study_id, lab_source]).fetchone() #OR for row in datasets: ..... [row[2], row[3]]).fetchone()
-            mappings = dict(
+            name_mappings = dict(
                 con.execute("""
                     SELECT canonical_name, original_name 
                     FROM column_mappings
@@ -474,10 +474,10 @@ def build_registry_index(registry_db_path: str, force_rebuild: bool = False):
                 """, [study_id, lab_source]).fetchall()
             )
 
-            gene_col = mappings.get("gene_symbol")
-            protein_col = mappings.get("protein_id")
-            organism_col = mappings.get("organism")
-            human_col = mappings.get("human_gene")    # Identify human gene column if available for cross-species mapping
+            gene_col     = name_mappings.get("gene_symbol")
+            protein_col  = name_mappings.get("protein_id")
+            organism_col = name_mappings.get("organism")
+            human_col    = name_mappings.get("human_gene")    # Identify human gene column if available for cross-species mapping
 
             if not gene_col and not human_col and not protein_col:
                 print(f" WARNING: No gene or protein mapping for study_id: {study_id}, lab: {lab_source}, skipping index.")

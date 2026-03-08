@@ -91,6 +91,43 @@ def build_dataset_stats(registry_db_path: str, force: bool = False):
                         continue
             db_alias = attached_dbs[data_path]
 
+            # Mappings to extract data from any column that has an adjacent canonical name, from tables
+            name_mappings = dict(
+                con.execute("""
+                    SELECT canonical_name, original_name 
+                    FROM column_mappings
+                    WHERE study_id = ? AND lab_source = ?
+                """, [study_id, lab_source]).fetchall()
+            )
+
+            table_map = dict(con.execute("""
+                SELECT logical_table, actual_table
+                FROM table_mappings
+                WHERE study_id = ? AND lab_source = ?
+            """, [study_id, lab_source]).fetchall())
+
+            expr_table        = table_map.get("expression")
+            counts_table      = table_map.get("counts")
+            sample_meta_table = table_map.get("sample_metadata")
+            cell_meta_table   = table_map.get("cell_metadata")
+            extra_meta_table  = table_map.get("extra_metadata")   #TODO: append into a single metadata_table?
+            
+            gene_col          = name_mappings.get("gene_symbol")
+            protein_col       = name_mappings.get("protein_id")
+            organism_col      = name_mappings.get("organism")
+            human_col         = name_mappings.get("human_gene")
+            padj_col          = name_mappings.get("padj")
+            sample_a_col      = name_mappings.get("sample_a")
+            sample_b_col      = name_mappings.get("sample_b")
+            condition_a_col   = name_mappings.get("condition_a")
+            condition_b_col   = name_mappings.get("condition_b")
+            cell_id_col       = name_mappings.get("cell_id")
+            cell_type_col     = name_mappings.get("cell_type")
+            cluster_col       = name_mappings.get("cluster_id")
+            tissue_col        = name_mappings.get("tissue")
+            age_col           = name_mappings.get("age")
+            sex_col           = name_mappings.get("sex")
+
             # Skip if stats is already computed and not forced
             if not force:
                 computed = con.execute("""
@@ -131,11 +168,11 @@ def build_dataset_stats(registry_db_path: str, force: bool = False):
                     # Feature summaries from expression view
                     feature_stats_query = f"""
                         SELECT
-                            COUNT(DISTINCT gene_symbol) AS total_features,
-                            SUM(CASE WHEN padj < 0.05 THEN 1 ELSE 0 END) AS n_sig_features      -- row-level summary
-                            -- COUNT(DISTINCT CASE WHEN padj < 0.05 THEN gene_symbol ELSE NULL END) AS n_sig_features       -- gene-level summaries due to unique rows only
+                            COUNT(DISTINCT {gene_col})                          AS total_features,
+                            SUM(CASE WHEN {padj_col} < 0.05 THEN 1 ELSE 0 END)  AS n_sig_features      -- row-level summary
+                            -- COUNT(DISTINCT CASE WHEN {padj_col} < 0.05 THEN {gene_col} ELSE NULL END) AS n_sig_features       -- gene-level summaries due to unique rows only
                         FROM {expr_view}    
-                    """ # FROM {db_alias}.main.{actual_table} or FROM '{data_path}'
+                    """ # FROM {db_alias}.main.{expr_table} or FROM {db_alias}.main.{actual_table} or FROM '{data_path}'
                     feature_stats = con.execute(feature_stats_query).fetchone() #or (None, None)
                     
                 if view_exists(con, meta_view):
