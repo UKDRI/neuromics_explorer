@@ -45,10 +45,10 @@ sources:
           - logFC
           - pvalue
           - padj
-        # annotations:
-        #   - Sample_or_condition_A
-        #   - Sample_or_condition_B
-        #   - DE 
+        annotations:
+          - Sample_or_condition_A
+          - Sample_or_condition_B
+          - DE
       Endfoot_LPS_vs_PBS:
         study_name: "Endfoot_LPS_vs_PBS"
         study_id: 2
@@ -71,6 +71,10 @@ sources:
           - logFC
           - pvalue
           - padj
+        annotations:
+          - Sample_or_condition_A
+          - Sample_or_condition_B
+          - DE
       Endfoot_TurboID_vs_tdT:
         study_name: "Endfoot_TurboID_vs_tdT"
         study_id: 3
@@ -93,6 +97,10 @@ sources:
           - logFC
           - pvalue
           - padj
+        annotations:
+          - Sample_or_condition_A
+          - Sample_or_condition_B
+          - DE
       Human_vessel_vs_bulk:
         study_name: "Human_vessel_vs_bulk"
         study_id: 4
@@ -115,6 +123,10 @@ sources:
           - logFC
           - pvalue
           - padj
+        annotations:
+          - Sample_or_condition_A
+          - Sample_or_condition_B
+          - DE
       BEC_RNAseq:
         study_name: "BEC_RNAseq"
         study_id: 5
@@ -138,10 +150,10 @@ sources:
           - logFC
           - padj
           - pvalue
-        # annotations:
-        #   - Sample_or_condition_A
-        #   - Sample_or_condition_B
-        #   - DE 
+        annotations:
+          - Sample_or_condition_A
+          - Sample_or_condition_B
+          - DE
   
   # --- HONG LAB ---
   hong:
@@ -173,7 +185,7 @@ sources:
           - Gene_Symbol
           - Protein_Name
           - Protein_Description
-          - cell_type # - Cell_Type
+          # - cell_type # - Cell_Type
           # - Cell_ID
         metric_cols:
           - pct_1
@@ -181,9 +193,12 @@ sources:
           - logFC
           - pvalue
           - padj
-        # annotations:
-          # `- cell_type` OR `cell_label: "cell_type"`
-          # - cluster
+        annotations:
+          - cluster
+          - cell_type   # `- cell_type` OR `cell_label: "cell_type"`
+          - Condition
+          - Sample_ID
+          - Cell_ID
         reductions:
           - name: "UMAP"
             dim_name: "UMAP"
@@ -209,9 +224,9 @@ sources:
         metric_cols:
           - logFC
           - pvalue
-        # annotations:
-        #   - DE
-        #   - Subcellular_Location
+        annotations:
+          - DE
+          - Subcellular_Location
           # `- cell_type` OR `cell_label: "cell_type"`
           # comparison_status: "DE" 
           # feature_description: "Subcellular_Location"

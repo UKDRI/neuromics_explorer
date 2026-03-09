@@ -7,24 +7,12 @@ Stats are written once (or on force=True).
 from datetime import datetime, timezone
 import duckdb
 
-def view_exists(con, view_name: str) -> bool:  #con: duckdb.DuckDBPyConnection
-    """Check information_schema.views for DuckDB views."""
-    row = con.execute("""
-        SELECT 1
-        FROM information_schema.views
-        WHERE table_name = ?
-        LIMIT 1
-        """,
-        [view_name]
-    ).fetchone()
-    return bool(row)
-
-
 # Ordered key names for build_dataset_stats()
 FEATURE_STAT_KEYS = ["total_features", "n_sig_features"]
 META_STAT_KEYS = [
     "total_samples", "n_conditions", "total_cells", "n_cell_types", "n_clusters",
-    "avg_doublet_score", "cell_types_json", "conditions_json",
+    # "avg_doublet_score",
+    "cell_types_json", "conditions_json",
     "tissues_json", "age_range_json", "sexes_json",
 ]
 
@@ -48,7 +36,7 @@ def build_dataset_stats(registry_db_path: str, force: bool = False):
                 total_cells         INTEGER,   -- e.g. for scrna/ snrna (NULL for others)
                 n_cell_types        INTEGER,   -- distinct cell_type_label values
                 n_clusters          INTEGER,   -- distinct cluster_label values
-                avg_doublet_score   VARCHAR,   -- avg. doublet scores (if available for scrna/ snrna)
+                -- avg_doublet_score   VARCHAR,   -- avg. doublet scores (if available for scrna/ snrna)
                 cell_types_json     VARCHAR,   -- JSON array of distinct cell type labels
                 conditions_json     VARCHAR,   -- JSON array of conditions
                 tissues_json        VARCHAR,   -- JSON array of tissues/brain regions
@@ -71,6 +59,7 @@ def build_dataset_stats(registry_db_path: str, force: bool = False):
         """).fetchall()
         
         attached_dbs = {}
+        issue_rows   = []
         
         for (study_id, lab_source, dataset_name, omic_type, data_path) in datasets:
             
@@ -79,9 +68,9 @@ def build_dataset_stats(registry_db_path: str, force: bool = False):
                 alias = f"src_{lab_source}"
                 try:
                     con.execute(f"ATTACH '{data_path}' AS {alias} (READ_ONLY)")
-                    attached_dbs[data_path] = alias
+                    attached_dbs[data_path] = alias  # attached_dbs.add(alias)
                 except Exception as e:
-                    if "already attached" not in str(e).lower():
+                    if "already attached" in str(e).lower() or "already exists" in str(e).lower():
                         attached_dbs[data_path] = alias     # record the alias it was given even if same file path used for different datasets
                     else:
                         issue_rows.append((
@@ -109,27 +98,9 @@ def build_dataset_stats(registry_db_path: str, force: bool = False):
 
             expr_table        = table_map.get("expression")
             counts_table      = table_map.get("counts")
-            sample_meta_table = table_map.get("sample_metadata")
-            cell_meta_table   = table_map.get("cell_metadata")
+            obs_meta_table    = table_map.get("obs_metadata")
             extra_meta_table  = table_map.get("extra_metadata")   #TODO: append into a single metadata_table?
             
-            gene_col          = name_mappings.get("gene_symbol")
-            protein_col       = name_mappings.get("protein_id")
-            organism_col      = name_mappings.get("organism")
-            human_col         = name_mappings.get("human_gene")
-            padj_col          = name_mappings.get("padj")
-            sample_a_col      = name_mappings.get("sample_a")
-            sample_b_col      = name_mappings.get("sample_b")
-            condition_a_col   = name_mappings.get("condition_a")
-            condition_b_col   = name_mappings.get("condition_b")
-            cell_id_col       = name_mappings.get("cell_id")
-            cell_type_col     = name_mappings.get("cell_type")
-            dbl_score_col     = name_mappings.get("doublet_scores")
-            cluster_col       = name_mappings.get("cluster_id")
-            tissue_col        = name_mappings.get("tissue")
-            age_col           = name_mappings.get("age")
-            sex_col           = name_mappings.get("sex")
-
             # Skip if stats is already computed and not forced
             if not force:
                 computed = con.execute("""
@@ -137,7 +108,7 @@ def build_dataset_stats(registry_db_path: str, force: bool = False):
                     WHERE study_id=? AND lab_source=?
                 """, [study_id, lab_source]).fetchone()
                 if computed:
-                    print(f"   Stats already computed for [{lab_source}] study_id={study_id} — skipping.")
+                    print(f"   Stats already computed for [{lab_source}] study_id={study_id} — skipping...")
                     continue
             
             # Generate view names for queries, to avoid management, complexity, and overhead
@@ -153,7 +124,7 @@ def build_dataset_stats(registry_db_path: str, force: bool = False):
                 "total_cells":          None,
                 "n_cell_types":         None,
                 "n_clusters":           None,
-                "avg_doublet_scores":  "[]",
+                # "avg_doublet_scores":  "[]",
                 "cell_types_json":      "[]",
                 "conditions_json":      "[]",
                 "tissues_json":         "[]",
@@ -168,7 +139,6 @@ def build_dataset_stats(registry_db_path: str, force: bool = False):
                 # Execute queries, add defaults for any missing fields, and upsert into dataset_stats
                 if view_exists(con, view_name):
                     # Feature summaries from expression view
-                    print("DEBUG VIEW CHECK!!!")
                     # feature_stats_query = f"""
                     #     SELECT
                     #         COUNT(DISTINCT {gene_col})                          AS total_features,
@@ -205,58 +175,44 @@ def build_dataset_stats(registry_db_path: str, force: bool = False):
                         SELECT
                             COUNT(DISTINCT sample_a) + COUNT(DISTINCT sample_b)       AS total_samples,           -- COUNT(DISTINCT sample_id) AS total_samples,
                             COUNT(DISTINCT condition_a) + COUNT(DISTINCT condition_b) AS n_conditions,            -- DISTINCT ({condition_a_col}, {condition_b_col})) OR COUNT(DISTINCT condition) AS n_conditions;    COUNT(DISTINCT {condition_a_col} AND {condition_b_col})
-                            COUNT(DISTINCT cell_id)                            AS total_cells,
-                            COUNT(DISTINCT cell_type)                          AS n_cell_types,
-                            COUNT(DISTINCT cluster_id)                         AS n_clusters,
-                            DISTINCT AVG(doublet_scores)                       AS avg_doublet_score,            -- JSON_GROUP_ARRAY(DISTINCT doublet_scores) AS doublet_scores_json, -- OR consider TO_JSON(LIST(DISTINCT doublet_scores))
-                            TO_JSON(LIST(DISTINCT cell_type))                  AS cell_types_json,                -- json_group_array(DISTINCT cell_type)
-                            TO_JSON(LIST(DISTINCT (condition_a, condition_b))) AS conditions_json,                -- json_group_array(DISTINCT (condition_a, condition_b))  -- json_group_array(DISTINCT condition_a) || json_group_array(DISTINCT condition_b);   JSON_GROUP_ARRAY()
-                            TO_JSON(LIST(DISTINCT tissue))                     AS tissues_json,                   -- json_group_array(DISTINCT tissue)
+                            COUNT(DISTINCT cell_id)                                   AS total_cells,
+                            COUNT(DISTINCT cell_type)                                 AS n_cell_types,
+                            COUNT(DISTINCT cluster_id)                                AS n_clusters,
+                            -- DISTINCT AVG(doublet_scores)                           AS avg_doublet_score,            -- JSON_GROUP_ARRAY(DISTINCT doublet_scores) AS doublet_scores_json, -- OR consider TO_JSON(LIST(DISTINCT doublet_scores))
+                            TO_JSON(LIST(DISTINCT cell_type))                         AS cell_types_json,                -- json_group_array(DISTINCT cell_type)
+                            TO_JSON(LIST(DISTINCT condition_a || ' vs ' || condition_b)) AS conditions_json,         -- TO_JSON(LIST(DISTINCT struct_pack(cond_a := condition_a, cond_b := condition_b))) AS conditions_json,   -- TO_JSON(LIST(DISTINCT (condition_a, condition_b)))     AS conditions_json,                -- json_group_array(DISTINCT (condition_a, condition_b))  -- json_group_array(DISTINCT condition_a) || json_group_array(DISTINCT condition_b);   JSON_GROUP_ARRAY()
+                            TO_JSON(LIST(DISTINCT tissue))                            AS tissues_json,                   -- json_group_array(DISTINCT tissue)
                             JSON_OBJECT('min', MIN(age), 'max', MAX(age), 'unit', 'months') AS age_range_json,    -- JSON_GROUP_OBJECT gives key/value merging OR JSON_OBJECT for single structure
-                            TO_JSON(LIST(DISTINCT sex))                        AS sexes_json                      -- json_group_array(DISTINCT sex)
+                            TO_JSON(LIST(DISTINCT sex))                               AS sexes_json                      -- json_group_array(DISTINCT sex)
                         FROM {view_name}    
                     """ # or NOW() AS computed_at FROM '{data_path}'
                     metadata_stats = con.execute(metadata_stats_query).fetchone() #or (None,) * len(META_STAT_KEYS)               
-                    print(f"[DEBUG] metadata_stats  {metadata_stats}")
                 
                 # Create combinations of iterations to map positional columns → key names to a dict, before merging with defaults
                 if feature_stats:
                     defaults.update(dict(zip(FEATURE_STAT_KEYS, feature_stats)))
-                print(f"   [DEBUG] mapped feature_stats [{lab_source}] study_id={study_id}: {feature_stats}")
+                print(f"   [DEBUG] mapped feature_stats [{lab_source}] study_id={study_id}: -> no. of gene_symbol & n_sig_genes {feature_stats}")
                 if metadata_stats:
                     defaults.update(dict(zip(META_STAT_KEYS, metadata_stats)))
-                print(f"   [DEBUG] mapped metadata_stats [{lab_source}] study_id={study_id}: {feature_stats}")
-
+                print(f"   [DEBUG] mapped metadata_stats [{lab_source}] study_id={study_id}: {metadata_stats}")
+                
+                con.execute(f"""
+                    INSERT OR REPLACE INTO dataset_stats (study_id, lab_source, dataset_name, omic_type, total_features,
+                        n_sig_features, total_samples, n_conditions, total_cells, n_cell_types, n_clusters, 
+                        cell_types_json, conditions_json, tissues_json, age_range_json, sexes_json, computed_at) 
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """, [study_id, lab_source, dataset_name, omic_type,
+                        *[defaults[k] for k in FEATURE_STAT_KEYS + META_STAT_KEYS], # *splat/ flatten values from merged dict, defaults
+                        datetime.now(timezone.utc)]
+                ) # TODO: avg_doublet_score,
+                # [study_id, lab_source, dataset_name, omic_type] + list(feature_stats) + list(metadata_stats) + [datetime.now(timezone.utc)])
+            
             except Exception as e:
                 print(f"  WARNING: metadata stats failed for study_id: {study_id}, lab: {lab_source}: {e}")
 
-            con.execute(f"""
-                INSERT OR REPLACE INTO dataset_stats (study_id, lab_source, dataset_name, omic_type, total_features,
-                    n_sig_features, total_samples, n_conditions, total_cells, n_cell_types, n_clusters, avg_doublet_score, 
-                    cell_types_json, conditions_json, tissues_json, age_range_json, sexes_json, computed_at) 
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-            """, [study_id, lab_source, dataset_name, omic_type,
-                    *[defaults[k] for k in FEATURE_STAT_KEYS + META_STAT_KEYS], # *splat/ flatten values from merged dict, defaults
-                    datetime.now(timezone.utc)]
-            )
-            # [study_id, lab_source, dataset_name, omic_type] + list(feature_stats) + list(metadata_stats) + [datetime.now(timezone.utc)])
-                # [study_id, lab_source, dataset_name, omic_type, defaults["total_features"],
-                #     defaults["n_sig_features"],
-                #     defaults["total_samples"],
-                #     defaults["n_conditions"],
-                #     defaults["total_cells"],
-                #     defaults["n_cell_types"],
-                #     defaults["n_clusters"],
-                #     defaults["doublet_scores_json"],
-                #     defaults["cell_types_json"],
-                #     defaults["conditions_json"],
-                #     defaults["tissues_json"],
-                #     defaults["age_range_json"],
-                #     defaults["sexes_json"], datetime.now(timezone.utc)])
-
     finally:
         con.close()
-        print("    Aggregated dataset stats computed.")
+        print("   Aggregated dataset stats computed.")
 
         # Compute tables or views for common queries for UI and filtering:
         # e.g. "top 10 most abundant x y z", "top 10 DE genes in cell type X" or "expression of gene Y across conditions" - can be expanded once usage patterns are clearer

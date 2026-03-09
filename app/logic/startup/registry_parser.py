@@ -51,6 +51,7 @@ CANONICAL_NAMES = {
 
 # Map original names to the canonical names. First match is used.
 HEURISTIC_MAPPINGS = {
+    # features
     "gene_symbol":          ["Mouse_Gene", "Gene_Symbol", "gene_symbol", "gene", "symbol"],
     "human_gene":           ["Human_Gene", "human_gene", "HGNC_Symbol"],
     "protein_id":           ["Uniprot_id", "Uniprot_ID", "uniprot", "protein_id"],
@@ -62,6 +63,7 @@ HEURISTIC_MAPPINGS = {
     "location":             ["Location", "location", "Subcellular_Location", "subcellular_location",
                                 "localisation"],
     "biotype":              ["Biotype", "biotype", "gene_biotype", "Gene_Biotype"],
+    # metrics
     "log2fc":               ["logFC", "logfc", "log2FC", "log2FoldChange", "lfc", "avg_log2FC"],
     "pvalue":               ["pvalue", "PValue", "p_value", "pval", "p.value"],
     "padj":                 ["padj", "FDR", "adj.P.Val", "p_adj", "adjusted_pvalue"],
@@ -72,11 +74,13 @@ HEURISTIC_MAPPINGS = {
     "expression_metric":    ["expression_metric", "avg_log2FC", "mean_expr"],
     "normalisation_method": ["normalisation_method", "normalization_method", "norm_method", 
                                 "normalisation", "normalization", "normalisation_type", "normalization_type"],
-
-    "sample_a":             ["Sample_or_condition_A", "sample_A", "Sample_A"],
+    # obs (sample/ cell) metadata
+    "sample_a":             ["Sample_or_condition_A", "sample_A", "Sample_A", "Sample_ID"],
     "sample_b":             ["Sample_or_condition_B", "sample_B", "Sample_B"],
-    "condition_a":          ["condition_a", "condition_A", "group_A", "treatment", "Condition_A"],
-    "condition_b":          ["condition_b", "condition_B", "group_B", "control", "Condition_B"],
+    "condition_a":          ["condition_a", "condition_A", "group_A", "treatment", "Condition_A", 
+                                "Sample_or_condition_A", "condition", "Condition"],
+    "condition_b":          ["condition_b", "condition_B", "group_B", "control", "Condition_B",
+                                "Sample_or_condition_B", "condition"],
     "cell_type":            ["cell_type", "Cell_Type", "celltype", "cell_label", "cluster_label", 
                                 "annotation"],
     "age":                  ["age", "Age", "age_years", "age_group", "Age_group", "Age_Group"],
@@ -91,26 +95,30 @@ HEURISTIC_MAPPINGS = {
 
 # Map table name → logical role mapping i.e.:
 # sqlite/duckdb sources: *_exp / _results → expression, 
-#                        study_info / *_metadata → sample_/cell_/extra_metadata
+#                        study_info / *_metadata → obs_metadata (sample/cell info), extra_metadata
 # rds (SCE obj) sources: assay logcounts → (log)counts, assay counts → counts,
-#                    colData → cell_metadata, metadata() → sample_metadata,
+#                    colData → obs_metadata, metadata(),
 #                    rowData → feature_annotations
 SQLITE_TABLE_MAPPINGS = {
+    # proteomics
     "proteomics_exp":       "expression",
+    "proteomics_metadata":  "extra_metadata",
+    # bulk
     "bulk_exp":             "expression",
+    "bulk_metadata":        "extra_metadata",
+    # scrna
     "sc_deg_results":       "expression",
     "sc_normalised_expr":   "counts",
     "sc_gene_info":         "gene_annotations",
-    "sc_metadata":          "cell_metadata",
-    "proteomics_metadata":  "extra_metadata",
-    "bulk_metadata":        "extra_metadata",
+    "sc_metadata":          "obs_metadata", 
+    # extras
     "study_info":           "extra_metadata",
 }
 RDS_OBJ_MAPPINGS = {
     "assay(obj, 'logcounts')": "counts",
     "assay(obj, 'counts')":    "counts",
-    "colData(obj)":            "cell_metadata",     #contains sample/cell info, sex, age, doublet_scores, project name for eac cell_id
-    "metadata(obj)":           "sample_metadata",   #or 'extra_metadata' or 'expression' results
+    "colData(obj)":            "obs_metadata",     #contains sample/cell info, sex, age, doublet_scores, project name for eac cell_id
+    "metadata(obj)":           "obs_metadata",     #or 'extra_metadata' or 'expression' results
     "rowData(obj)":            "feature_annotations",
     "rownames(obj)":           "gene_annotations",
 }
@@ -136,7 +144,7 @@ def resolve_column_mappings(feature_cols: list, metric_cols: list,
 def resolve_logical_table(yaml_key: str, actual_table: str, source_type: str) -> str:
     """
     Map a YAML table key + actual original table name to a canonical logical name.
-    Logical tables will match those in Parquet files: 'expression', 'sample_metadata' &/or 'cell_metadata', 
+    Logical tables will match those in Parquet files: 'expression', 'obs_metadata'(cell/sample), 
         'counts', 'gene_annotations' &/or 'feature_annotations', 'extra_metadata' etc.
     Current yaml key in table dict: 'expression', 'metadata'
     Actual db table names (and how to access rds objects): 'proteomics_exp', 'proteomics_metadata',
@@ -228,7 +236,7 @@ def parse_and_load_registry(yaml_path: str, registry_db_path: str):
                 study_id        INTEGER,
                 lab_source      VARCHAR NOT NULL,
                 lab_name        VARCHAR NOT NULL,
-                logical_table   VARCHAR,   -- 'expression', 'sample_metadata' &/or 'cell_metadata', 'counts', 'gene_annotations' &/or 'feature_annotations', 'extra_metadata' etc.
+                logical_table   VARCHAR,   -- 'expression', 'obs_metadata' (sample/ cell info), 'counts', 'gene_annotations' &/or 'feature_annotations', 'extra_metadata' etc.
                 actual_table    VARCHAR,   -- 'proteomics_exp', 'proteomics_metadata', etc.
                 PRIMARY KEY (study_id, lab_source, logical_table)
             )
@@ -283,6 +291,7 @@ def parse_and_load_registry(yaml_path: str, registry_db_path: str):
                 metric_cols  = ds.get("metric_cols", [])
                 meta_cols    = ds.get("annotations", [])
                 col_map      = resolve_column_mappings(feature_cols, metric_cols, meta_cols)
+                print(f"meta_cols to resolve: {meta_cols}")
 
                 # For each dataset, upsert dataset_registry
                 con.executemany("""
@@ -492,23 +501,11 @@ def build_registry_index(registry_db_path: str, force_rebuild: bool = False):
             primary_gene_col = (f"COALESCE({', '.join(gene_candidates)})"
                 if len(gene_candidates) > 1
                 else gene_candidates[0])
-            print(f"[DEBUG] primary_gene_col: {primary_gene_col}    gene_candidates: {gene_candidates}  ")
-            # [DEBUG] primary_gene_col: COALESCE("Gene_Symbol", "Uniprot_ID")    gene_candidates: ['"Gene_Symbol"', '"Uniprot_ID"'] 
             # or
             # Use gene_col or human_col if available, else protein_col
             # gene_col     = gene_col if gene_col else protein_col #None # if statement to avoid error if fetchone returns None or NULL?? gene_col[0]
             # protein_col  = protein_col if protein_col else "NULL" #None
             # organism_col = organism_col if organism_col else "unknown" #None
-            
-            # primary_gene_col = (f'COALESCE("{gene_col}", "{human_col}")'  if gene_col and human_col
-            #     else f'"{gene_col}"' if gene_col
-            #     else f'"{human_col}"' if human_col
-            #     else f'"{protein_col}"')
-            # # coalesce_gene = []
-            # # if gene_col:    coalesce_gene.append(f'"{gene_col}"')
-            # # if human_col:   coalesce_gene.append(f'"{human_col}"')
-            # # if protein_col: coalesce_gene.append(f'"{protein_col}"')
-            # # primary_gene_col = f"COALESCE({', '.join(coalesce_gene)})" 
             # # protein_expr = f'"{protein_col}"' if protein_col != "NULL" else "NULL"
 
             # # print(f"[DEBUG] gene_col: {gene_col}    protein_col: {protein_col}  organism_col: {organism_col}")
@@ -519,8 +516,9 @@ def build_registry_index(registry_db_path: str, force_rebuild: bool = False):
             # Look up alias and create semantic view for each dataset, and insert
             view_name = f"v_{lab_source}_{study_id}"
             print(f" [DEBUG] {lab_source} study_id={study_id} | alias={db_alias} | "
-                f"table={actual_table} | gene_col={gene_col} | primary_gene_col={primary_gene_col} | protein_col={protein_col} | human_col={human_col} | organism_col={organism_col} | view={view_name}")
-            # primary_gene_col="Gene_Symbol" | protein_col=Uniprot_id | protein_expr="Uniprot_id" 
+                f"table={actual_table} | gene_col={gene_col} \n | primary_gene_col={primary_gene_col} \n | gene_candidates: {gene_candidates} \n | protein_col={protein_col} | human_col={human_col} | organism_col={organism_col} | view={view_name}")
+            # protein_col=Uniprot_id | protein_expr="Uniprot_id" 
+            # primary_gene_col: COALESCE("Gene_Symbol", "Uniprot_ID")    gene_candidates: ['"Gene_Symbol"', '"Uniprot_ID"'] 
 
             try:
                 #TODO: check "" colnames VS '' string e.g.      protein_expr = f'"{protein_col}"' if protein_col != "NULL" else "NULL"
@@ -589,7 +587,7 @@ def build_registry_index(registry_db_path: str, force_rebuild: bool = False):
                     WHERE lab_source = '{lab_source}' AND study_id = {study_id}
                 """).fetchone()[0]
                 row_count += inserted_rows
-                print(f"  [DEBUG] Indexed {inserted_rows} genes for [{lab_source}] {dataset_name} into gene_study_index from view: {view_name}")
+                print(f"  [DEBUG] Indexed {inserted_rows} genes for [{lab_source}] {dataset_name} into gene_study_index from view: {view_name} \n")
                 # Indexed 6790 genes for [hong] 3KL_vs_WT_ME-Macs_2 into gene_study_index from view: v_hong_2_proteomics_3KL_vs_WT_ME_Macs_2
 
 
