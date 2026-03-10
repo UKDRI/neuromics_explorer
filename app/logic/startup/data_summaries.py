@@ -5,6 +5,7 @@ Stats are written once (or on force=True).
 """
 
 from datetime import datetime, timezone
+from db_views import attach_source_dbs, view_exists, get_sql_col
 import duckdb
 
 # Ordered key names for build_dataset_stats()
@@ -52,7 +53,8 @@ def build_dataset_stats(registry_db_path: str, force: bool = False):
                 study_id, 
                 lab_source, 
                 dataset_name, 
-                omic_type, 
+                omic_type,
+                source_type,
                 data_path
             FROM dataset_registry
             -- ORDER BY study_id, lab_source
@@ -60,26 +62,37 @@ def build_dataset_stats(registry_db_path: str, force: bool = False):
         
         attached_dbs = {}
         issue_rows   = []
+
+        # Attach each unique db_path once if not done already, record alias per path
+        attached_dbs, attach_failures = attach_source_dbs(con, datasets, 
+            lab_source_index=1, data_path_index=5)
+        for path, lab, err in attach_failures:
+            issue_rows.append((datetime.now(timezone.utc), None, lab, None, f"ATTACH failed: {err}"))
         
-        for (study_id, lab_source, dataset_name, omic_type, data_path) in datasets:
+        for (study_id, lab_source, dataset_name, omic_type, source_type, data_path) in datasets:
             
-            # Attach each unique db_path once if not done already, record alias per path
-            if data_path and data_path not in attached_dbs: # two gaurds against passing None to ATTACH & prevent re-attaching the same db under a second alias with multiple studies
-                alias = f"src_{lab_source}"
-                try:
-                    con.execute(f"ATTACH '{data_path}' AS {alias} (READ_ONLY)")
-                    attached_dbs[data_path] = alias  # attached_dbs.add(alias)
-                except Exception as e:
-                    if "already attached" in str(e).lower() or "already exists" in str(e).lower():
-                        attached_dbs[data_path] = alias     # record the alias it was given even if same file path used for different datasets
-                    else:
-                        issue_rows.append((
-                            datetime.now(timezone.utc), study_id, lab_source, dataset_name, 
-                            f"ATTACH failed: {e}"
-                        ))
-                        print(f"   ERROR attaching DB {data_path} as {alias}: {e}")
-                        continue
+            if not data_path:
+                issue_rows.append((
+                    datetime.now(timezone.utc), study_id, lab_source,
+                    dataset_name, "missing database path, expression table, or data object — skipped"
+                ))
+                continue
+
+            # Skip RDS/Parquet objects
+            if not data_path.endswith(".duckdb"):
+                print(f"   INFO: Skipping non-DuckDB source [{lab_source}] study_id={study_id} ({data_path})")
+                continue
+            # TODO for Parquet
+            # if source_type == "parquet":
+            #     print(f"   INFO: Skipping Parquet dataset study_id={study_id}, lab={lab_source} (will convert to Parquet later)")
+                # Optionally log to skipped_datasets table
+                # con.execute("""
+                #     INSERT OR REPLACE INTO registry_load_issues 
+                #     VALUES (?,?,?,?,?)
+                # """, [datetime.now(timezone.utc), lab_source, dataset_name, study_id, "rds_not_indexed"])
+                # continue
             db_alias = attached_dbs[data_path]
+            # db_alias = attached_dbs.get(data_path)
 
             # Mappings to extract data from any column that has an adjacent canonical name, from tables
             name_mappings = dict(
@@ -96,11 +109,6 @@ def build_dataset_stats(registry_db_path: str, force: bool = False):
                 WHERE study_id = ? AND lab_source = ?
             """, [study_id, lab_source]).fetchall())
 
-            expr_table        = table_map.get("expression")
-            counts_table      = table_map.get("counts")
-            obs_meta_table    = table_map.get("obs_metadata")
-            extra_meta_table  = table_map.get("extra_metadata")   #TODO: append into a single metadata_table?
-            
             # Skip if stats is already computed and not forced
             if not force:
                 computed = con.execute("""
@@ -113,7 +121,8 @@ def build_dataset_stats(registry_db_path: str, force: bool = False):
             
             # Generate view names for queries, to avoid management, complexity, and overhead
             # - views are created by build_registry_index() in registry_parser.py
-            view_name = f"v_{lab_source}_{study_id}"
+            expr_view     = f"v_{lab_source}_{study_id}"
+            obs_meta_view = f"vm_{lab_source}_{study_id}"
 
             # Initialise stat values to prevent `UnboundLocalError`
             defaults = {
@@ -137,44 +146,24 @@ def build_dataset_stats(registry_db_path: str, force: bool = False):
                 metadata_stats = None
 
                 # Execute queries, add defaults for any missing fields, and upsert into dataset_stats
-                if view_exists(con, view_name):
+                if view_exists(con, expr_view):
                     # Feature summaries from expression view
-                    # feature_stats_query = f"""
-                    #     SELECT
-                    #         COUNT(DISTINCT {gene_col})                          AS total_features,
-                    #         SUM(CASE WHEN {padj_col} < 0.05 THEN 1 ELSE 0 END)  AS n_sig_features      -- row-level summary
-                    #         -- COUNT(DISTINCT CASE WHEN {padj_col} < 0.05 THEN {gene_col} ELSE NULL END) AS n_sig_features       -- gene-level summaries due to unique rows only
-                    #     FROM {view_name}    
-                    # """ # FROM {db_alias}.main.{expr_table} or FROM {db_alias}.main.{actual_table} or FROM '{data_path}'
                     feature_stats_query = f"""
                         SELECT
                             COUNT(DISTINCT gene_symbol)                         AS total_features,
                             SUM(CASE WHEN padj < 0.05 THEN 1 ELSE 0 END)        AS n_sig_features      -- row-level summary
                             -- COUNT(DISTINCT CASE WHEN padj < 0.05 THEN gene_symbol ELSE NULL END) AS n_sig_features       -- gene-level summaries due to unique rows only
-                        FROM {view_name}    
+                        FROM {expr_view}    
                     """ # FROM {db_alias}.main.{expr_table} or FROM {db_alias}.main.{actual_table} or FROM '{data_path}'
                     feature_stats = con.execute(feature_stats_query).fetchone() #or (None, None)
 
+                if view_exists(con, obs_meta_view):
                     # Metadata summaries from metadata view (if exists)
-                    # metadata_stats_query = f"""
-                    #     SELECT
-                    #         COUNT(DISTINCT {sample_a_col}) + COUNT(DISTINCT {sample_b_col})       AS total_samples,           -- COUNT(DISTINCT sample_id) AS total_samples,
-                    #         COUNT(DISTINCT {condition_a_col}) + COUNT(DISTINCT {condition_b_col}) AS n_conditions,            -- DISTINCT ({condition_a_col}, {condition_b_col})) OR COUNT(DISTINCT condition) AS n_conditions;    COUNT(DISTINCT {condition_a_col} AND {condition_b_col})
-                    #         COUNT(DISTINCT {cell_id_col})                            AS total_cells,
-                    #         COUNT(DISTINCT {cell_type_col})                          AS n_cell_types,
-                    #         COUNT(DISTINCT {cluster_col})                            AS n_clusters,
-                    #         json_group_array(DISTINCT {dbl_score_col})               AS doublet_scores_json,                  -- JSON_GROUP_ARRAY(DISTINCT doublet_scores) AS doublet_scores_json, -- OR consider TO_JSON(LIST(DISTINCT doublet_scores))
-                    #         json_group_array(DISTINCT {cell_type_col})               AS cell_types_json,
-                    #         json_group_array(DISTINCT ({condition_a_col}, {condition_b_col})) AS conditions_json,             -- json_group_array(DISTINCT condition_a) || json_group_array(DISTINCT condition_b);   JSON_GROUP_ARRAY()
-                    #         json_group_array(DISTINCT {tissue_col})                  AS tissues_json,
-                    #         JSON_OBJECT('min', MIN({age_col}), 'max', MAX({age_col}), 'unit', 'months') AS age_range_json,    -- JSON_GROUP_OBJECT gives key/value merging OR JSON_OBJECT for single structure
-                    #         json_group_array(DISTINCT {sex_col})                     AS sexes_json
-                    #     FROM {view_name}    
-                    # """ # or NOW() AS computed_at FROM '{data_path}'
+                    print("[DEBUG]          metadata views exists!!")
                     metadata_stats_query = f"""
                         SELECT
                             COUNT(DISTINCT sample_a) + COUNT(DISTINCT sample_b)       AS total_samples,           -- COUNT(DISTINCT sample_id) AS total_samples,
-                            COUNT(DISTINCT condition_a) + COUNT(DISTINCT condition_b) AS n_conditions,            -- DISTINCT ({condition_a_col}, {condition_b_col})) OR COUNT(DISTINCT condition) AS n_conditions;    COUNT(DISTINCT {condition_a_col} AND {condition_b_col})
+                            COUNT(DISTINCT condition_a) + COUNT(DISTINCT condition_b) AS n_conditions,            -- DISTINCT ({condition_a_col}, {condition_b_col})) OR COUNT(DISTINCT condition) AS n_conditions  --  COUNT(DISTINCT {condition_a_col} AND {condition_b_col})
                             COUNT(DISTINCT cell_id)                                   AS total_cells,
                             COUNT(DISTINCT cell_type)                                 AS n_cell_types,
                             COUNT(DISTINCT cluster_id)                                AS n_clusters,
@@ -184,17 +173,17 @@ def build_dataset_stats(registry_db_path: str, force: bool = False):
                             TO_JSON(LIST(DISTINCT tissue))                            AS tissues_json,                   -- json_group_array(DISTINCT tissue)
                             JSON_OBJECT('min', MIN(age), 'max', MAX(age), 'unit', 'months') AS age_range_json,    -- JSON_GROUP_OBJECT gives key/value merging OR JSON_OBJECT for single structure
                             TO_JSON(LIST(DISTINCT sex))                               AS sexes_json                      -- json_group_array(DISTINCT sex)
-                        FROM {view_name}    
+                        FROM {obs_meta_view}    
                     """ # or NOW() AS computed_at FROM '{data_path}'
                     metadata_stats = con.execute(metadata_stats_query).fetchone() #or (None,) * len(META_STAT_KEYS)               
                 
                 # Create combinations of iterations to map positional columns → key names to a dict, before merging with defaults
                 if feature_stats:
                     defaults.update(dict(zip(FEATURE_STAT_KEYS, feature_stats)))
-                print(f"   [DEBUG] mapped feature_stats [{lab_source}] study_id={study_id}: -> no. of gene_symbol & n_sig_genes {feature_stats}")
+                print(f"   [DEBUG] mapped feature_stats [{lab_source}] study_id={study_id}: -> total_features & n_sig_genes {feature_stats}")
                 if metadata_stats:
                     defaults.update(dict(zip(META_STAT_KEYS, metadata_stats)))
-                print(f"   [DEBUG] mapped metadata_stats [{lab_source}] study_id={study_id}: {metadata_stats}")
+                print(f"   [DEBUG] mapped metadata_stats [{lab_source}] study_id={study_id}: -> total_samples & n_sig_features etc. {metadata_stats}")
                 
                 con.execute(f"""
                     INSERT OR REPLACE INTO dataset_stats (study_id, lab_source, dataset_name, omic_type, total_features,

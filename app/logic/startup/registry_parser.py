@@ -5,6 +5,7 @@ It also creates DuckDB Views to implement a semantic layer for querying and aggr
 """
 
 from datetime import datetime, timezone
+from db_views import attach_source_dbs, create_views, get_sql_col
 import yaml
 import duckdb
 
@@ -101,18 +102,18 @@ HEURISTIC_MAPPINGS = {
 #                    rowData → feature_annotations
 SQLITE_TABLE_MAPPINGS = {
     # proteomics
-    "proteomics_exp":       "expression",
-    "proteomics_metadata":  "extra_metadata",
+    "proteomics_exp":       "expression",   #contains sample, protein name/descrp, DE, metrics
+    "proteomics_metadata":  "extra_metadata",   #metadata text
     # bulk
     "bulk_exp":             "expression",
     "bulk_metadata":        "extra_metadata",
     # scrna
-    "sc_deg_results":       "expression",
+    "sc_deg_results":       "expression",   #gene name, metrics, cell type
     "sc_normalised_expr":   "counts",
     "sc_gene_info":         "gene_annotations",
-    "sc_metadata":          "obs_metadata", 
+    "sc_metadata":          "obs_metadata",     #sample, cellid, condition, cluster,cell type
     # extras
-    "study_info":           "extra_metadata",
+    "study_info":           "extra_metadata",   #organism, modality, 
 }
 RDS_OBJ_MAPPINGS = {
     "assay(obj, 'logcounts')": "counts",
@@ -168,24 +169,6 @@ def _infer_organism(gene_col: str) -> str:
     if "Human_Gene" in gene_col:
         return "human"  #homo sapiens
     return "unknown"
-
-
-def get_sql_col(col_name: str | None, fallback: str = "NULL") -> str:
-    """
-    Return a quoted SQL column from an original column name from column_mappings,
-    or a literal fallback if the name is None/ unmapped to prevent None or unquoted identifiers.
-
-    Used to safely embed original column names from column_mappings into
-    SQL strings without risk of injecting None or unquoted identifiers.
-
-    Examples:
-        get_sql_col("Mouse_Gene")          →  '"Mouse_Gene"'
-        get_sql_col("padj")                →  '"padj"'
-        get_sql_col(None)                  →  'NULL'
-        get_sql_col(None, "NULL::INTEGER") →  'NULL::INTEGER'
-    """
-    return f'"{col_name}"' if col_name else fallback
-
 
 
 def parse_and_load_registry(yaml_path: str, registry_db_path: str):
@@ -427,7 +410,8 @@ def build_registry_index(registry_db_path: str, force_rebuild: bool = False):
                 dr.study_id, 
                 dr.lab_source, 
                 dr.dataset_name, 
-                dr.omic_type, 
+                dr.omic_type,
+                dr.source_type,
                 dr.data_path, 
                 tm.actual_table
             FROM dataset_registry dr
@@ -443,7 +427,13 @@ def build_registry_index(registry_db_path: str, force_rebuild: bool = False):
         attached_dbs = {}
         row_count    = 0
 
-        for (study_id, lab_source, dataset_name, omic_type, data_path, actual_table) in datasets:
+        # Attach all DBs
+        attached_dbs, attach_failures = attach_source_dbs(con, datasets,
+            lab_source_index=1, data_path_index=5)
+        for path, lab, err in attach_failures:
+            issue_rows.append((datetime.now(timezone.utc), None, lab, None, f"ATTACH failed: {err}"))
+
+        for (study_id, lab_source, dataset_name, omic_type, source_type, data_path, actual_table) in datasets:
             
             if not data_path or not actual_table:
                 issue_rows.append((
@@ -452,30 +442,29 @@ def build_registry_index(registry_db_path: str, force_rebuild: bool = False):
                 ))
                 continue
 
-            # Attach each unique db_path once if not done already, record alias per path
-            if data_path and data_path not in attached_dbs: # two gaurds against passing None to ATTACH & prevent re-attaching the same db under a second alias with multiple studies
-                alias = f"src_{lab_source}"
-                try:
-                    con.execute(f"ATTACH '{data_path}' AS {alias} (READ_ONLY)")
-                    attached_dbs[data_path] = alias
-                except Exception as e:
-                    if "already attached" not in str(e).lower():
-                        attached_dbs[data_path] = alias     # record the alias it was given even if same file path used for different datasets
-                    else:
-                        issue_rows.append((
-                            datetime.now(timezone.utc), study_id, lab_source, dataset_name, 
-                            f"ATTACH failed: {e}"
-                        ))
-                        print(f"   ERROR attaching DB {data_path} as {alias}: {e}")
-                        continue  # removed since it skips view creation if it exists, prevents it from properly failing and recieving errror/for debugging
-            
-            db_alias = attached_dbs[data_path] 
+            # Skip RDS/Parquet objects
+            if not data_path.endswith(".duckdb"):
+                print(f"   INFO: Skipping non-DuckDB source [{lab_source}] study_id={study_id} ({data_path})")
+                continue
+            # TODO for Parquet
+            # if source_type == "parquet":
+            #     print(f"   INFO: Skipping Parquet dataset study_id={study_id}, lab={lab_source} (will convert to Parquet later)")
+                # Optionally log to skipped_datasets table
+                # con.execute("""
+                #     INSERT OR REPLACE INTO registry_load_issues 
+                #     VALUES (?,?,?,?,?)
+                # """, [datetime.now(timezone.utc), lab_source, dataset_name, study_id, "rds_not_indexed"])
+                # continue
 
-            # Identify primary column/ canonical gene as `gene_symbol` or, if unavailable, protein_id
-            # gene_col = con.execute("""
-            #     SELECT original_name FROM column_mappings
-            #     WHERE study_id = ? AND lab_source = ? AND canonical_name = 'gene_symbol'
-            # """, [study_id, lab_source]).fetchone() #OR for row in datasets: ..... [row[2], row[3]]).fetchone()
+            db_alias = attached_dbs[data_path]
+            # db_alias = attached_dbs.get(data_path)
+            if not db_alias:
+                issue_rows.append((
+                    datetime.now(timezone.utc), study_id, lab_source,
+                    dataset_name, "Issue giving db attachment an alias — skipped"
+                ))
+                continue
+
             name_mappings = dict(
                 con.execute("""
                     SELECT canonical_name, original_name 
@@ -484,9 +473,14 @@ def build_registry_index(registry_db_path: str, force_rebuild: bool = False):
                 """, [study_id, lab_source]).fetchall()
             )
 
+            table_map = dict(con.execute("""
+                SELECT logical_table, actual_table
+                FROM table_mappings
+                WHERE study_id = ? AND lab_source = ?
+            """, [study_id, lab_source]).fetchall())
+
             gene_col     = name_mappings.get("gene_symbol")
             protein_col  = name_mappings.get("protein_id")
-            organism_col = name_mappings.get("organism")
             human_col    = name_mappings.get("human_gene")    # Identify human gene column if available for cross-species mapping
 
             if not gene_col and not human_col and not protein_col:
@@ -496,17 +490,11 @@ def build_registry_index(registry_db_path: str, force_rebuild: bool = False):
                     dataset_name, f"missing gene/ protein mapping for indexing"))
                 continue
 
-            # Primary gene column: COALESCE so Mouse_Gene NULLs it falls through to Human_Gene
-            gene_candidates = [get_sql_col(c) for c in [gene_col, protein_col, human_col] if c]         # build as a list and join
-            primary_gene_col = (f"COALESCE({', '.join(gene_candidates)})"
-                if len(gene_candidates) > 1
-                else gene_candidates[0])
             # or
             # Use gene_col or human_col if available, else protein_col
             # gene_col     = gene_col if gene_col else protein_col #None # if statement to avoid error if fetchone returns None or NULL?? gene_col[0]
             # protein_col  = protein_col if protein_col else "NULL" #None
             # organism_col = organism_col if organism_col else "unknown" #None
-            # # protein_expr = f'"{protein_col}"' if protein_col != "NULL" else "NULL"
 
             # # print(f"[DEBUG] gene_col: {gene_col}    protein_col: {protein_col}  organism_col: {organism_col}")
             # # output: [DEBUG] gene_col: Mouse_Gene    protein_col: Uniprot_id  organism_col: unknown    (diaz)
@@ -514,55 +502,14 @@ def build_registry_index(registry_db_path: str, force_rebuild: bool = False):
 
 
             # Look up alias and create semantic view for each dataset, and insert
-            view_name = f"v_{lab_source}_{study_id}"
-            print(f" [DEBUG] {lab_source} study_id={study_id} | alias={db_alias} | "
-                f"table={actual_table} | gene_col={gene_col} \n | primary_gene_col={primary_gene_col} \n | gene_candidates: {gene_candidates} \n | protein_col={protein_col} | human_col={human_col} | organism_col={organism_col} | view={view_name}")
-            # protein_col=Uniprot_id | protein_expr="Uniprot_id" 
-            # primary_gene_col: COALESCE("Gene_Symbol", "Uniprot_ID")    gene_candidates: ['"Gene_Symbol"', '"Uniprot_ID"'] 
+            created, view_failures = create_views(
+                con, study_id, lab_source, dataset_name,
+                db_alias, name_mappings, table_map
+            )
+            issue_rows.extend(view_failures)
 
-            try:
-                #TODO: check "" colnames VS '' string e.g.      protein_expr = f'"{protein_col}"' if protein_col != "NULL" else "NULL"
-                # Use `Views` for semantic layer (e.g. translating heterogeneous column names into canonical names)
-                # Reduce need to materialise data for zero-copy data streams/ transfers
-                con.execute(f"""
-                    CREATE OR REPLACE VIEW {view_name} AS
-                    SELECT
-                        {study_id}                  AS study_id,
-                        -- Feature identifiers
-                        {primary_gene_col}          AS gene_symbol,
-                        {get_sql_col(human_col)}    AS human_gene,
-                        {get_sql_col(protein_col)}  AS protein_id,      -- {protein_col} AS protein_id,
-                        '{organism_col}'            AS organism,
-                        -- Expression metrics
-                        {get_sql_col(name_mappings.get('log2fc'))}             AS log2fc,
-                        {get_sql_col(name_mappings.get('pvalue'))}             AS pvalue,
-                        {get_sql_col(name_mappings.get('padj'))}               AS padj,
-                        {get_sql_col(name_mappings.get('abundance_a'))}        AS abundance_a,
-                        {get_sql_col(name_mappings.get('abundance_b'))}        AS abundance_b,
-                        {get_sql_col(name_mappings.get('pct_expressed_a'))}    AS pct_expressed_a,
-                        {get_sql_col(name_mappings.get('pct_expressed_b'))}    AS pct_expressed_b,
-                        {get_sql_col(name_mappings.get('expression_metric'))}  AS expression_metric,
-                        -- Sample / cell metadata
-                        {get_sql_col(name_mappings.get('sample_a'))}           AS sample_a,
-                        {get_sql_col(name_mappings.get('sample_b'))}           AS sample_b,
-                        {get_sql_col(name_mappings.get('condition_a'))}        AS condition_a,
-                        {get_sql_col(name_mappings.get('condition_b'))}        AS condition_b,
-                        {get_sql_col(name_mappings.get('cell_type'))}          AS cell_type,
-                        {get_sql_col(name_mappings.get('cell_id'))}            AS cell_id,
-                        {get_sql_col(name_mappings.get('cluster_id'))}         AS cluster_id,
-                        {get_sql_col(name_mappings.get('tissue'))}             AS tissue,
-                        {get_sql_col(name_mappings.get('age'), 'NULL::INTEGER')} AS age,
-                        {get_sql_col(name_mappings.get('sex'))}                AS sex
-                    FROM {db_alias}.main.{actual_table}
-                    WHERE study_id = {study_id} AND {primary_gene_col} IS NOT NULL
-                """)    # '{source_id}'.main.{expression_table} OR '{data_path}'.{actual_table} OR attach_alias.main.actual_table
-            except Exception as e:
-                print(f"   ERROR creating view {view_name} while building index: {e}")
-                issue_rows.append((
-                    datetime.now(timezone.utc), study_id, lab_source, dataset_name, 
-                    f"view creation failed: {e}"
-                ))
-                continue
+            if not any(v == f"v_{lab_source}_{study_id}" for v in created):
+                continue   # expression view failed — skip gene index insert
 
             try:
                 #TODO: check "" colnames VS '' string
@@ -576,7 +523,7 @@ def build_registry_index(registry_db_path: str, force_rebuild: bool = False):
                         '{dataset_name}',
                         '{omic_type}',
                         organism
-                    FROM {view_name}
+                    FROM v_{lab_source}_{study_id}
                     WHERE gene_symbol IS NOT NULL
                     AND gene_symbol != ''
                     GROUP BY gene_symbol, study_id, protein_id, organism
@@ -587,12 +534,10 @@ def build_registry_index(registry_db_path: str, force_rebuild: bool = False):
                     WHERE lab_source = '{lab_source}' AND study_id = {study_id}
                 """).fetchone()[0]
                 row_count += inserted_rows
-                print(f"  [DEBUG] Indexed {inserted_rows} genes for [{lab_source}] {dataset_name} into gene_study_index from view: {view_name} \n")
-                # Indexed 6790 genes for [hong] 3KL_vs_WT_ME-Macs_2 into gene_study_index from view: v_hong_2_proteomics_3KL_vs_WT_ME_Macs_2
-
+                print(f"  [DEBUG] Indexed {inserted_rows} genes for [{lab_source}] {dataset_name} into gene_study_index from view: v_{lab_source}_{study_id} \n")
 
             except Exception as e:
-                print(f"ERROR inserting index from view: {view_name}: {e}")
+                print(f"ERROR inserting index from view: {e}")
                 issue_rows.append((
                     datetime.now(timezone.utc), study_id, lab_source, dataset_name, 
                     f"index insert failed: {e}"))
@@ -604,7 +549,7 @@ def build_registry_index(registry_db_path: str, force_rebuild: bool = False):
 
         # Create (composite) indexes for fast querying
         con.execute("""
-            CREATE INDEX IF NOT EXISTS idx_gene_study ON gene_study_index (gene_symbol, study_id)      -- show me gene x in dataset y
+            CREATE INDEX IF NOT EXISTS idx_gene_study ON gene_study_index (gene_symbol, study_id);      -- show me gene x in dataset y
             -- CREATE INDEX IF NOT EXISTS idx_gene ON gene_study_index (gene_symbol)              -- show me all datasets containing x gene, can end up too large
             -- CREATE INDEX IF NOT EXISTS idx_study ON study_index (study_id)                     -- show me dataset y, may as well just query dataset_registry directly
         """)
@@ -634,9 +579,6 @@ def build_registry_index(registry_db_path: str, force_rebuild: bool = False):
     print("gene_study_index build's log updated.")
 
     
-
-
-
 
 
 
