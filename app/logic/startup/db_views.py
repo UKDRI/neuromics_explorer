@@ -9,23 +9,51 @@ to avoid duplicating attach/view logic across modules.
 from datetime import datetime, timezone
 import duckdb
 
+def get_db_table_columns(con: duckdb.DuckDBPyConnection, db_alias: str, table_name: str) -> set[str]:
+    """Get set of column names for a table to be used in views."""
+    try:
+        result = con.execute(f"DESCRIBE {db_alias}.main.{table_name}").fetchall()
+        return {row[0] for row in result}
+    except Exception:
+        return set()
 
 
-def get_sql_col(col_name: str | None, fallback: str = "NULL") -> str:
+
+def simple_sql_col(col_name: str | None, fallback: str = "NULL") -> str:
     """
-    Return a quoted SQL column from an original column name from column_mappings,
+    Return a quoted SQL column from an original column name from column_mappings if it exists,
     or a literal fallback if the name is None/ unmapped to prevent None or unquoted identifiers.
 
-    Used to safely embed original column names from column_mappings into
-    SQL strings without risk of injecting None or unquoted identifiers.
+    Used to safely embed original column names from column_mappings into SQL strings 
+    without risk of injecting None or unquoted identifiers.
 
     Examples:
-        get_sql_col("Mouse_Gene")          →  '"Mouse_Gene"'
-        get_sql_col("padj")                →  '"padj"'
-        get_sql_col(None)                  →  'NULL'
-        get_sql_col(None, "NULL::INTEGER") →  'NULL::INTEGER'
+        simple_sql_col("Mouse_Gene")          →  '"Mouse_Gene"'
+        simple_sql_col("padj")                →  '"padj"'
+        simple_sql_col(None)                  →  'NULL'
+        simple_sql_col(None, "NULL::INTEGER") →  'NULL::INTEGER'
     """
     return f'"{col_name}"' if col_name else fallback
+
+
+def get_sql_col(
+    name_mappings: dict[str, str],
+    canonical_name: str,
+    col_names: set[str] | None = None,
+    fallback: str = "NULL"
+) -> str:
+    """
+    Return a quoted SQL column from an original column name from column_mappings if it exists,
+    or a literal fallback if the name is None/ unmapped to prevent None or unquoted identifiers.
+
+    Used to safely embed original column names from column_mappings into SQL strings 
+    without risk of injecting None or unquoted identifiers.
+    """
+    original_name = name_mappings.get(canonical_name)
+    if original_name and original_name in col_names:
+        if col_names is None or original_name in col_names:     # skip check if no col_names given
+            return f'"{original_name}"'
+    return fallback # return f'"{col_name}"' if col_name else fallback
 
 
 def attach_source_dbs(
@@ -111,9 +139,10 @@ def create_views(
     human_col       = name_mappings.get("human_gene")      # Identify human gene column if available for cross-species mapping
     organism_col    = name_mappings.get("organism")
     organism        = f"'{organism_col}'" if organism_col else "'unknown'"
+    expr_cols       = get_db_table_columns(con, db_alias, expr_table)   # to check where meta entities like sample names and conditions exist
 
     # Build COALESCE expression for primary gene column so Mouse_Gene NULLs and it falls through to Human_Gene
-    gene_candidates = [get_sql_col(c) for c in [gene_col, protein_col, human_col] if c]
+    gene_candidates = [simple_sql_col(c) for c in [gene_col, protein_col, human_col] if c and c in expr_cols]
     if not gene_candidates:
         err = f"No gene or protein column mapping for [{lab_source}] study_id={study_id}"
         print(f"   WARNING: {err} — skipping views")
@@ -132,34 +161,40 @@ def create_views(
     # primary_gene_col: COALESCE("Gene_Symbol", "Uniprot_ID")    gene_candidates: ['"Gene_Symbol"', '"Uniprot_ID"'] 
 
     # --- Expression view (gene identifiers + DE metrics only) ---
-        #TODO: check "" colnames VS '' string e.g.      protein_expr = f'"{protein_col}"' if protein_col != "NULL" else "NULL"
+        #TODO: check "" colnames VS '' string 
     if expr_table:
         try:
+            print(f"    [DEBUG]   expr_cols {expr_cols}")
             con.execute(f"""
                 CREATE OR REPLACE VIEW {expr_view} AS
                 SELECT
-                    {study_id}                                              AS study_id,
+                    {study_id}                                                      AS study_id,
                     -- Feature identifiers
-                    {primary_gene_col}                                      AS gene_symbol,
-                    {get_sql_col(name_mappings.get('human_gene'))}          AS human_gene,
-                    {get_sql_col(name_mappings.get('protein_id'))}          AS protein_id,      -- {protein_col} AS protein_id,
-                    {organism}                                              AS organism,
+                    {primary_gene_col}                                              AS gene_symbol,
+                    {get_sql_col(name_mappings, 'human_gene',        expr_cols)}    AS human_gene,
+                    {get_sql_col(name_mappings, 'protein_id',        expr_cols)}    AS protein_id,      -- {protein_col} AS protein_id,
+                    {organism}                                                      AS organism,
                     -- Expression metrics
-                    {get_sql_col(name_mappings.get('log2fc'))}              AS log2fc,
-                    {get_sql_col(name_mappings.get('pvalue'))}              AS pvalue,
-                    {get_sql_col(name_mappings.get('padj'))}                AS padj,
-                    {get_sql_col(name_mappings.get('abundance_a'))}         AS abundance_a,
-                    {get_sql_col(name_mappings.get('abundance_b'))}         AS abundance_b,
-                    {get_sql_col(name_mappings.get('pct_expressed_a'))}     AS pct_expressed_a,
-                    {get_sql_col(name_mappings.get('pct_expressed_b'))}     AS pct_expressed_b,
-                    {get_sql_col(name_mappings.get('expression_metric'))}   AS expression_metric,
+                    {get_sql_col(name_mappings, 'log2fc',            expr_cols)}    AS log2fc,
+                    {get_sql_col(name_mappings, 'pvalue',            expr_cols)}    AS pvalue,
+                    {get_sql_col(name_mappings, 'padj',              expr_cols)}    AS padj,
+                    {get_sql_col(name_mappings, 'abundance_a',       expr_cols)}    AS abundance_a,
+                    {get_sql_col(name_mappings, 'abundance_b',       expr_cols)}    AS abundance_b,
+                    {get_sql_col(name_mappings, 'pct_expressed_a',   expr_cols)}    AS pct_expressed_a,
+                    {get_sql_col(name_mappings, 'pct_expressed_b',   expr_cols)}    AS pct_expressed_b,
+                    {get_sql_col(name_mappings, 'expression_metric', expr_cols)}    AS expression_metric,
 
                     -- Sample / cell metadata (when present in expression table)
-                    {get_sql_col(name_mappings.get('sample_a'))}            AS sample_a,
-                    {get_sql_col(name_mappings.get('sample_b'))}            AS sample_b,
-                    {get_sql_col(name_mappings.get('condition_a'))}         AS condition_a,
-                    {get_sql_col(name_mappings.get('condition_b'))}         AS condition_b,
-                    {get_sql_col(name_mappings.get('cell_type'))}           AS cell_type,
+                    {get_sql_col(name_mappings, 'sample_a',         expr_cols)}     AS sample_a,
+                    {get_sql_col(name_mappings, 'sample_b',         expr_cols)}     AS sample_b,
+                    {get_sql_col(name_mappings, 'condition_a',      expr_cols)}     AS condition_a,
+                    {get_sql_col(name_mappings, 'condition_b',      expr_cols)}     AS condition_b,
+                    {get_sql_col(name_mappings, 'cell_type',        expr_cols)}     AS cell_type,
+                    {get_sql_col(name_mappings, 'cell_id',          expr_cols)}          AS cell_id,
+                    {get_sql_col(name_mappings, 'cluster_id',       expr_cols)}          AS cluster_id,
+                    {get_sql_col(name_mappings, 'tissue',           expr_cols)}          AS tissue,
+                    {get_sql_col(name_mappings, 'age',              expr_cols, 'NULL::INTEGER')} AS age,
+                    {get_sql_col(name_mappings, 'sex',              expr_cols)}          AS sex
                 FROM {db_alias}.main.{expr_table}
                 WHERE study_id = {study_id}
                 AND {primary_gene_col} IS NOT NULL
@@ -171,25 +206,27 @@ def create_views(
                 datetime.now(timezone.utc), study_id, lab_source, dataset_name, 
                 f"expression view creation failed: {e}"
             ))
-    
+
     # --- Metadata view (sample/cell metadata from separate obs_metadata table) ---
     if obs_meta_table:
         try:
+            meta_cols = get_db_table_columns(con, db_alias, obs_meta_table)
+            print(f"     [DEBUG] meta_cols {meta_cols}")
             con.execute(f"""
                 CREATE OR REPLACE VIEW {obs_meta_view} AS
                 SELECT
-                    {study_id}                                              AS study_id,
+                    {study_id}                                                AS study_id,
                     -- Sample / cell metadata
-                    {get_sql_col(name_mappings.get('sample_a'))}            AS sample_a,
-                    {get_sql_col(name_mappings.get('sample_b'))}            AS sample_b,
-                    {get_sql_col(name_mappings.get('condition_a'))}         AS condition_a,
-                    {get_sql_col(name_mappings.get('condition_b'))}         AS condition_b,
-                    {get_sql_col(name_mappings.get('cell_type'))}           AS cell_type,
-                    {get_sql_col(name_mappings.get('cell_id'))}             AS cell_id,
-                    {get_sql_col(name_mappings.get('cluster_id'))}          AS cluster_id,
-                    {get_sql_col(name_mappings.get('tissue'))}              AS tissue,
-                    {get_sql_col(name_mappings.get('age'), 'NULL::INTEGER')} AS age,
-                    {get_sql_col(name_mappings.get('sex'))}                 AS sex
+                    {get_sql_col(name_mappings, 'sample_a',    meta_cols)}    AS sample_a,
+                    {get_sql_col(name_mappings, 'sample_b',    meta_cols)}    AS sample_b,
+                    {get_sql_col(name_mappings, 'condition_a', meta_cols)}    AS condition_a,
+                    {get_sql_col(name_mappings, 'condition_b', meta_cols)}    AS condition_b,
+                    {get_sql_col(name_mappings, 'cell_type',   meta_cols)}    AS cell_type,
+                    {get_sql_col(name_mappings, 'cell_id',     meta_cols)}    AS cell_id,
+                    {get_sql_col(name_mappings, 'cluster_id',  meta_cols)}    AS cluster_id,
+                    {get_sql_col(name_mappings, 'tissue',      meta_cols)}    AS tissue,
+                    {get_sql_col(name_mappings, 'age',         meta_cols, 'NULL::INTEGER')} AS age,
+                    {get_sql_col(name_mappings, 'sex',         meta_cols)}    AS sex
                 FROM {db_alias}.main.{obs_meta_table}
                 WHERE study_id = {study_id}
             """)

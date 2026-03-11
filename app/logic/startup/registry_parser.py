@@ -534,7 +534,7 @@ def build_registry_index(registry_db_path: str, force_rebuild: bool = False):
                     WHERE lab_source = '{lab_source}' AND study_id = {study_id}
                 """).fetchone()[0]
                 row_count += inserted_rows
-                print(f"  [DEBUG] Indexed {inserted_rows} genes for [{lab_source}] {dataset_name} into gene_study_index from view: v_{lab_source}_{study_id} \n")
+                print(f"  [DEBUG] Indexed {inserted_rows} genes for [{lab_source}] {dataset_name} into gene_study_index from view: v_{lab_source}_{study_id} \n \n")
 
             except Exception as e:
                 print(f"ERROR inserting index from view: {e}")
@@ -554,7 +554,7 @@ def build_registry_index(registry_db_path: str, force_rebuild: bool = False):
             -- CREATE INDEX IF NOT EXISTS idx_study ON study_index (study_id)                     -- show me dataset y, may as well just query dataset_registry directly
         """)
         con.execute("""
-            CREATE INDEX IF NOT EXISTS idx_gene_omic  ON gene_study_index (gene_symbol, omic_type)
+            CREATE INDEX IF NOT EXISTS idx_gene_omic ON gene_study_index (gene_symbol, omic_type)
         """)
 
         # Log build time, total row count, and issues
