@@ -5,10 +5,10 @@ box::use(
   shiny[...],  # ie shiny[bootstrapPage, div, moduleServer, NS, renderUI, tags, uiOutput, observeEvent],
   bslib[...],
   shinyjs[useShinyjs],
-  app/view/landing_page[homepage_ui, homepage_server],
-  app/view/explore_sidebar[sidebar_ui, sidebar_server],
-  app/view/data_explorer[explorer_ui, explorer_server],
-  app/view/data_submit[submit_ui, submit_server]
+  app/view/pages/landing_page[homepage_ui, homepage_server],
+  app/view/pages/explore_sidebar[sidebar_ui, sidebar_server],
+  app/view/pages/data_explorer[explorer_ui, explorer_server],
+  app/view/pages/data_submit[submit_ui, submit_server]
 )
 
 #' @export
@@ -36,6 +36,15 @@ ui <- page_navbar(
       .hide-nav #navbar-brand { display: flex !important; }
     ")),
     # bs_theme_toggle(),
+    # CSS toggleTheme():
+    # <button class="theme-toggle" type="button" onclick="toggleTheme()" aria-label="Switch to dark mode">
+    #   <span class="theme-toggle-icon">🌙</span>
+    #   <span class="theme-toggle-text">Dark</span>
+    #   </button>
+    # <button class="theme-toggle" type="button" onclick="toggleTheme()" aria-label="Switch to light mode">
+    #   <span class="theme-toggle-icon">☀️</span>
+    #   <span class="theme-toggle-text">Light</span>
+    #   </button>
   ),
   
   # Add shinyjs
@@ -63,7 +72,7 @@ ui <- page_navbar(
     submit_ui("submit")
   ),
   
-  # Dropdown Menu with additional pages
+  # Dropdown menu with additional pages
   nav_menu(
     title = "Resources",
     icon = icon("book"),
@@ -186,7 +195,7 @@ server <- function(input, output, session) {
     # }
   })
   homepage_server("home")
-  # sidebar_server("filters")
+  sidebar_server("filters")
   explorer_server("explore")
   submit_server("submit")
 }
