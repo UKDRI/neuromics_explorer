@@ -25,12 +25,6 @@ async def lifespan(app: FastAPI):
         print("2. Build registry index and semantic views...")
         build_registry_index("data/neuromics_registry.duckdb")
 
-    #     print("2. Building semantic views...")
-    #     build_semantic_views("data/registry.duckdb", {
-    #         "diaz": "data/diaz.duckdb",
-    #         "hong": "data/hong.duckdb",
-    #     })
-
         print("3. Computing dataset stats...")
         build_dataset_stats("data/neuromics_registry.duckdb")
 
