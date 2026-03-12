@@ -2,10 +2,10 @@
 # Modal popup: search a gene/ protein to see all datasets containing it (with metadata preview)
 # User selects 1+ dataset to explore.
 #
-# Flow:
+# User flow:
 #   1. User clicks "Search Gene / Protein" button on data_explore page
-#   2. Modal opens with search bar + omic/ lab filters
-#   3. Results table shows matching datasets + stats (total features, n_sig, conditions)
+#   2. Modal opens with search bar and omic/ lab filters
+#   3. Results table shows matching datasets and stats (total features, n_sig, conditions)
 #   4. User selects a row, clicks "Explore"
 #   5. selected_dataset reactiveVal() is updated, modal closes and plots update
 # ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -20,7 +20,7 @@ box::use(
 )
 
 #' @export
-ui <- function(id) {
+gene_selector_ui <- function(id) {
   ns <- NS(id)
   tagList(
     actionButton(
@@ -45,7 +45,7 @@ ui <- function(id) {
 #' @param selected_dataset  reactiveVal() updated when user confirms a dataset
 #'                          Value: list(lab, study_id, dataset_name, omic_type, gene)
 #' @export
-server <- function(id, registry_con, selected_dataset) {
+gene_selector_server <- function(id, registry_con, selected_dataset) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
@@ -63,8 +63,16 @@ server <- function(id, registry_con, selected_dataset) {
             column(3,
               div(class = "well well-sm",
                 tags$label("Gene symbol or protein ID", style = "font-weight:600"),
-                textInput(ns("gene_query"), NULL,
-                          placeholder = "e.g. GFAP, AQP4, Q9Z223"),
+                selectizeInput(ns("gene_query"), "Gene symbol(s) or protein ID(s)",
+                    choices  = NULL,          # populated server-side via updateSelectizeInput
+                    multiple = TRUE,
+                    options  = list(
+                        placeholder = "Start typing e.g. GFAP, AQP4...",
+                        create      = TRUE,     # allow typing values not in the list
+                        maxItems    = NULL,
+                        maxOptions  = 30,
+                        loadThrottle = 300
+                )),
                 selectInput(ns("omic_filter"), "Omic type",
                             choices  = c("All", "proteomics", "scrna", "snrna", "bulk"),
                             selected = "All"),
@@ -212,7 +220,7 @@ server <- function(id, registry_con, selected_dataset) {
 }
 
 
-# ── Utilities ─────────────────────────────────────────────────────────────────
+# ── Utilities - defensive null-handling helpers ─────────────────────────────────────────────────────────────────
 `%||%` <- function(a, b) if (!is.null(a) && !is.na(a) && a != "") a else b
 coalesce_na <- function(...) {
   for (x in list(...)) if (!is.null(x) && !is.na(x)) return(x)
