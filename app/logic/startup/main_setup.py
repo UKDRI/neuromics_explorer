@@ -11,7 +11,20 @@ from fastapi import FastAPI
 from registry_parser import parse_and_load_registry, build_registry_index
 from data_summaries import build_dataset_stats
 from db_pool import DuckDBPool, get_conn
+from pathlib import Path
 import uvicorn
+
+# __file__ uses absolute path to main_setup.py (sets working directory separate from main.R & run_startup.R)
+_SCRIPT_DIR   = Path(__file__).resolve().parent   # ./app/logic/startup/
+_APP_DIR      = _SCRIPT_DIR.parent.parent         # ./app/
+_PROJECT_DIR  = _APP_DIR.parent                   # ./
+_DATA_DIR     = _PROJECT_DIR / "data"             # ./data/
+
+REGISTRY_YAML = str(_DATA_DIR / "dataset_registry.yml")
+DB_PATH       = str(_DATA_DIR / "neuromics_registry.duckdb")
+DIAZ_DB       = str(_DATA_DIR / "diaz_castro.duckdb")
+HONG_DB       = str(_DATA_DIR / "hong.duckdb")
+DATA_DIR      = str(_DATA_DIR)
 
 
 @asynccontextmanager
@@ -20,20 +33,20 @@ async def lifespan(app: FastAPI):
     duckdb_pool = None # initialise
     try:
         print("1. Parsing registry YAML and importing into duckdb...")
-        parse_and_load_registry("data/dataset_registry.yml", "data/neuromics_registry.duckdb")
+        parse_and_load_registry(REGISTRY_YAML, DB_PATH)
 
         print("2. Build registry index and semantic views...")
-        build_registry_index("data/neuromics_registry.duckdb")
+        build_registry_index(DB_PATH)
 
         print("3. Computing dataset stats...")
-        build_dataset_stats("data/neuromics_registry.duckdb")
+        build_dataset_stats(DB_PATH)
 
         print("4. Initialising connection pool to create new instance...")
         duckdb_pool = DuckDBPool(
-            db_path="data/neuromics_registry.duckdb", 
-            attached_dbs={
-                'src_diaz': 'data/diaz_castro.duckdb',  # key must match view alias name in registry_parser.py
-                'src_hong': 'data/hong.duckdb',
+            db_path = DB_PATH, 
+            attached_dbs = {
+                'src_diaz': DIAZ_DB,  # key must match view alias name in registry_parser.py
+                'src_hong': HONG_DB,
             }
         )
 

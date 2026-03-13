@@ -17,12 +17,12 @@ run_python_startup <- function(
   message("Running Python startup: ", script_path)
   
   # wrap single quotes = shell-safe
-  PYTHON_PATH    <- shQuote(normalizePath(python,    mustWork = FALSE))
-  STARTUP_SCRIPT <- shQuote(normalizePath(script_path, mustWork = FALSE))
+  # PYTHON_PATH    <- normalizePath(python,    mustWork = FALSE)
+  # STARTUP_SCRIPT <- normalizePath(script_path, mustWork = FALSE)
   
   exit_code <- system2(
-    command = PYTHON_PATH,
-    args    = c(STARTUP_SCRIPT, "--db", db_path),
+    command = (python),
+    args    = c(shQuote(script_path)),
     stdout  = "",
     stderr  = ""
   )

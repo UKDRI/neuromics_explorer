@@ -1,0 +1,3 @@
+# Run once locally, or add to Dockerfile:
+touch .here
+# or: Rscript -e "here::set_here()"

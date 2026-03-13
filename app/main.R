@@ -1,34 +1,26 @@
 # Main NEx_alpha module that ties together UI and server components of the app
 
-# Extract app and root directory
-APP_DIR <- tryCatch({
-    # When sourced via runApp or source()
-    normalizePath(dirname(sys.frame(1)$ofile))
-  }, error = function(e) tryCatch({
-    # When run interactively in RStudio
-    normalizePath(dirname(rstudioapi::getSourceEditorContext()$path))
-  }, error = function(e) {
-    # Final fallback: assume working dir is project root
-    normalizePath(file.path(getwd(), "app"))
-  }))
-PROJECT_DIR <- normalizePath(file.path(APP_DIR, ".."), mustWork = FALSE)
+# Run python startup
+reticulate::use_virtualenv(here(".venv"), required = TRUE)
+reticulate::source_python(here("app", "logic", "startup", "main_setup.py"))
 
-# Build paths from root
-STARTUP_SCRIPT  <- file.path(APP_DIR, "logic", "startup", "main_setup.py")
-DB_PATH         <- file.path(PROJECT_DIR, "data", "neuromics_registry.duckdb")
-PYTHON_PATH     <- file.path(PROJECT_DIR, ".venv", "bin", "python3")
+# Build paths from project root
+STARTUP_SCRIPT <- normalizePath(here("app", "logic", "startup", "main_setup.py"))
+DB_PATH        <- normalizePath(here("data", "neuromics_registry.duckdb"))
+DB_DIAZ        <- normalizePath(here("data", "diaz_castro.duckdb"))
+DB_HONG        <- normalizePath(here("data", "hong.duckdb"))
+PYTHON_PATH    <- normalizePath(here(".venv", "bin", "python3"))
 if (!file.exists(PYTHON_PATH)) {
   PYTHON_PATH <- Sys.which("python3")
   message("Venv Python not found, falling back to: ", PYTHON_PATH)
 }
-Sys.setenv(RETICULATE_PYTHON = PYTHON_PATH) # "../.venv/bin/python3"
-message("APP_DIR:  ", APP_DIR)
+# Sys.setenv(RETICULATE_PYTHON = PYTHON_PATH) # "../.venv/bin/python3"
 message("PYTHON:   ", PYTHON_PATH)
 message("STARTUP:  ", STARTUP_SCRIPT)
 message("DB:       ", DB_PATH)
 
 # Run setup once when app starts
-source(file.path(APP_DIR, "logic", "startup", "run_startup.R"))
+source(normalizePath(here("app", "logic", "startup", "run_startup.R")))
 run_python_startup(
   db_path     = DB_PATH,
   script_path = STARTUP_SCRIPT,
@@ -228,7 +220,7 @@ server <- function(input, output, session) {
   registry_pool <- pool::dbPool(
     drv    = duckdb::duckdb(),
     dbname = DB_PATH,
-    minSize = 1
+    minSize = 1  #???
   )
 
   attach_db <- function(alias, path) {
@@ -242,8 +234,8 @@ server <- function(input, output, session) {
       }
     )
   }
-  attach_db("src_diaz", file.path(PROJECT_DIR, "data", "diaz_castro.duckdb"))
-  attach_db("src_hong",  file.path(PROJECT_DIR, "data", "hong.duckdb"))
+  attach_db("src_diaz", DB_DIAZ)
+  attach_db("src_hong", DB_HONG)
   
   # Wrap in reactive for modules to receive it as a reactive()
   registry_con <- reactive(registry_pool)
