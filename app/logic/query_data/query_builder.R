@@ -10,19 +10,36 @@
 #  - fetch_dataset_stats()      → drives explorer page summaries
 
 box::use(
-  DBI[dbGetQuery, dbExecute, dbIsValid],
+  DBI[dbExecute, dbIsValid],
   glue[glue, glue_sql],
   dplyr[bind_rows, mutate, filter, arrange, desc],
   purrr[map, keep, compact],
 )
 
 
-# ── DuckDB check ───────────────────────────────────────────────────────────────
+# ── DuckDB check ─────────────────────────────────────────────────────────
 
 #' @noRd
 check_con <- function(con) {
   if (is.null(con) || !DBI::dbIsValid(con))
     stop("Registry DuckDB connection is not valid.")
+}
+
+
+# ── Arrow querying ───────────────────────────────────────────────────────
+#' Use Arrow fetch to execute SQL for zero-copy data transfers
+#' DuckDB columnar → Arrow buffer/ memory
+#'
+#' @param con   DuckDB connection
+#' @param sql   SQL string
+#' @param collect logical — if TRUE returns data.frame (can be used for small lookups)
+#' @return Arrow Table (default) or data.frame
+query_arrow <- function(con, sql, collect = FALSE) {
+  result <- duckdb::dbSendQuery(con, sql)
+  tbl    <- duckdb::duckdb_fetch_arrow(result)
+  duckdb::dbClearResult(result)
+  if (collect) return(dplyr::collect(tbl))
+  tbl
 }
 
 
@@ -32,7 +49,7 @@ check_con <- function(con) {
 #' @export
 fetch_all_datasets <- function(con) {
   check_con(con)
-  DBI::dbGetQuery(con, "
+  query_arrow(con, "
     SELECT
       dr.study_id, dr.lab_source, dr.dataset_name, dr.omic_type,
       dr.organism, dr.source_type,
@@ -73,7 +90,7 @@ fetch_datasets_for_gene <- function(con, query, omic_type = NULL, lab_source = N
   lab_clause  <- if (!is.null(lab_source) && lab_source != "All")
     glue::glue("AND gi.lab_source = '{lab_source}'") else ""
 
-  DBI::dbGetQuery(con, glue::glue("
+  query_arrow(con, glue::glue("
     SELECT
       gi.study_id,
       gi.lab_source,
@@ -129,7 +146,7 @@ fetch_de_for_gene <- function(con, gene, lab_source, study_id,
   ct_clause   <- if (!is.null(cell_type))
     glue::glue("AND cell_type = '{gsub(\"'\",\"''\", cell_type)}'") else ""
 
-  DBI::dbGetQuery(con, glue::glue("
+  query_arrow(con, glue::glue("
     SELECT
       gene_symbol, human_gene, protein_id, organism,
       log2fc, pvalue, padj,
@@ -168,7 +185,7 @@ fetch_top_de <- function(con, lab_source, study_id, n = 50,
     ct_clause <- if (!is.null(cell_type))
       glue::glue("AND cell_type = '{gsub(\"'\",\"''\", cell_type)}'") else ""
 
-    DBI::dbGetQuery(con, glue::glue("
+    query_arrow(con, glue::glue("
       SELECT
         gene_symbol, log2fc, padj, pvalue,
         abundance_a, abundance_b,
@@ -219,7 +236,7 @@ fetch_dataset_stats <- function(con, lab_source = NULL, study_id = NULL, omic_ty
   check_con(con)
 
   # Guard against dataset_stats not existing yet: return empty dataframe
-  tables <- DBI::dbGetQuery(con,
+  tables <- query_arrow(con,
     "SELECT table_name FROM information_schema.tables
      WHERE table_name = 'dataset_stats'"
   )
@@ -235,7 +252,7 @@ fetch_dataset_stats <- function(con, lab_source = NULL, study_id = NULL, omic_ty
     clauses <- c(clauses, glue::glue("omic_type = '{omic_type}'"))
 
   where <- if (length(clauses)) paste("WHERE", paste(clauses, collapse = " AND ")) else ""
-  DBI::dbGetQuery(con, glue::glue("
+  query_arrow(con, glue::glue("
     SELECT * FROM dataset_stats 
     {where} 
     ORDER BY lab_source, study_id
@@ -255,13 +272,13 @@ fetch_metadata_filter_options <- function(con, lab_source, study_id) {
 
   # Check which view exists (scrna has vm_, proteomics may not)
   has_meta <- tryCatch({
-    DBI::dbGetQuery(con, glue::glue("SELECT 1 FROM {vm_view} LIMIT 1"))
+    query_arrow(con, glue::glue("SELECT 1 FROM {vm_view} LIMIT 1"))
     TRUE
   }, error = function(e) FALSE)
 
   src_view <- if (has_meta) vm_view else v_view
 
-  DBI::dbGetQuery(con, glue::glue("
+  query_arrow(con, glue::glue("
     SELECT
       LIST(DISTINCT sample_a    ORDER BY sample_a)     AS sample_a,
       LIST(DISTINCT sample_b    ORDER BY sample_b)     AS sample_b,
@@ -280,10 +297,10 @@ fetch_all_metadata <- function(con, lab_source, study_id) {
   v_view  <- glue::glue("v_{lab_source}_{study_id}")
 
   has_vm <- tryCatch({
-    DBI::dbGetQuery(con, glue::glue("SELECT 1 FROM {vm_view} LIMIT 1"))
+    query_arrow(con, glue::glue("SELECT 1 FROM {vm_view} LIMIT 1"))
     TRUE
   }, error = function(e) FALSE)
 
   src_view <- if (has_vm) vm_view else v_view
-  DBI::dbGetQuery(con, glue::glue("SELECT * FROM {src_view}"))
+  query_arrow(con, glue::glue("SELECT * FROM {src_view}"))
 }

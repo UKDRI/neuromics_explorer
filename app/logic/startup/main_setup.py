@@ -88,7 +88,8 @@ def health_check():
 if __name__ == "__main__":
     # Run the FastAPI app
     uvicorn.run(
-        "app.logic.startup.main_setup:app",
+        # "app.logic.startup.main_setup:app",
+        "main_setup:app",
         host="0.0.0.0",
         port=7000,
         log_level="info",
