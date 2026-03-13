@@ -7,7 +7,7 @@ box::use(
 )
 
 #' @export
-ui <- function(id) {
+umap_ui <- function(id) {
   ns <- NS(id)
   tagList(
     fluidRow(
@@ -23,7 +23,7 @@ ui <- function(id) {
 }
 
 #' @export
-server <- function(id, selected_dataset) {
+umap_server <- function(id, selected_dataset) {
   moduleServer(id, function(input, output, session) {
 
     emb_data <- reactive({

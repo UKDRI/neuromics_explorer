@@ -217,9 +217,20 @@ fetch_de_multi_dataset <- function(con, gene, dataset_list,
 #' @export
 fetch_dataset_stats <- function(con, lab_source = NULL, study_id = NULL, omic_type = NULL) {
   check_con(con)
+
+  # Guard against dataset_stats not existing yet: return empty dataframe
+  tables <- DBI::dbGetQuery(con,
+    "SELECT table_name FROM information_schema.tables
+     WHERE table_name = 'dataset_stats'"
+  )
+  if (nrow(tables) == 0) {
+    warning("dataset_stats table not found — has data_summaries.py run?")
+    return(data.frame())
+  }
+
   clauses <- character(0)
-  if (!is.null(lab_source))       clauses <- c(clauses, glue::glue("lab_source = '{lab_source}'"))
-  if (!is.null(study_id))  clauses <- c(clauses, glue::glue("study_id = {study_id}"))
+  if (!is.null(lab_source))   clauses <- c(clauses, glue::glue("lab_source = '{lab_source}'"))
+  if (!is.null(study_id))     clauses <- c(clauses, glue::glue("study_id = {study_id}"))
   if (!is.null(omic_type) && omic_type != "All")
     clauses <- c(clauses, glue::glue("omic_type = '{omic_type}'"))
 
@@ -262,6 +273,7 @@ fetch_metadata_filter_options <- function(con, lab_source, study_id) {
   "))
 }
 
+# Used when the actual data, e.g. to join onto UMAP coordinates or pass to a violin plot from views (vm_ or v_)
 #' @export
 fetch_all_metadata <- function(con, lab_source, study_id) {
   vm_view <- glue::glue("vm_{lab_source}_{study_id}")

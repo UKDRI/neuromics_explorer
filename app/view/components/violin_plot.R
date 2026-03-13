@@ -44,7 +44,7 @@ violin_server <- function(id, de_data) {
         x    = group_vals,
         y    = df[[y_col]],
         type = "violin",
-        box  = list(visible = input$show_box),
+        box  = list(visible = isTRUE(input$show_box)),   # list(visible = input$show_box),
         meanline = list(visible = TRUE),
         points   = "outliers",
         hovertemplate = paste0(

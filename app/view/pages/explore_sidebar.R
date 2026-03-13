@@ -5,7 +5,7 @@
 
 box::use(
   # shiny[...],
-  shiny[moduleServer, NS, tagList, selectInput, selectizeInput,
+  shiny[moduleServer, NS, tagList, selectInput, selectizeInput, updateSelectInput,
         sliderInput, updateSliderInput, checkboxGroupInput, actionButton,
         observeEvent, uiOutput, renderUI, tags, reactive],
   shinyWidgets[pickerInput, sliderTextInput],

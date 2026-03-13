@@ -11,7 +11,7 @@
 # ─────────────────────────────────────────────────────────────────────────────────────────────
 
 box::use(
-  app/logic/query_data/query_builder[fetch_all_datasets, fetch_datasets_for_gene],
+  app/logic/query_data/query_builder[fetch_all_datasets, fetch_datasets_for_gene, fetch_metadata_filter_options],
   dplyr[mutate, rename, select],
   DT[ datatable, dataTableProxy, DTOutput, renderDT, selectRows],
   glue[glue],
@@ -53,26 +53,28 @@ gene_selector_server <- function(id, registry_con, selected_dataset) {
     observeEvent(input$open_btn, {
       showModal(
         modalDialog(
-          title    = "Find dataset(s) containing your gene(s) or protein(s)",
-          size     = "xl",
+          title     = "Find dataset(s) containing your gene(s) or protein(s) of interest",
+          size      = "xl",
           easyClose = TRUE,
-          footer   = NULL,
+          footer    = NULL,
 
           fluidRow(
             # ── Left: search controls ──────────────────────────────────────
             column(3,
               div(class = "well well-sm",
-                tags$label("Gene symbol or protein ID", style = "font-weight:600"),
+                # tags$label("Gene symbol or protein ID", style = "font-weight:600"),
                 selectizeInput(ns("gene_query"), "Gene symbol(s) or protein ID(s)",
-                    choices  = NULL,          # populated server-side via updateSelectizeInput
+                    choices  = NULL,
                     multiple = TRUE,
                     options  = list(
-                        placeholder = "Start typing e.g. GFAP, AQP4...",
+                        placeholder = "Start typing e.g. GAPDH, AQP4...",
                         create      = TRUE,     # allow typing values not in the list
-                        maxItems    = NULL,
+                        maxItems    = 15,   # NULL
                         maxOptions  = 30,
+                        plugins     = list("remove_button"), # adds × on each tag
                         loadThrottle = 300
                 )),
+                # TODO handle dynamically (i.e. choices = NULL)
                 selectInput(ns("omic_filter"), "Omic type",
                             choices  = c("All", "proteomics", "scrna", "snrna", "bulk"),
                             selected = "All"),
@@ -84,22 +86,44 @@ gene_selector_server <- function(id, registry_con, selected_dataset) {
                 actionButton(ns("search_btn"), "Search",
                              class = "btn btn-primary btn-block",
                              icon  = shiny::icon("search")),
-                hr(),
                 # Confirm button — only enabled after a row is selected
                 uiOutput(ns("confirm_ui"))
               )
             ),
 
-            # ── Right: results ────────────────────────────────────────────
+            # ── Right: preview results ───────────────────────────────────────
             column(9,
-              h5("Datasets containing this gene:"),
+              h5("Datasets containing selected gene(s):"),
               DTOutput(ns("hits_tbl")),
               hr(),
-              h5("Selected dataset — metadata preview:"),
+              h5("Selected datasets — metadata preview:"),
               uiOutput(ns("meta_preview"))
             )
           )
         )
+      )
+      # Load gene list from index once modal opens - tryCatch to gaurd against main_setup.py not yet running
+      genes_sql <- tryCatch(
+        DBI::dbGetQuery(
+            registry_con(),
+            "SELECT DISTINCT gene_symbol 
+                FROM gene_study_index 
+                ORDER BY gene_symbol"
+        )$gene_symbol,
+        error = function(e) {
+            showNotification(
+                "Gene index not available — startup may not have completed.",
+                type = "error", duration = 10
+            )
+            character(0)   # empty — selectize works without suggestions
+        }
+      )
+
+      updateSelectizeInput(
+        session,
+        "gene_query",
+        choices  = genes_sql,
+        server   = TRUE     # streams, doesn't dump all genes into the page
       )
     })
 
@@ -146,7 +170,7 @@ gene_selector_server <- function(id, registry_con, selected_dataset) {
         )
 
       datatable(display,
-        selection = "single",
+        selection = "multiple",
         rownames  = FALSE,
         class     = "table-sm table-hover",
         options   = list(
@@ -202,16 +226,25 @@ gene_selector_server <- function(id, registry_con, selected_dataset) {
 
     # ── Confirm selection updates reactiveVal and closes modal ─────────────────
     observeEvent(input$confirm_btn, {
-      row_idx <- input$hits_tbl_rows_selected
-      req(row_idx, nrow(hits_data()) > 0)
-      row <- hits_data()[row_idx, ]
+      row_idxs <- input$hits_tbl_rows_selected
+      req(length(row_idxs) > 0)
+      # req(row_idx, nrow(hits_data()) > 0)
+      row <- hits_data()[row_idxs, ]
 
+      # List of vectors
       selected_dataset(list(
+        genes      = trimws(strsplit(input$modal_gene, ",")[[1]]),
         lab        = row$lab_source,
         study_id   = row$study_id,
         dataset_name = row$dataset_name,
-        omic_type  = row$omic_type,
-        gene       = trimws(input$gene_query)
+        omic_type  = row$omic_type[1],
+        available_datasets = rows,
+        cell_types       = unique(unlist(
+            lapply(seq_len(nrow(rows)), function(i)
+                tryCatch(fetch_metadata_filter_options(registry_con(), rows$lab_source[i], rows$study_id[i])$cell_types[[1]],
+                    error = function(e) NULL)
+            )
+        ))
       ))
       removeModal()
     })
