@@ -8,6 +8,7 @@ to avoid duplicating attach/view logic across modules.
 
 from datetime import datetime, timezone
 import duckdb
+import os
 
 def get_db_table_columns(con: duckdb.DuckDBPyConnection, db_alias: str, table_name: str) -> set[str]:
     """Get set of column names for a table to be used in views."""
@@ -84,18 +85,19 @@ def attach_source_dbs(
             continue
 
         # Attach each unique db_path once if not done already, record alias per path
-        if data_path and data_path not in attached_dbs: # two guards against passing None to ATTACH & prevent re-attaching the same db under a second alias with multiple studies
+        abs_path = os.path.realpath(data_path)  # ensures lookup is consistent
+        if abs_path and abs_path not in attached_dbs: # two guards against passing None to ATTACH & prevent re-attaching the same db under a second alias with multiple studies
             alias = f"src_{lab_source}"
             try:
-                con.execute(f"ATTACH '{data_path}' AS {alias} (READ_ONLY)")
-                attached_dbs[data_path] = alias
+                con.execute(f"ATTACH '{abs_path}' AS {alias} (READ_ONLY)")
+                attached_dbs[abs_path] = alias
             except Exception as e:
                 if "already attached" in str(e).lower() or "already exists" in str(e).lower():
-                    attached_dbs[data_path] = alias     # record the alias it was given even if same file path used for different datasets, and continue
+                    attached_dbs[abs_path] = alias     # record the alias it was given even if same file path used for different datasets, and continue
                 else:
-                    failed.append((data_path, lab_source, str(e)))
-                    print(f"   ERROR attaching '{data_path}' as {alias}: {e}")
-        # db_alias = attached_dbs[data_path]
+                    failed.append((abs_path, lab_source, str(e)))
+                    print(f"   ERROR attaching '{abs_path}' as {alias}: {e}")
+        # db_alias = attached_dbs[abs_path]
 
     return attached_dbs, failed
 

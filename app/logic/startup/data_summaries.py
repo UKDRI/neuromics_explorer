@@ -7,6 +7,7 @@ Stats are written once (or on force=True).
 from datetime import datetime, timezone
 from db_views import attach_source_dbs, view_exists, get_sql_col
 import duckdb
+import os
 
 # Ordered key names for build_dataset_stats()
 FEATURE_STAT_KEYS = ["total_features", "n_sig_features"]
@@ -91,7 +92,7 @@ def build_dataset_stats(registry_db_path: str, force: bool = False):
                 #     VALUES (?,?,?,?,?)
                 # """, [datetime.now(timezone.utc), lab_source, dataset_name, study_id, "rds_not_indexed"])
                 # continue
-            db_alias = attached_dbs[data_path]
+            db_alias = attached_dbs[os.path.realpath(data_path)]
 
             # Mappings to extract data from any column that has an adjacent canonical name, from tables
             name_mappings = dict(

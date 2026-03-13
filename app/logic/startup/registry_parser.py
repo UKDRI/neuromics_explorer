@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from db_views import attach_source_dbs, create_views, get_sql_col
 import yaml
 import duckdb
+import os
 
 # Every dataset gets mapped to these canonical names within the dictionary which also contains their categories.
 CANONICAL_NAMES = {
@@ -456,7 +457,7 @@ def build_registry_index(registry_db_path: str, force_rebuild: bool = False):
                 # """, [datetime.now(timezone.utc), lab_source, dataset_name, study_id, "rds_not_indexed"])
                 # continue
 
-            db_alias = attached_dbs[data_path]
+            db_alias = attached_dbs[os.path.realpath(data_path)]
             # db_alias = attached_dbs.get(data_path)
             if not db_alias:
                 issue_rows.append((

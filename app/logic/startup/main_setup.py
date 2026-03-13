@@ -12,12 +12,14 @@ from registry_parser import parse_and_load_registry, build_registry_index
 from data_summaries import build_dataset_stats
 from db_pool import DuckDBPool, get_conn
 from pathlib import Path
+import os
 import uvicorn
 
 # __file__ uses absolute path to main_setup.py (sets working directory separate from main.R & run_startup.R)
 _SCRIPT_DIR   = Path(__file__).resolve().parent   # ./app/logic/startup/
 _APP_DIR      = _SCRIPT_DIR.parent.parent         # ./app/
 _PROJECT_DIR  = _APP_DIR.parent                   # ./
+os.chdir(_PROJECT_DIR)
 _DATA_DIR     = _PROJECT_DIR / "data"             # ./data/
 
 REGISTRY_YAML = str(_DATA_DIR / "dataset_registry.yml")
