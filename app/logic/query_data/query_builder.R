@@ -238,7 +238,8 @@ fetch_dataset_stats <- function(con, lab_source = NULL, study_id = NULL, omic_ty
   # Guard against dataset_stats not existing yet: return empty dataframe
   tables <- query_arrow(con,
     "SELECT table_name FROM information_schema.tables
-     WHERE table_name = 'dataset_stats'"
+     WHERE table_name = 'dataset_stats'",
+    collect = TRUE
   )
   if (nrow(tables) == 0) {
     warning("dataset_stats table not found — has data_summaries.py run?")
@@ -256,7 +257,7 @@ fetch_dataset_stats <- function(con, lab_source = NULL, study_id = NULL, omic_ty
     SELECT * FROM dataset_stats 
     {where} 
     ORDER BY lab_source, study_id
-  "))
+  "), collect = TRUE)
 }
 
 

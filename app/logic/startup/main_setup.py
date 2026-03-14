@@ -13,6 +13,7 @@ from data_summaries import build_dataset_stats
 from db_pool import DuckDBPool, get_conn
 from pathlib import Path
 import os
+import sys
 import uvicorn
 
 # __file__ uses absolute path to main_setup.py (sets working directory separate from main.R & run_startup.R)
@@ -20,6 +21,8 @@ _SCRIPT_DIR   = Path(__file__).resolve().parent   # ./app/logic/startup/
 _APP_DIR      = _SCRIPT_DIR.parent.parent         # ./app/
 _PROJECT_DIR  = _APP_DIR.parent                   # ./
 os.chdir(_PROJECT_DIR)
+if str(_PROJECT_DIR) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_DIR))   # include project root in sys.path before uvicorn starts
 _DATA_DIR     = _PROJECT_DIR / "data"             # ./data/
 
 REGISTRY_YAML = str(_DATA_DIR / "dataset_registry.yml")
@@ -78,6 +81,13 @@ app = FastAPI(
     version="1.2.0",
     description="Neuromics Explorer visualisation dashboard for UK DRI datasets")
 
+@app.get("/")
+def root():
+    return {
+        "status": "ready",
+        "service": "Neuromics Explorer API",
+        "docs": "http://0.0.0.0:7000/docs"
+    }
 
 # Health check to ensure API is running
 @app.get("/health")
@@ -88,8 +98,8 @@ def health_check():
 if __name__ == "__main__":
     # Run the FastAPI app
     uvicorn.run(
-        # "app.logic.startup.main_setup:app",
-        "main_setup:app",
+        "app.logic.startup.main_setup:app",
+        # "main_setup:app",
         host="0.0.0.0",
         port=7000,
         log_level="info",

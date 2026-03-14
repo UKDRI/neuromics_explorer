@@ -119,7 +119,7 @@ def create_views(
     - metadata view (vm_{lab}_{id}) for sample/cell metadata (when obs_metadata table exists)
     
     The view translates heterogeneous source column names → canonical names
-    so all downstream queries (gene index, stats, API endpoints) use consistent names.
+    so all downstream queries (gene index, stats, etc) use consistent names.
     Reduces need to materialise data for zero-copy data streams/ transfers.
 
     Returns:

@@ -1,20 +1,29 @@
 # Main NEx_alpha module that ties together UI and server components of the app
 
-# Run python startup
-reticulate::use_virtualenv(here(".venv"), required = TRUE)
-reticulate::source_python(here("app", "logic", "startup", "main_setup.py"))
+# Run python startup (optional venv)
+VENV_PATH <- here(".venv")
+PYTHON_PATH <- NA_character_
+if (dir.exists(VENV_PATH)) {
+  candidates <- c(
+    here(".venv", "bin", "python3"),
+    here(".venv", "bin", "python3.13"),
+    here(".venv", "bin", "python")
+  )
+  PYTHON_PATH <- candidates[file.exists(candidates)][1]
+}
+if (is.na(PYTHON_PATH) || !nzchar(PYTHON_PATH)) {
+  PYTHON_PATH <- Sys.which("python3")
+  message("Venv Python not found, falling back to: ", PYTHON_PATH)
+} else {
+  Sys.setenv(RETICULATE_PYTHON = PYTHON_PATH)
+  reticulate::use_python(PYTHON_PATH, required = TRUE)
+}
 
 # Build paths from project root
 STARTUP_SCRIPT <- normalizePath(here("app", "logic", "startup", "main_setup.py"))
 DB_PATH        <- normalizePath(here("data", "neuromics_registry.duckdb"))
 DB_DIAZ        <- normalizePath(here("data", "diaz_castro.duckdb"))
 DB_HONG        <- normalizePath(here("data", "hong.duckdb"))
-PYTHON_PATH    <- normalizePath(here(".venv", "bin", "python3"))
-if (!file.exists(PYTHON_PATH)) {
-  PYTHON_PATH <- Sys.which("python3")
-  message("Venv Python not found, falling back to: ", PYTHON_PATH)
-}
-# Sys.setenv(RETICULATE_PYTHON = PYTHON_PATH) # "../.venv/bin/python3"
 message("PYTHON:   ", PYTHON_PATH)
 message("STARTUP:  ", STARTUP_SCRIPT)
 message("DB:       ", DB_PATH)
@@ -24,7 +33,8 @@ source(normalizePath(here("app", "logic", "startup", "run_startup.R")))
 run_python_startup(
   db_path     = DB_PATH,
   script_path = STARTUP_SCRIPT,
-  python      = PYTHON_PATH
+  python      = PYTHON_PATH,
+  wait        = FALSE
 )
 # run_python_startup()
 

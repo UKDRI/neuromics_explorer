@@ -79,7 +79,7 @@ sidebar_ui <- function(id) {
       # ── Additional filters (collapsible) - populated reactively from selected dataset's metadata
       accordion_panel(
         title = "Cell Type Filter",
-        icon  = shiny::icon("cell"),   # TODO select different icon
+        icon  = shiny::icon("dna"),   # TODO select different icon
         uiOutput(ns("cell_type_ui"))
       ),
       

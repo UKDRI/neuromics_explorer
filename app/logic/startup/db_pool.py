@@ -1,5 +1,5 @@
 """
-This module sets up FastAPI and initialises pools of connections for use in API endpoints to handle concurrent reads internally.
+This module sets up FastAPI and initialises pools of connections to handle concurrent reads internally.
 It also includes startup and shutdown event handlers to manage the lifecycle of these connections.
 """
 
@@ -9,7 +9,7 @@ from queue import Queue, Empty
 from contextlib import contextmanager
 import threading
 
-# Connection pool class to manage multiple read-only duckdb connections for concurrent access in FastAPI endpoints
+# Connection pool class to manage multiple read-only duckdb connections for concurrent access in FastAPI
 class DuckDBPool:
     def __init__(self, db_path: str, pool_size: int = 4,
             attached_dbs: dict | None = None): # | None avoids conflicts
