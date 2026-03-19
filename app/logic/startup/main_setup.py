@@ -31,6 +31,13 @@ DIAZ_DB       = str(_DATA_DIR / "diaz_castro.duckdb")
 HONG_DB       = str(_DATA_DIR / "hong.duckdb")
 DATA_DIR      = str(_DATA_DIR)
 
+def run_build_only():
+    print("Build-only mode: generating registry index and dataset_stats...")
+    parse_and_load_registry(REGISTRY_YAML, DB_PATH)
+    build_registry_index(DB_PATH)
+    build_dataset_stats(DB_PATH)
+    print("Build-only complete.")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -96,12 +103,16 @@ def health_check():
 
 # Run server and main_setup to load/use app instance
 if __name__ == "__main__":
+    if os.getenv("NEX_BUILD_ONLY") == "1":
+        run_build_only()
+        raise SystemExit(0)
     # Run the FastAPI app
     uvicorn.run(
-        "app.logic.startup.main_setup:app",
-        # "main_setup:app",
+        # "app.logic.startup.main_setup:app",
+        # app
+        "main_setup:app",
         host="0.0.0.0",
         port=7000,
         log_level="info",
-        reload=True)       # uvicorn app.logic.startup.main_setup:app --host 0.0.0.0 --port 8000 --reload # reload automatically restarts server when code changes are detected
+        reload=False)       # uvicorn app.logic.startup.main_setup:app --host 0.0.0.0 --port 8000 --reload # reload automatically restarts server when code changes are detected
     

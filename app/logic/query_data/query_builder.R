@@ -14,6 +14,7 @@ box::use(
   glue[glue, glue_sql],
   dplyr[bind_rows, mutate, filter, arrange, desc],
   purrr[map, keep, compact],
+  pool[poolCheckout, poolReturn],
 )
 
 
@@ -21,7 +22,10 @@ box::use(
 
 #' @noRd
 check_con <- function(con) {
-  if (is.null(con) || !DBI::dbIsValid(con))
+  if (is.null(con))
+    stop("Registry DuckDB connection is not valid.")
+  if (inherits(con, "Pool")) return(invisible(TRUE))
+  if (!DBI::dbIsValid(con))
     stop("Registry DuckDB connection is not valid.")
 }
 
@@ -35,6 +39,21 @@ check_con <- function(con) {
 #' @param collect logical — if TRUE returns data.frame (can be used for small lookups)
 #' @return Arrow Table (default) or data.frame
 query_arrow <- function(con, sql, collect = FALSE) {
+  check_con(con)
+
+  # Pool proxy → raw duckdb connection. duckdb_fetch_arrow needs the real object.
+  is_pool    <- inherits(con, "Pool")
+  raw_con    <- if (is_pool) pool::poolCheckout(con) else con
+  on.exit(if (is_pool) pool::poolReturn(raw_con), add = TRUE)
+
+  # Unwrap one further layer: pool checkout returns a DBIConnection proxy,
+  # duckdb_fetch_arrow needs the duckdb-native connection handle inside it.
+  # Access via the internal slot — this is stable across duckdb R package versions.
+  duckdb_con <- if (inherits(raw_con, "duckdb_connection")) {
+    raw_con
+  } else {
+    raw_con@conn   # pool wraps in PooledDBIConnection — .conn slot is the real handle
+  }
   result <- duckdb::dbSendQuery(con, sql)
   tbl    <- duckdb::duckdb_fetch_arrow(result)
   duckdb::dbClearResult(result)
@@ -236,10 +255,12 @@ fetch_dataset_stats <- function(con, lab_source = NULL, study_id = NULL, omic_ty
   check_con(con)
 
   # Guard against dataset_stats not existing yet: return empty dataframe
-  tables <- query_arrow(con,
+  # tables <- query_arrow(con,
+  tables <- DBI::dbGetQuery(con,
     "SELECT table_name FROM information_schema.tables
-     WHERE table_name = 'dataset_stats'",
-    collect = TRUE
+     WHERE table_name = 'dataset_stats'"
+    #  ,
+    # collect = TRUE
   )
   if (nrow(tables) == 0) {
     warning("dataset_stats table not found — has data_summaries.py run?")
@@ -253,11 +274,13 @@ fetch_dataset_stats <- function(con, lab_source = NULL, study_id = NULL, omic_ty
     clauses <- c(clauses, glue::glue("omic_type = '{omic_type}'"))
 
   where <- if (length(clauses)) paste("WHERE", paste(clauses, collapse = " AND ")) else ""
-  query_arrow(con, glue::glue("
+  # query_arrow(con, glue::glue("
+  DBI::dbGetQuery(con, glue::glue("
     SELECT * FROM dataset_stats 
     {where} 
     ORDER BY lab_source, study_id
-  "), collect = TRUE)
+  ")#, collect = TRUE
+  )
 }
 
 

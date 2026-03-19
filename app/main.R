@@ -17,6 +17,7 @@ if (is.na(PYTHON_PATH) || !nzchar(PYTHON_PATH)) {
 } else {
   Sys.setenv(RETICULATE_PYTHON = PYTHON_PATH)
   reticulate::use_python(PYTHON_PATH, required = TRUE)
+  # reticulate::source_python(here("app", "logic", "startup", "main_setup.py")) 
 }
 
 # Build paths from project root
@@ -34,7 +35,7 @@ run_python_startup(
   db_path     = DB_PATH,
   script_path = STARTUP_SCRIPT,
   python      = PYTHON_PATH,
-  wait        = FALSE
+  wait        = TRUE   #Python runs to completion before pool::dbPool()
 )
 # run_python_startup()
 
@@ -226,16 +227,18 @@ ui <- page_navbar(
 #' @export
 server <- function(input, output, session) {
   
-  # Create pool once per session
+  # Create pool once per session (DBI::dbGetQuery)
   registry_pool <- pool::dbPool(
     drv    = duckdb::duckdb(),
     dbname = DB_PATH,
     minSize = 1  #???
   )
+  # Raw connection for Arrow queries — pool cannot be used with duckdb_fetch_arrow
+  registry_arrow_db <- DBI::dbConnect(duckdb::duckdb(), dbname = DB_PATH, read_only = TRUE)
 
-  attach_db <- function(alias, path) {
+  attach_db <- function(con, alias, path) {
     tryCatch(
-      DBI::dbExecute(registry_pool, sprintf(
+      DBI::dbExecute(con, sprintf(
         "ATTACH '%s' AS %s (READ_ONLY)", path, alias
       )),
       error = function(e) {
@@ -244,15 +247,20 @@ server <- function(input, output, session) {
       }
     )
   }
-  attach_db("src_diaz", DB_DIAZ)
-  attach_db("src_hong", DB_HONG)
+  attach_db(registry_pool, "src_diaz", DB_DIAZ)
+  attach_db(registry_pool, "src_hong", DB_HONG)
+  attach_db(registry_arrow_db, "src_diaz", DB_DIAZ)
+  attach_db(registry_arrow_db, "src_hong", DB_HONG)
   
   # Wrap in reactive for modules to receive it as a reactive()
-  registry_con <- reactive(registry_pool)
+  
+  registry_con       <- reactive(registry_pool)        # for DBI::dbGetQuery calls
+  registry_arrow_con <- reactive(registry_arrow_db)    # for query_arrow() calls
   
   session$onSessionEnded(function() {
     pool::poolClose(registry_pool)
-  })
+    DBI::dbDisconnect(registry_arrow_db, shutdown = TRUE)
+  })    
 
   
   
@@ -270,7 +278,7 @@ server <- function(input, output, session) {
   # ── Page servers ────────────────────────────────────────────────
   homepage_server("home")
   # sidebar_server("filters")
-  explorer_server("explore", registry_con)
+  explorer_server("explore", registry_arrow_con, registry_con)
   submit_server("submit")
   
   # ── About page — rendered from Rmd ───────────────────────────────
