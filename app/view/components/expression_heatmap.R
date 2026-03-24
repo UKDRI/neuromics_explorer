@@ -21,10 +21,8 @@ heatmap_ui <- function(id) {
 #' @param padj_thresh       reactive numeric
 #' @param lfc_thresh        reactive numeric
 #' @param n_genes           reactive integer (top N)
-#' @param registry_con      reactive DBI connection
-#' @param registry_con      reactive DBI connection
 #' @export
-heatmap_server <- function(id, selected_dataset, registry_con,
+heatmap_server <- function(id, selected_dataset,
                            padj_thresh, lfc_thresh, n_genes) {
   moduleServer(id, function(input, output, session) {
 
@@ -32,7 +30,6 @@ heatmap_server <- function(id, selected_dataset, registry_con,
       ds <- selected_dataset()
       req(ds)
       get_top_de(
-        registry_con(),
         ds$lab_source,
         ds$study_id,
         n           = n_genes(),

@@ -5,7 +5,7 @@ It also creates DuckDB Views to implement a semantic layer for querying and aggr
 """
 
 from datetime import datetime, timezone
-from db_views import attach_source_dbs, create_views, get_sql_col
+from app.logic.startup.db_views import attach_source_dbs, create_views, get_sql_col
 import yaml
 import duckdb
 import os
@@ -54,7 +54,7 @@ CANONICAL_NAMES = {
 # Map original names to the canonical names. First match is used.
 HEURISTIC_MAPPINGS = {
     # features
-    "gene_symbol":          ["Mouse_Gene", "Gene_Symbol", "gene_symbol", "gene", "symbol"],
+    "gene_symbol":          ["Mouse_Gene", "Gene_Symbol", "gene_symbol", "gene", "symbol", "gene_id", "gene_name"],
     "human_gene":           ["Human_Gene", "human_gene", "HGNC_Symbol"],
     "protein_id":           ["Uniprot_id", "Uniprot_ID", "uniprot", "protein_id"],
     "ensembl_id":           ["Ensembl_id", "ensembl_id", "ENSEMBL"],

@@ -5,7 +5,7 @@ Stats are written once (or on force=True).
 """
 
 from datetime import datetime, timezone
-from db_views import attach_source_dbs, view_exists, get_sql_col
+from app.logic.startup.db_views import attach_source_dbs, view_exists, get_sql_col
 import duckdb
 import os
 
@@ -242,5 +242,4 @@ def build_dataset_stats(registry_db_path: str, force: bool = False):
 
         # Compute tables or views for common queries for UI and filtering:
         # e.g. "top 10 most abundant x y z", "top 10 DE genes in cell type X" or "expression of gene Y across conditions" - can be expanded once usage patterns are clearer
-
 

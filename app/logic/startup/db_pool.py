@@ -12,12 +12,15 @@ import threading
 # Connection pool class to manage multiple read-only duckdb connections for concurrent access in FastAPI
 class DuckDBPool:
     def __init__(self, db_path: str, pool_size: int = 4,
-            attached_dbs: dict | None = None): # | None avoids conflicts
+            attached_dbs: dict | None = None,
+            threads_per_connection: int | None = None): # | None avoids conflicts
         self.pool = Queue(maxsize=pool_size)
         self._lock = threading.Lock()
 
         for _ in range(pool_size):
             con = duckdb.connect(db_path, read_only=True)
+            if threads_per_connection is not None:
+                con.execute(f"PRAGMA threads={int(threads_per_connection)}")
             # Attach source databases to every connection in the pool
             if attached_dbs:
                 for alias, path in attached_dbs.items():
@@ -39,8 +42,8 @@ class DuckDBPool:
             return self.pool.get(timeout=timeout)
         except Empty as e:
             raise RuntimeError(
-                "DuckDB pool exhausted — all connections busy. "
-                "Consider increasing pool_size. Error:", str(e)
+                "DuckDB pool exhausted: all pooled read connections are busy. "
+                "Consider increasing pool_size."
             )
 
     # Release connection back to pool/ queue
@@ -64,7 +67,7 @@ def get_conn(pool: DuckDBPool):
 
 
 
-
+### issues: 
 
 
 # # Initialise once at FastAPI startup

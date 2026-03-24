@@ -15,15 +15,13 @@ dataset_table_ui <- function(id) {
   tagList(DTOutput(ns("tbl")))
 }
 
-#' @param registry_con       reactive DBI connection
 #' @param on_select          function(row) called when a dataset row is clicked
 #' @export
-dataset_table_server <- function(id, registry_con, on_select = NULL) {
+dataset_table_server <- function(id, on_select = NULL) {
   moduleServer(id, function(input, output, session) {
 
     all_data <- reactive({
-      req(registry_con())
-      get_all_datasets(registry_con())
+      get_all_datasets()
     })
 
     output$tbl <- renderDT({

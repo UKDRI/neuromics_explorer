@@ -1,55 +1,23 @@
-# Main NEx_alpha module that ties together UI and server components of the app
-
-# Run python startup (optional venv)
-VENV_PATH <- here(".venv")
-PYTHON_PATH <- NA_character_
-if (dir.exists(VENV_PATH)) {
-  candidates <- c(
-    here(".venv", "bin", "python3"),
-    here(".venv", "bin", "python3.13"),
-    here(".venv", "bin", "python")
-  )
-  PYTHON_PATH <- candidates[file.exists(candidates)][1]
-}
-if (is.na(PYTHON_PATH) || !nzchar(PYTHON_PATH)) {
-  PYTHON_PATH <- Sys.which("python3")
-  message("Venv Python not found, falling back to: ", PYTHON_PATH)
-} else {
-  Sys.setenv(RETICULATE_PYTHON = PYTHON_PATH)
-  reticulate::use_python(PYTHON_PATH, required = TRUE)
-  # reticulate::source_python(here("app", "logic", "startup", "main_setup.py")) 
-}
-
-# Build paths from project root
-STARTUP_SCRIPT <- normalizePath(here("app", "logic", "startup", "main_setup.py"))
-DB_PATH        <- normalizePath(here("data", "neuromics_registry.duckdb"))
-DB_DIAZ        <- normalizePath(here("data", "diaz_castro.duckdb"))
-DB_HONG        <- normalizePath(here("data", "hong.duckdb"))
-message("PYTHON:   ", PYTHON_PATH)
-message("STARTUP:  ", STARTUP_SCRIPT)
-message("DB:       ", DB_PATH)
-
-# Run setup once when app starts
-source(normalizePath(here("app", "logic", "startup", "run_startup.R")))
-run_python_startup(
-  db_path     = DB_PATH,
-  script_path = STARTUP_SCRIPT,
-  python      = PYTHON_PATH,
-  wait        = TRUE   #Python runs to completion before pool::dbPool()
-)
-# run_python_startup()
+# Main NEx_alpha module that ties together the Shiny UI and the Python API.
+#
+# Production model:
+#   - FastAPI owns DuckDB startup, SQL execution, pooling, and Arrow IPC
+#   - Shiny stays a thin HTTP client that renders returned data
+API_BASE_URL <- Sys.getenv("NEX_API_BASE_URL", "http://127.0.0.1:7000/api")
+message("API: ", API_BASE_URL)
 
 
-# Load modules
+# ── Load modules, define ui and server ─────────────────────────────────────
 box::use(
-  shiny[...],  # ie shiny[bootstrapPage, div, moduleServer, NS, renderUI, tags, uiOutput, observeEvent],
+  shiny[...],  
+  # shiny[bootstrapPage, div, moduleServer, NS, renderUI, tags, uiOutput, observeEvent],
   bslib[...],
   shinyjs[useShinyjs],
+  app/logic/api/api_client[set_api_base_url],
   app/view/pages/landing_page[homepage_ui, homepage_server],
   app/view/pages/explore_sidebar[sidebar_ui, sidebar_server],
   app/view/pages/data_explorer[explorer_ui, explorer_server],
   app/view/pages/data_submit[submit_ui, submit_server],
-  app/logic/startup/run_startup[run_python_startup],
 )
 
 #' @export
@@ -226,41 +194,8 @@ ui <- page_navbar(
 
 #' @export
 server <- function(input, output, session) {
-  
-  # Create pool once per session (DBI::dbGetQuery)
-  registry_pool <- pool::dbPool(
-    drv    = duckdb::duckdb(),
-    dbname = DB_PATH,
-    minSize = 1  #???
-  )
-  # Raw connection for Arrow queries — pool cannot be used with duckdb_fetch_arrow
-  registry_arrow_db <- DBI::dbConnect(duckdb::duckdb(), dbname = DB_PATH, read_only = TRUE)
-
-  attach_db <- function(con, alias, path) {
-    tryCatch(
-      DBI::dbExecute(con, sprintf(
-        "ATTACH '%s' AS %s (READ_ONLY)", path, alias
-      )),
-      error = function(e) {
-        if (!grepl("already attach|already exist", e$message, ignore.case=TRUE))
-          warning("ATTACH failed for ", alias, ": ", e$message)
-      }
-    )
-  }
-  attach_db(registry_pool, "src_diaz", DB_DIAZ)
-  attach_db(registry_pool, "src_hong", DB_HONG)
-  attach_db(registry_arrow_db, "src_diaz", DB_DIAZ)
-  attach_db(registry_arrow_db, "src_hong", DB_HONG)
-  
-  # Wrap in reactive for modules to receive it as a reactive()
-  
-  registry_con       <- reactive(registry_pool)        # for DBI::dbGetQuery calls
-  registry_arrow_con <- reactive(registry_arrow_db)    # for query_arrow() calls
-  
-  session$onSessionEnded(function() {
-    pool::poolClose(registry_pool)
-    DBI::dbDisconnect(registry_arrow_db, shutdown = TRUE)
-  })    
+  # Production mode: Shiny is the HTTP client, Python owns DuckDB and Arrow IPC.
+  set_api_base_url(API_BASE_URL)
 
   
   
@@ -278,7 +213,7 @@ server <- function(input, output, session) {
   # ── Page servers ────────────────────────────────────────────────
   homepage_server("home")
   # sidebar_server("filters")
-  explorer_server("explore", registry_arrow_con, registry_con)
+  explorer_server("explore")
   submit_server("submit")
   
   # ── About page — rendered from Rmd ───────────────────────────────

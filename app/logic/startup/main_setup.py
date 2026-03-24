@@ -8,9 +8,6 @@ and computing/ aggregating dataset-level stats for quick retrieval.
 
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
-from registry_parser import parse_and_load_registry, build_registry_index
-from data_summaries import build_dataset_stats
-from db_pool import DuckDBPool, get_conn
 from pathlib import Path
 import os
 import sys
@@ -25,18 +22,19 @@ if str(_PROJECT_DIR) not in sys.path:
     sys.path.insert(0, str(_PROJECT_DIR))   # include project root in sys.path before uvicorn starts
 _DATA_DIR     = _PROJECT_DIR / "data"             # ./data/
 
+from app.logic.startup.registry_parser import parse_and_load_registry, build_registry_index
+from app.logic.startup.data_summaries import build_dataset_stats
+from app.logic.startup.db_pool import DuckDBPool
+from app.logic.api.endpoints import router as api_router
+
 REGISTRY_YAML = str(_DATA_DIR / "dataset_registry.yml")
 DB_PATH       = str(_DATA_DIR / "neuromics_registry.duckdb")
 DIAZ_DB       = str(_DATA_DIR / "diaz_castro.duckdb")
 HONG_DB       = str(_DATA_DIR / "hong.duckdb")
 DATA_DIR      = str(_DATA_DIR)
+POOL_SIZE     = int(os.getenv("NEX_DUCKDB_POOL_SIZE", "8"))
+DUCKDB_THREADS = int(os.getenv("NEX_DUCKDB_THREADS", str(max(2, (os.cpu_count() or 4) // 2))))
 
-def run_build_only():
-    print("Build-only mode: generating registry index and dataset_stats...")
-    parse_and_load_registry(REGISTRY_YAML, DB_PATH)
-    build_registry_index(DB_PATH)
-    build_dataset_stats(DB_PATH)
-    print("Build-only complete.")
 
 
 @asynccontextmanager
@@ -56,14 +54,18 @@ async def lifespan(app: FastAPI):
         print("4. Initialising connection pool to create new instance...")
         duckdb_pool = DuckDBPool(
             db_path = DB_PATH, 
+            pool_size = POOL_SIZE,
             attached_dbs = {
                 'src_diaz': DIAZ_DB,  # key must match view alias name in registry_parser.py
                 'src_hong': HONG_DB,
-            }
+            },
+            threads_per_connection = DUCKDB_THREADS
         )
 
-        # Make pool available to endpoint modules via app state
-        # app.state.db_pool = duckdb_pool
+        # Make a db connection from the pool available to endpoint modules via app state
+        app.state.db_pool = duckdb_pool
+        api_paths = sorted(route.path for route in app.routes if route.path.startswith("/api"))
+        print("Registered API routes:", ", ".join(api_paths))
 
         print("API ready.")
         yield   # application runs here; all requests are handled after this point
@@ -87,13 +89,14 @@ app = FastAPI(
     title="Neuromics Explorer",
     version="1.2.0",
     description="Neuromics Explorer visualisation dashboard for UK DRI datasets")
+app.include_router(api_router)
 
 @app.get("/")
 def root():
     return {
         "status": "ready",
         "service": "Neuromics Explorer API",
-        "docs": "http://0.0.0.0:7000/docs"
+        "docs": "/docs" #"http://0.0.0.0:7000/docs"
     }
 
 # Health check to ensure API is running
@@ -103,14 +106,9 @@ def health_check():
 
 # Run server and main_setup to load/use app instance
 if __name__ == "__main__":
-    if os.getenv("NEX_BUILD_ONLY") == "1":
-        run_build_only()
-        raise SystemExit(0)
     # Run the FastAPI app
     uvicorn.run(
-        # "app.logic.startup.main_setup:app",
-        # app
-        "main_setup:app",
+        "app.logic.startup.main_setup:app", #"main_setup:app",
         host="0.0.0.0",
         port=7000,
         log_level="info",

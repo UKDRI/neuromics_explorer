@@ -1,18 +1,15 @@
-# Interactive DE results table with export button
+# Interactive DE results table.
+# The CSV export control is rendered by the parent explorer header.
 
 box::use(
-  shiny[NS, moduleServer, reactive, req, tagList, downloadButton, downloadHandler],
+  shiny[NS, moduleServer, reactive, req, tagList, downloadHandler],
   DT[DTOutput, renderDT, datatable, formatSignif, formatRound],
 )
 
 #' @export
 results_ui <- function(id) {
   ns <- NS(id)
-  tagList(
-    downloadButton(ns("dl_csv"), "⬇ Download CSV", class = "btn-sm btn-default",
-                   style = "margin-bottom:6px"),
-    DTOutput(ns("tbl"))
-  )
+  tagList(DTOutput(ns("tbl")))
 }
 
 #' @param de_data  reactive data.frame
