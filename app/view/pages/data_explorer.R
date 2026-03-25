@@ -22,6 +22,7 @@ box::use(
   bslib[...],
   plotly[plotlyOutput, renderPlotly, plot_ly, layout, add_trace],
   DT[DTOutput, renderDT, datatable, dataTableProxy, selectRows],
+  htmlwidgets[JS],
   app/view/components/dataset_table[dataset_table_ui, dataset_table_server],
   app/view/components/expression_heatmap[heatmap_ui, heatmap_server],
   app/view/components/results_table[results_ui, results_server],
@@ -30,7 +31,7 @@ box::use(
   # app/view/components/umap_plot[umap_ui, umap_server],
   app/view/pages/gene_dataset_selector[gene_selector_ui, gene_selector_server],
   app/view/pages/explore_sidebar[sidebar_ui, sidebar_server],
-  app/logic/api/api_client[fetch_de_for_terms, fetch_de_multi_dataset, fetch_dataset_stats,
+  app/logic/api/api_client[fetch_dataset_expression, fetch_expression_multi_dataset,
                            fetch_metadata_filter_options, fetch_top_de],
 )
 
@@ -120,6 +121,13 @@ explorer_ui <- function(id) {
             ),
             card_body(
               min_height = "500px",
+              tags$div(
+                class = "alert alert-info",
+                role = "alert",
+                style = "margin-bottom: 12px;",
+                tags$strong("NB: "),
+                "Select one dataset row in **Dataset Listings** above to drive the Expression and Plot tab. Select two or more rows to activate **Compare** tab."
+              ),
 
               # Tab navigation for expression and various other plots
               navset_card_tab(
@@ -132,7 +140,7 @@ explorer_ui <- function(id) {
                 ),
 
                 nav_panel(
-                  title = "Plots",
+                  title = "Plot",
                   icon = icon("chart-line"),
                   uiOutput(ns("plot_ui"))
                 ),
@@ -245,6 +253,20 @@ explorer_server <- function(id) {
   moduleServer(id, function(input, output, session) {
     dataset_key <- function(df) {
       paste(df$lab_source, df$study_id, sep = "::")
+    }
+
+    sum_numeric <- function(x) {
+      values <- suppressWarnings(as.numeric(x))
+      values <- values[!is.na(values)]
+      if (length(values) == 0) return(NA_real_)
+      sum(values)
+    }
+
+    flatten_json_values <- function(values) {
+      unique(unlist(lapply(values, function(value) {
+        if (is.null(value) || is.na(value) || !nzchar(value)) return(character(0))
+        tryCatch(jsonlite::fromJSON(value), error = function(e) character(0))
+      }), use.names = FALSE))
     }
 
     compare_group_col <- function(df) {
@@ -375,14 +397,27 @@ explorer_server <- function(id) {
       current_state
     }
 
-    # This reactive exposes the currently confirmed dataset set to both the
-    # Dataset Listings table and the Compare tab.
+    # This reactiveVal tracks the current row selection inside Dataset Listings.
+    # The same selected row set powers the combined table, compare tab, and
+    # aggregate value boxes.
+    listing_selection <- reactiveVal(integer())
+    last_dataset_keys <- reactiveVal(character())
+
+    # This reactive exposes the currently selected dataset rows from the
+    # Dataset Listings table.
     compare_source_rows <- reactive({
       ds <- selected_dataset()
       if (is.null(ds) || is.null(ds$selected_datasets) || nrow(ds$selected_datasets) == 0) {
         return(data.frame())
       }
-      ds$selected_datasets
+
+      idx <- listing_selection()
+      idx <- idx[idx >= 1 & idx <= nrow(ds$selected_datasets)]
+      if (length(idx) == 0) {
+        return(ds$selected_datasets[0, , drop = FALSE])
+      }
+
+      ds$selected_datasets[idx, , drop = FALSE]
     })
 
     # This reactive performs the cross-dataset fetch used by the Compare tab.
@@ -418,9 +453,7 @@ explorer_server <- function(id) {
         return(dplyr::bind_rows(rows))
       }
 
-      fetch_de_multi_dataset(
-        gene = ds$genes,
-        proteins = ds$proteins,
+      fetch_expression_multi_dataset(
         dataset_list = datasets,
         padj_thresh = sidebar_vals$padj_thresh(),
         lfc_thresh = sidebar_vals$lfc_thresh_min()
@@ -466,28 +499,52 @@ explorer_server <- function(id) {
     # ── Plot subtitle ────────────────────────────────────────────────────
     output$plot_subtitle <- renderText({
       ds <- selected_dataset()
-      if (is.null(ds)) "Select a gene or protein to get started..."
-      else {
-        n_selected <- if (!is.null(ds$selected_datasets)) nrow(ds$selected_datasets) else 0
-        extra <- if (n_selected > 1) paste0(" (+", n_selected - 1, " more)") else ""
-        terms <- c(ds$genes, ds$proteins)
-        paste0(
-          ds$dataset_name, extra, " · ", ds$omic_type, " · search terms: ",
-          paste(terms, collapse = ", ")
-        )
-      }
+      if (is.null(ds)) return("")
+      paste0("search terms: ", paste(c(ds$genes, ds$proteins), collapse = ", "))
     })
-    
+
+    # This reactive fetches the combined DE / expression rows for every dataset
+    # currently selected in Dataset Listings. It powers the Expression data tab.
+    expression_data <- reactive({
+      ds <- selected_dataset()
+      datasets <- compare_source_rows()
+      req(ds, nrow(datasets) > 0, length(c(ds$genes, ds$proteins)) > 0)
+
+      if (nrow(datasets) == 1) {
+        row <- datasets[1, , drop = FALSE]
+        single_df <- fetch_dataset_expression(
+          lab_source = row$lab_source[1],
+          study_id = row$study_id[1],
+          padj_thresh = sidebar_vals$padj_thresh(),
+          lfc_thresh = sidebar_vals$lfc_thresh_min()
+        )
+
+        if (nrow(single_df) == 0) {
+          return(single_df)
+        }
+
+        single_df$lab_source <- row$lab_source[1]
+        single_df$study_id <- row$study_id[1]
+        single_df$dataset_name <- row$dataset_name[1]
+        single_df$omic_type <- row$omic_type[1]
+        return(single_df)
+      }
+
+      fetch_expression_multi_dataset(
+        dataset_list = datasets,
+        padj_thresh = sidebar_vals$padj_thresh(),
+        lfc_thresh = sidebar_vals$lfc_thresh_min()
+      )
+    })
+
     # ── DE data reactive ─────────────────────────────────────────────────
-    # This reactive is the active-dataset query backing the expression table
-    # and single-dataset plot modules. It reruns when terms or thresholds change.
+    # This reactive is the active-dataset query backing the single-dataset
+    # Plots tab. It reruns when the active row, terms, or thresholds change.
     de_data <- reactive({
       ds <- selected_dataset()
       req(ds, length(c(ds$genes, ds$proteins)) > 0)
 
-      fetch_de_for_terms(
-        genes       = ds$genes,
-        proteins    = ds$proteins,
+      fetch_dataset_expression(
         lab_source  = ds$lab_source,
         study_id    = ds$study_id,
         padj_thresh = sidebar_vals$padj_thresh(),
@@ -505,7 +562,7 @@ explorer_server <- function(id) {
             class = "alert alert-info",
             role = "alert",
             tags$strong("NB: "),
-            "Select at least two datasets in the modal to compare them side-by-side."
+            "Select at least two rows in Dataset Listings to compare those datasets side-by-side."
           )
         )
       }
@@ -588,7 +645,7 @@ explorer_server <- function(id) {
             tags$h5(style = "margin-top: 0; color: #2196F3;", "Default Behaviour"),
             tags$p(
               style = "margin-bottom: 0;",
-              "Choose one or more datasets in the modal, then click a row here to make it the active dataset for plots and summaries."
+              "Choose one or more datasets in the modal, then use row selection here to drive the combined table, Compare tab, and the active dataset shown in Plots."
             )
           )
         ))
@@ -618,7 +675,18 @@ explorer_server <- function(id) {
       datatable(
         display,
         rownames = FALSE,
-        selection = "single",
+        selection = "multiple",
+        callback = htmlwidgets::JS(
+          sprintf(
+            "table.on('click.dt', 'tbody tr', function() {
+               var idx = table.row(this).index();
+               if (idx !== undefined) {
+                 Shiny.setInputValue('%s', idx + 1, {priority: 'event'});
+               }
+             });",
+            session$ns("dataset_listing_last_clicked")
+          )
+        ),
         options = list(
           pageLength = min(8L, nrow(display)),
           paging = nrow(display) > 8,
@@ -630,24 +698,51 @@ explorer_server <- function(id) {
       )
     })
 
-    # Keep the DT row highlight aligned with whichever dataset is currently active.
-    observeEvent(selected_dataset(), {
+    # This observe initialises the DT row selection when a new modal-confirmed
+    # dataset set arrives, selecting all confirmed rows by default.
+    observe({
       ds <- selected_dataset()
       req(ds, !is.null(ds$selected_datasets), nrow(ds$selected_datasets) > 0)
-      active_idx <- which(
-        ds$selected_datasets$lab_source == ds$lab_source &
-        ds$selected_datasets$study_id == ds$study_id
-      )[1]
-      if (length(active_idx) == 0 || is.na(active_idx)) {
-        active_idx <- 1L
+
+      dataset_keys <- dataset_key(ds$selected_datasets)
+      if (!identical(dataset_keys, last_dataset_keys())) {
+        last_dataset_keys(dataset_keys)
+        selected_rows <- seq_len(nrow(ds$selected_datasets))
+        listing_selection(selected_rows)
+        DT::selectRows(listing_proxy, selected_rows)
       }
-      DT::selectRows(listing_proxy, active_idx)
+    })
+
+    # This observeEvent keeps the shared row-selection state aligned with the
+    # DT widget so Expression/Compare/value boxes all follow the same rows.
+    observeEvent(input$dataset_listing_rows_selected, {
+      row_idx <- sort(unique(input$dataset_listing_rows_selected %||% integer()))
+      listing_selection(row_idx)
+
+      if (length(row_idx) == 0) {
+        return(invisible(NULL))
+      }
+
+      current <- selected_dataset()
+      req(current, !is.null(current$selected_datasets), nrow(current$selected_datasets) >= row_idx[1])
+
+      active_idx <- which(
+        current$selected_datasets$lab_source == current$lab_source &
+        current$selected_datasets$study_id == current$study_id
+      )[1]
+
+      if (length(active_idx) == 0 || is.na(active_idx) || !(active_idx %in% row_idx)) {
+        row <- current$selected_datasets[row_idx[1], , drop = FALSE]
+        selected_dataset(set_active_dataset(current, row))
+      }
     }, ignoreInit = TRUE)
 
-    # ── Clicking a row in "Dataset Listings" switches an active dataset for plots, stats, and cell-type options
-    observeEvent(input$dataset_listing_rows_selected, {
-      row_idx <- input$dataset_listing_rows_selected
+    # This observeEvent promotes the most recently clicked DT row to the active
+    # dataset that drives the single-dataset Plots tab and cell-type filter UI.
+    observeEvent(input$dataset_listing_last_clicked, {
+      row_idx <- input$dataset_listing_last_clicked
       req(length(row_idx) == 1)
+      req(row_idx %in% (input$dataset_listing_rows_selected %||% integer()))
 
       current <- selected_dataset()
       req(current, !is.null(current$selected_datasets), nrow(current$selected_datasets) >= row_idx)
@@ -664,7 +759,7 @@ explorer_server <- function(id) {
     }, ignoreInit = TRUE)
     
     # ── Results table & plot servers ──────────────────────────────────────
-    results_server("results",  de_data) # results table displaying expression data
+    results_server("results", expression_data)
     volcano_server("volcano",  de_data,
                    padj_thresh = sidebar_vals$padj_thresh,
                    lfc_thresh  = sidebar_vals$lfc_thresh_min,
@@ -723,56 +818,59 @@ explorer_server <- function(id) {
     #   # icon = icon("flask"),
     #   color = "maroon"))
     stats_row <- reactive({
-      ds <- selected_dataset()
-      if (is.null(ds)) return(data.frame())   # return empty, don't req() here
-      tryCatch(
-        fetch_dataset_stats(
-          lab_source = ds$lab_source,
-          study_id = ds$study_id
-        ),
-        error = function(e) data.frame()
+      rows <- compare_source_rows()
+      if (nrow(rows) == 0) return(list())
+
+      list(
+        dataset_count = nrow(rows),
+        total_features = sum_numeric(rows$total_features),
+        n_sig_features = sum_numeric(rows$n_sig_features),
+        total_cells = sum_numeric(rows$total_cells),
+        total_samples = sum_numeric(rows$total_samples),
+        n_cell_types = length(flatten_json_values(rows$cell_types_json)),
+        n_conditions = length(flatten_json_values(rows$conditions_json))
       )
     })
     
     output$box_datasets <- renderValueBox({
-      ds    <- selected_dataset()
-      count <- if (!is.null(ds) && !is.null(ds$selected_datasets)) nrow(ds$selected_datasets) else "—"
+      row <- stats_row()
+      count <- if (length(row) > 0) row$dataset_count else "—"
       valueBox(count, "Datasets selected", color = "purple")
     })
     
     output$box_genes <- renderValueBox({
-      row <- stats_row()   # stats_row already has req(ds) inside it
-      val <- if (nrow(row) > 0) row$total_features[1] %||% "—" else "—"
+      row <- stats_row()
+      val <- if (length(row) > 0) row$total_features %||% "—" else "—"
       valueBox(val, "Total features", color = "blue")
     })
     
     output$box_sig_genes <- renderValueBox({
       row <- stats_row()
-      val <- if (nrow(row) > 0) row$n_sig_features[1] %||% "—" else "—"
+      val <- if (length(row) > 0) row$n_sig_features %||% "—" else "—"
       valueBox(val, "Significant (padj<0.05)", color = "red")
     })
     
     output$box_cells <- renderValueBox({
       row <- stats_row()
-      val <- if (nrow(row) > 0) row$total_cells[1] %||% "—" else "—"
+      val <- if (length(row) > 0) row$total_cells %||% "—" else "—"
       valueBox(val, "Total cells", icon = icon("circle-nodes"), color = "teal")
     })
     
     output$box_cell_types <- renderValueBox({
       row <- stats_row()
-      val <- if (nrow(row) > 0) row$n_cell_types[1] %||% "—" else "—"
+      val <- if (length(row) > 0) row$n_cell_types %||% "—" else "—"
       valueBox(val, "Cell types", icon = icon("tags"), color = "olive")
     })
     
     output$box_samples <- renderValueBox({
       row <- stats_row()
-      val <- if (nrow(row) > 0) row$total_samples[1] %||% "—" else "—"
+      val <- if (length(row) > 0) row$total_samples %||% "—" else "—"
       valueBox(val, "Samples", icon = icon("vials"), color = "navy")
     })
     
     output$box_conditions <- renderValueBox({
       row <- stats_row()
-      val <- if (nrow(row) > 0) row$n_conditions[1] %||% "—" else "—"
+      val <- if (length(row) > 0) row$n_conditions %||% "—" else "—"
       valueBox(val, "Conditions", color = "maroon")
     })
     
@@ -784,4 +882,9 @@ explorer_server <- function(id) {
   })
 }
 # ── Small null helper used by value boxes ──────────────────────────────────
-`%||%` <- function(a, b) if (!is.null(a) && !is.na(a)) a else b
+`%||%` <- function(a, b) {
+  if (is.null(a) || length(a) == 0) return(b)
+  if (length(a) == 1 && is.na(a)) return(b)
+  if (length(a) == 1 && identical(a, "")) return(b)
+  a
+}
