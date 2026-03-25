@@ -6,13 +6,22 @@
 # Design based on prototype: colour by significance direction,
 # threshold lines update reactively with sidebar sliders,
 # hover shows gene details, click highlights row in results_table.
+#
+# Original plotly-first renderer reference:
+# p <- plotly::plot_ly(
+#   df,
+#   x = ~log2fc, y = ~neg_log10p, type = "scatter", mode = "markers",
+#   color = ~sig, colors = c(Up = COLS$up, Down = COLS$down, NS = COLS$ns),
+#   text = ~hover_text, hoverinfo = "text", source = "volcano",
+#   marker = list(size = 6, opacity = 0.7, line = list(width = 0))
+# )
 # ─────────────────────────────────────────────────────────────────────────────
 
 box::use(
   shiny[NS, moduleServer, reactive, observe, req, renderUI, uiOutput,
         div, p, tags, tagList],
   plotly[plotlyOutput, renderPlotly, plot_ly, layout, add_annotations,
-         add_segments, event_data],
+         add_segments, event_data, event_register],
   dplyr[mutate, case_when, filter, arrange, desc],
 )
 
@@ -137,6 +146,7 @@ volcano_server <- function(id, de_data, padj_thresh, lfc_thresh, gene = reactive
           font = list(size = 12, color = "#2C3E50")
         )
       }
+      plotly::event_register(p, "plotly_click")
       p
     })
 

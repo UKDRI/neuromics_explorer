@@ -11,14 +11,17 @@
 # ─────────────────────────────────────────────────────────────────────────────────────────────
 
 box::use(
-  app/logic/query_data/query_builder[fetch_all_datasets, fetch_datasets_for_gene, fetch_metadata_filter_options],
-  dplyr[mutate, rename, select],
-  DT[ datatable, dataTableProxy, DTOutput, renderDT, selectRows],
-  glue[glue],
+  app/logic/api/api_client[fetch_datasets_for_terms, fetch_gene_index_genes,
+                           fetch_metadata_filter_options, fetch_protein_index_ids],
+  dplyr[arrange, bind_rows, group_by, select, summarise],
+  DT[ datatable, DTOutput, renderDT],
   jsonlite[fromJSON],
   shiny[...],
 )
 
+# Launch button for the modal-first dataset search workflow.
+# The alphabetical suggestion list and narrowing behavior belong to the
+# selectize inputs inside the modal, not to this button.
 #' @export
 gene_selector_ui <- function(id) {
   ns <- NS(id)
@@ -27,29 +30,77 @@ gene_selector_ui <- function(id) {
       ns("open_btn"),
       label = "Search Gene or Protein",
       class = "btn btn-primary btn-lg",
-      multiple = TRUE,
-      options = list(
-        placeholder = "Start typing...",
-        maxOptions = 30,
-        maxItems = NULL,
-        create = FALSE
-      ),
+      # multiple = TRUE,
+      # options = list(
+      #   placeholder = "Start typing...",
+      #   maxOptions = 30,
+      #   maxItems = NULL,
+      #   create = FALSE
+      # ),
       style = "margin-bottom: 12px;"
     )
     # The modal is injected by the server on click — no static placeholder needed
   )
 }
 
-
-#' @param registry_con      reactive() returning a valid DBI connection
 #' @param selected_dataset  reactiveVal() updated when user confirms a dataset
-#'                          Value: list(lab, study_id, dataset_name, omic_type, gene)
+#'                          Value: list(lab_source, study_id, dataset_name, omic_type, genes, proteins)
 #' @export
-gene_selector_server <- function(id, registry_con, selected_dataset) {
+gene_selector_server <- function(id, selected_dataset) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
+    # Resolve cell-type choices for the active dataset so the sidebar can update immediately.
+    get_active_cell_types <- function(rows) {
+      if (nrow(rows) == 0) return(character(0))
+
+      active_row <- rows[1, , drop = FALSE]
+      opts <- tryCatch(
+        fetch_metadata_filter_options(
+          active_row$lab_source[1],
+          active_row$study_id[1]
+        ),
+        error = function(e) NULL
+      )
+
+      if (is.null(opts) || !"cell_types" %in% names(opts) || length(opts$cell_types) == 0) {
+        return(character(0))
+      }
+
+      cts <- opts$cell_types[[1]]
+      cts[!is.na(cts) & nzchar(cts)]
+    }
+
+    # Collapse selected rows down to one row per dataset and keep the first row active.
+    build_selected_payload <- function(rows, genes, proteins) {
+      selected_rows <- rows |>
+        dplyr::group_by(
+          lab_source, study_id, dataset_name, omic_type,
+          total_features, n_sig_features, total_samples, total_cells,
+          n_cell_types, n_conditions, cell_types_json, conditions_json
+        ) |>
+        dplyr::summarise(
+          matched_terms = paste(sort(unique(c(gene_symbol, protein_id))), collapse = ", "),
+          .groups = "drop"
+        ) |>
+        dplyr::arrange(lab_source, study_id)
+
+      list(
+        genes             = genes,
+        proteins          = proteins,
+        lab_source        = selected_rows$lab_source[1],
+        study_id          = selected_rows$study_id[1],
+        dataset_name      = selected_rows$dataset_name[1],
+        omic_type         = selected_rows$omic_type[1],
+        selected_datasets = selected_rows,
+        cell_types        = get_active_cell_types(selected_rows)
+      )
+    }
+
     # ── Open modal ────────────────────────────────────────────────────────────
+    # This observeEvent is the UI entry point for dataset search. It opens the
+    # modal, fetches starter suggestion lists, and resets both selectize inputs
+    # so stale previous selections do not appear when the modal is reopened.
     observeEvent(input$open_btn, {
       showModal(
         modalDialog(
@@ -57,32 +108,50 @@ gene_selector_server <- function(id, registry_con, selected_dataset) {
           size      = "xl",
           easyClose = TRUE,
           footer    = NULL,
+          style     = "max-width: 1400px; width: 95vw;",
 
-          fluidRow(
-            # ── Left: search controls ──────────────────────────────────────
-            column(3,
-              div(class = "well well-sm",
+          tags$div(
+            style = "display: flex; gap: 16px; align-items: flex-start;",
+
+            # ── Left: search controls ───────────────────────────────────────
+            tags$div(
+              style = "flex: 0 0 290px;",   #fixed-width
+              div(class = "well well-sm", style = "margin-bottom: 0;",
                 # tags$label("Gene symbol or protein ID", style = "font-weight:600"),
-                selectizeInput(ns("gene_query"), "Gene symbol(s) or protein ID(s)",
+                selectizeInput(ns("gene_query"), "Gene symbol(s)",
                     choices  = NULL,
                     multiple = TRUE,
                     options  = list(
                         placeholder = "Start typing e.g. GAPDH, AQP4...",
-                        create      = TRUE,     # allow typing values not in the list
-                        maxItems    = 15,   # NULL
+                        create      = FALSE,
+                        maxItems    = 15,
                         maxOptions  = 30,
-                        plugins     = list("remove_button"), # adds × on each tag
+                        preload     = "focus",
+                        openOnFocus = TRUE,
+                        closeAfterSelect = FALSE,
+                        plugins     = list("remove_button"),           # adds × on each tag 
                         loadThrottle = 300
                 )),
-                # TODO handle dynamically (i.e. choices = NULL)
+                selectizeInput(ns("protein_query"), "Protein ID(s)",
+                    choices  = NULL,
+                    multiple = TRUE,
+                    options  = list(
+                        placeholder = "Start typing e.g. P04406...",
+                        create      = FALSE,
+                        maxItems    = 15,
+                        maxOptions  = 30,
+                        preload     = "focus",
+                        openOnFocus = TRUE,
+                        closeAfterSelect = FALSE,
+                        plugins     = list("remove_button"),
+                        loadThrottle = 300
+                )),
                 selectInput(ns("omic_filter"), "Omic type",
                             choices  = c("All", "proteomics", "scrna", "snrna", "bulk"),
                             selected = "All"),
                 selectInput(ns("lab_filter"), "Lab",
                             choices  = c("All", "diaz", "hong", "williams"),
                             selected = "All"),
-                numericInput(ns("padj_preview"), "Preview padj threshold",
-                             value = 0.05, min = 0.001, max = 1, step = 0.001),
                 actionButton(ns("search_btn"), "Search",
                              class = "btn btn-primary btn-block",
                              icon  = shiny::icon("search")),
@@ -91,9 +160,10 @@ gene_selector_server <- function(id, registry_con, selected_dataset) {
               )
             ),
 
-            # ── Right: preview results ───────────────────────────────────────
-            column(9,
-              h5("Datasets containing selected gene(s):"),
+            # ── Right: preview results ──────────────────────────────────
+            tags$div(
+              style = "flex: 1 1 auto; min-width: 0;",      #flexible results area grows with modal width
+              h5("Datasets containing selected gene/protein terms:"),
               DTOutput(ns("hits_tbl")),
               hr(),
               h5("Selected datasets — metadata preview:"),
@@ -102,71 +172,95 @@ gene_selector_server <- function(id, registry_con, selected_dataset) {
           )
         )
       )
-      # Load gene list from index once modal opens - tryCatch to gaurd against main_setup.py not yet running
+      # Load the first alphabetical slice of available genes/proteins so the
+      # selectize dropdown shows starter suggestions before typing.
       genes_sql <- tryCatch(
-        DBI::dbGetQuery(
-            registry_con(),
-            "SELECT DISTINCT gene_symbol 
-                FROM gene_study_index 
-                ORDER BY gene_symbol"
-        )$gene_symbol,
+        fetch_gene_index_genes(),
         error = function(e) {
             showNotification(
-                "Gene index not available — startup may not have completed.",
+                paste0(
+                  "Gene index route unavailable. Restart the FastAPI service. ",
+                  e$message
+                ),
                 type = "error", duration = 10
             )
             character(0)   # empty — selectize works without suggestions
         }
       )
 
+      proteins_sql <- tryCatch(
+        fetch_protein_index_ids(),
+        error = function(e) character(0)
+      )
+
       updateSelectizeInput(
         session,
         "gene_query",
         choices  = genes_sql,
-        server   = TRUE     # streams, doesn't dump all genes into the page
+        selected = character(0),
+        server   = TRUE
+      )
+
+      updateSelectizeInput(
+        session,
+        "protein_query",
+        choices  = proteins_sql,
+        selected = character(0),
+        server   = TRUE
       )
     })
 
 
-    # ── Search ────────────────────────────────────────────────────────────────
+    # ── Search with genes and/or proteins ──────────────────────────────────
+    # This reactiveVal acts as the modal's shared result store. The hits table,
+    # metadata preview, and confirm action all read from the same search result.
     hits_data <- reactiveVal(data.frame())
 
+    # This observeEvent runs only when the user clicks Search. It translates the
+    # current modal inputs into one API query and updates the shared results.
     observeEvent(input$search_btn, {
-      req(nchar(trimws(input$gene_query)) >= 1) # changed from 2
+      search_genes <- unique(trimws(input$gene_query %||% character(0)))
+      search_genes <- search_genes[nzchar(search_genes)]
+      search_proteins <- unique(trimws(input$protein_query %||% character(0)))
+      search_proteins <- search_proteins[nzchar(search_proteins)]
+      req(length(search_genes) > 0 || length(search_proteins) > 0)
 
-      results <- tryCatch(
-        fetch_datasets_for_gene(
-          registry_con(),
-          query      = input$gene_query,
-          omic_type  = if (input$omic_filter  == "All") NULL else input$omic_filter,
-          lab_source = if (input$lab_filter   == "All") NULL else input$lab_filter
-        ),
-        error = function(e) {
-          shiny::showNotification(paste("Search error:", e$message), type = "error")
-          data.frame()
-        }
-      )
+      results <- tryCatch({
+        fetch_datasets_for_terms(
+            genes      = search_genes,
+            proteins   = search_proteins,
+            omic_type  = if (input$omic_filter  == "All") NULL else input$omic_filter,
+            lab_source = if (input$lab_filter   == "All") NULL else input$lab_filter
+          ) |>
+          dplyr::arrange(lab_source, study_id, gene_symbol)
+      }, error = function(e) {
+        shiny::showNotification(paste("Search error:", e$message), type = "error")
+        data.frame()
+      })
+
       hits_data(results)
     })
 
 
     # ── Hits table ────────────────────────────────────────────────────────────
+    # This render block presents the current search result for row selection.
     output$hits_tbl <- renderDT({
       df <- hits_data()
       req(nrow(df) > 0)
 
-      # Friendly display columns (hide JSON blobs)
+      # Friendly display columns (hides JSON blobs)
       display <- df |>
         dplyr::select(
           Lab          = lab_source,
           `Dataset`    = dataset_name,
-          `Omic`       = omic_type,
+          `Modality`   = omic_type,
           `Gene`       = gene_symbol,
-          `Features`   = total_features,
-          `Significant (padj<0.05)` = n_sig_features,
-          `Samples/Cells` = total_samples,
-          `Cell types` = n_cell_types,
-          `Conditions` = n_conditions
+          `Protein`    = protein_id,
+          `Total Features` = total_features,
+          `Total Significant (padj<0.05)` = n_sig_features,
+          `Total Samples`  = total_samples,
+          `Cell Types`     = n_cell_types,
+          `Conditions`     = n_conditions
         )
 
       datatable(display,
@@ -177,46 +271,65 @@ gene_selector_server <- function(id, registry_con, selected_dataset) {
           pageLength   = 8,
           scrollX      = TRUE,
           dom          = "frtip",
-          columnDefs   = list(list(className = "dt-right", targets = 4:8))
+          columnDefs   = list(list(className = "dt-right", targets = 5:9))
         )
       )
     })
 
 
-    # ── Metadata preview card ─────────────────────────────────────────────────
+    # ── Metadata preview cards for selected datasets ────────────────────────
+    # This render block reacts to the selected rows in the hits table and shows
+    # compact side-by-side metadata cards for those candidate datasets.
     output$meta_preview <- renderUI({
       row_idx <- input$hits_tbl_rows_selected
-      req(row_idx, nrow(hits_data()) > 0)
-
-      row <- hits_data()[row_idx, ]
-
-      # Parse JSON arrays for display
-      cell_types  <- tryCatch(paste(jsonlite::fromJSON(row$cell_types_json  %||% "[]"), collapse=", "), error=function(e) "—")
-      conditions  <- tryCatch(paste(jsonlite::fromJSON(row$conditions_json  %||% "[]"), collapse=", "), error=function(e) "—")
-
-      div(class = "panel panel-default",
-        div(class = "panel-body",
-          fluidRow(
-            column(4, tags$b("Dataset:"),    p(row$dataset_name)),
-            column(4, tags$b("Lab:"),        p(row$lab_source)),
-            column(4, tags$b("Omic type:"),  p(row$omic_type))
-          ),
-          fluidRow(
-            column(3, tags$b("Total features:"),  p(format(row$total_features, big.mark=","))),
-            column(3, tags$b("Significant:"),     p(format(row$n_sig_features,  big.mark=","))),
-            column(3, tags$b("Samples/ Cells:"),  p(format(coalesce_na(row$total_samples, row$total_cells), big.mark=","))),
-            column(3, tags$b("Cell types:"),      p(row$n_cell_types %||% "—"))
-          ),
-          fluidRow(
-            column(6, tags$b("Conditions:"), p(conditions)),
-            column(6, tags$b("Cell types:"), p(cell_types))
+      if (is.null(row_idx) || length(row_idx) == 0 || nrow(hits_data()) == 0) {
+        return(
+          tags$div(
+            class = "alert alert-secondary",
+            role = "alert",
+            style = "margin-bottom: 0; display: inline-block; max-width: 100%;",
+            "Select one or more dataset rows above to preview their metadata side-by-side."
           )
         )
+      }
+
+      rows <- hits_data()[row_idx, , drop = FALSE]
+
+      # Parse JSON arrays for display
+      tags$div(
+        style = "display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px;",
+        lapply(seq_len(nrow(rows)), function(i) {
+          row <- rows[i, , drop = FALSE]
+          cell_types <- tryCatch(
+            paste(jsonlite::fromJSON(row$cell_types_json %||% "[]"), collapse = ", "),
+            error = function(e) "—"
+          )
+          conditions <- tryCatch(
+            paste(jsonlite::fromJSON(row$conditions_json %||% "[]"), collapse = ", "),
+            error = function(e) "—"
+          )
+
+          tags$div(
+            style = "border: 1px solid #d9dee3; border-radius: 8px; padding: 10px 12px; background: #fff;",
+            tags$div(style = "font-weight: 700; margin-bottom: 4px;", row$dataset_name),
+            tags$div(style = "font-size: 12px; color: #555; margin-bottom: 8px;",
+                     paste(row$lab_source, "·", row$omic_type)),
+            tags$div(style = "font-size: 12px; line-height: 1.5;",
+                     tags$div(tags$b("Total Features: "), format(row$total_features, big.mark = ",")),
+                     tags$div(tags$b("Total Significant: "), format(row$n_sig_features, big.mark = ",")),
+                     tags$div(tags$b("Samples/Cells: "), format(coalesce_na(row$total_samples, row$total_cells), big.mark = ",")),
+                     tags$div(tags$b("Cell types: "), row$n_cell_types %||% "—"),
+                     tags$div(tags$b("Conditions: "), conditions %||% "—"),
+                     tags$div(tags$b("Cell types: "), cell_types %||% "—"))
+          )
+        })
       )
     })
 
 
     # ── Confirm button — shown only when a row is selected ───────────────────
+    # This render block enables the modal confirm action only after at least
+    # one dataset row has been selected in the search results table.
     output$confirm_ui <- renderUI({
       req(input$hits_tbl_rows_selected)
       actionButton(ns("confirm_btn"), "✓ Explore selected dataset(s)",
@@ -225,27 +338,19 @@ gene_selector_server <- function(id, registry_con, selected_dataset) {
 
 
     # ── Confirm selection updates reactiveVal and closes modal ─────────────────
+    # This observeEvent commits the modal selection into shared explorer state,
+    # which then drives the dataset listing, plots, and sidebar terms.
     observeEvent(input$confirm_btn, {
       row_idxs <- input$hits_tbl_rows_selected
       req(length(row_idxs) > 0)
-      # req(row_idx, nrow(hits_data()) > 0)
-      row <- hits_data()[row_idxs, ]
+      selected_rows <- hits_data()[row_idxs, , drop = FALSE]
+      genes <- unique(trimws(input$gene_query %||% character(0)))
+      genes <- genes[nzchar(genes)]
+      proteins <- unique(trimws(input$protein_query %||% character(0)))
+      proteins <- proteins[nzchar(proteins)]
+      req(length(genes) > 0 || length(proteins) > 0)
 
-      # List of vectors
-      selected_dataset(list(
-        genes      = trimws(strsplit(input$modal_gene, ",")[[1]]),
-        lab        = row$lab_source,
-        study_id   = row$study_id,
-        dataset_name = row$dataset_name,
-        omic_type  = row$omic_type[1],
-        available_datasets = rows,
-        cell_types       = unique(unlist(
-            lapply(seq_len(nrow(rows)), function(i)
-                tryCatch(fetch_metadata_filter_options(registry_con(), rows$lab_source[i], rows$study_id[i])$cell_types[[1]],
-                    error = function(e) NULL)
-            )
-        ))
-      ))
+      selected_dataset(build_selected_payload(selected_rows, genes, proteins))
       removeModal()
     })
 
@@ -253,8 +358,13 @@ gene_selector_server <- function(id, registry_con, selected_dataset) {
 }
 
 
-# ── Utilities - defensive null-handling helpers ─────────────────────────────────────────────────────────────────
-`%||%` <- function(a, b) if (!is.null(a) && !is.na(a) && a != "") a else b
+# ── Utilities - defensive null-handling helpers ───────────────────────────
+`%||%` <- function(a, b) {
+  if (is.null(a) || length(a) == 0) return(b)
+  if (length(a) == 1 && is.na(a)) return(b)
+  if (length(a) == 1 && identical(a, "")) return(b)
+  a
+}
 coalesce_na <- function(...) {
   for (x in list(...)) if (!is.null(x) && !is.na(x)) return(x)
   NA

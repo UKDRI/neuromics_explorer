@@ -46,9 +46,10 @@ heatmap_server <- function(id, selected_dataset,
       group_col <- if ("cell_type" %in% names(df) && any(!is.na(df$cell_type)))
         "cell_type" else "condition_a"
 
-      mat_df <- df |>
-        dplyr::select(gene_symbol, !!group_col, log2fc) |>
-        dplyr::mutate(group = .data[[group_col]]) |>
+      plot_source <- df[, intersect(c("gene_symbol", group_col, "log2fc"), names(df)), drop = FALSE]
+      names(plot_source)[names(plot_source) == group_col] <- "group"
+
+      mat_df <- plot_source |>
         tidyr::pivot_wider(
           id_cols     = gene_symbol,
           names_from  = group,

@@ -1,16 +1,14 @@
 # ────────────────────────────────────────────────────────────────────────────────────────
-# Module contains sidebar menu for the Explorer page
-# Users can select genes, re-open gene selector popup modal, apply filters to plots, etc.
+# Module contains the Explorer page sidebar.
+# It shows modal-selected genes and the plot/filter controls that shape the API queries.
 # ────────────────────────────────────────────────────────────────────────────────────────
 
 box::use(
   # shiny[...],
-  shiny[moduleServer, NS, tagList, selectInput, selectizeInput, updateSelectInput,
+  shiny[moduleServer, NS, tagList, selectInput, updateSelectInput,
         sliderInput, updateSliderInput, checkboxGroupInput, actionButton,
         observeEvent, uiOutput, renderUI, tags, reactive],
-  shinyWidgets[pickerInput, sliderTextInput],
   bslib[accordion, accordion_panel],
-  app/view/pages/gene_dataset_selector[gene_selector_ui, gene_selector_server],
 )
 
 #' @export
@@ -18,36 +16,21 @@ sidebar_ui <- function(id) {
   ns <- NS(id)
   tagList(
     
-    # ── Gene / protein search (tied to modal popup) ─────────────────────────────
-    tags$label("Genes", style = "font-weight: 600; color: #333;"),
-    # Read-only display of genes selected via modal — button re-opens modal
-    uiOutput(ns("selected_genes_display")),
-    actionButton(
-      ns("open_gene_modal"), "Search Gene or Protein",
-      class = "btn btn-primary btn-block",
-      style = "background-color: #667eea; border-color: #667eea; width: 100%; margin-bottom: 10px;"
-    ),
-    
+    # ── Selected genes from the modal workflow ─────────────────────────────
+    tags$label("Selected search terms", style = "font-weight: 600; color: #333;"),
+    uiOutput(ns("selected_terms_display")),
+
     tags$hr(),
     
-    # ── Dataset selector - populated reactively after gene search (only datasets containing selected genes)
-    tags$label("Select Dataset(s)", style = "font-weight: 600; color: #333;"),
-    uiOutput(ns("dataset_picker_ui")),
-    
-    tags$hr(),
-    
-    # ── Plot type and user-inputs ─────────────────────────────────────────────────────────
+    # ── Plot type and query-side filters ─────────────────────────────────────
+    # Reminder: add back the wider plot catalogue when the supporting modules
+    # are implemented and wired through the explorer/compare flow:
+    # Dot, Histogram, Volcano, Heatmap, Violin, Bar, Box, PCA, UMAP, Scater,
+    # Feature Scatter, Correlation, HighestExpr, Feature Expression Heatmap
     tags$label("Plot type", style = "font-weight: 600; color: #333;"),
     selectInput(ns("plot_type"), NULL,
-                choices  = c("", "Dot", "Histogram", "Volcano", "Heatmap", "Violin", 
-                             "Bar", "PCA", "UMAP", "Scater", "Feature Scatter", "HighestExpr"),
-                selected = ""
-    ),
-    
-    tags$label("Visualisation", style = "font-weight: 600; color: #333;"),
-    selectInput(ns("vis_type"), NULL,
-                choices  = c("", "By cell type", "By condition", "By sample"),
-                selected = ""
+                choices  = c("Volcano", "Heatmap", "Violin"),
+                selected = "Volcano"
     ),
     
     tags$hr(),
@@ -110,57 +93,25 @@ sidebar_ui <- function(id) {
 }
 
 #' @export
-sidebar_server <- function(id, registry_con, selected_dataset) {
+sidebar_server <- function(id, selected_dataset) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
-    
-    # ── Forward modal open to gene_selector module via side-menu button ────────────────────────
-    observeEvent(input$open_gene_modal, {
-      # Fire the same trigger that gene_dataset_selector listens for
-      # session$sendCustomMessage("open_gene_modal", list())
-      shinyjs::click(NS("gene_selector")("open_btn")) #gene_selector_ui?
-    })
-    
-    # ── Display selected genes as tags ────────────────────────────────────
-    output$selected_genes_display <- renderUI({
+
+    # ── Display selected search terms as tags ─────────────────────────────
+    output$selected_terms_display <- renderUI({
       ds <- selected_dataset()
-      if (is.null(ds) || length(ds$genes) == 0) {
-        tags$p("No genes selected", style = "color: #aaa; font-size: 12px; margin-bottom: 4px;")
+      terms <- c(ds$genes, ds$proteins)
+      if (is.null(ds) || length(terms) == 0) {
+        tags$p("No search terms selected", style = "color: #aaa; font-size: 12px; margin-bottom: 4px;")
       } else {
-        div(
+        tags$div(
           style = "margin-bottom: 6px;",
-          lapply(ds$genes, function(g) {
-            tags$span(g,
+          lapply(terms, function(term) {
+            tags$span(term,
                       class = "badge",
                       style = "background-color: #667eea; color: white; margin-right: 4px; padding: 4px 8px; border-radius: 10px;"
             )
           })
-        )
-      }
-    })
-    
-    # ── Dataset picker — only shows datasets containing selected genes ───────────────
-    output$dataset_picker_ui <- renderUI({
-      ds <- selected_dataset()
-      if (is.null(ds) || is.null(ds$available_datasets)) {
-        selectInput(ns("selected_datasets"), NULL,
-                    choices  = c("Search for a gene first" = ""),
-                    selected = ""
-        )
-      } else {
-        choices <- setNames(
-          paste0(ds$available_datasets$lab_source, "_", ds$available_datasets$study_id),
-          ds$available_datasets$dataset_name
-        )
-        shinyWidgets::pickerInput(ns("selected_datasets"), NULL,
-                                  choices  = choices,
-                                  selected = NULL,
-                                  multiple = TRUE,
-                                  options  = list(
-                                    `live-search`  = TRUE,
-                                    placeholder    = "Select dataset(s)...",
-                                    `selected-text-format` = "count > 2"
-                                  )
         )
       }
     })
@@ -183,8 +134,7 @@ sidebar_server <- function(id, registry_con, selected_dataset) {
     observeEvent(input$reset_filters, {
       updateSliderInput(session, "lfc_thresh",   value = c(0, 1))
       updateSliderInput(session, "padj_thresh",  value = 0.05)
-      updateSelectInput(session, "plot_type",    selected = "")
-      updateSelectInput(session, "vis_type",     selected = "")
+      updateSelectInput(session, "plot_type",    selected = "Volcano")
       updateSelectInput(session, "organism",     selected = "All")
       # session$reload()
     })
@@ -192,13 +142,11 @@ sidebar_server <- function(id, registry_con, selected_dataset) {
     # ── Return reactive list for use by data_explore.R ────────────────────
     list(
       plot_type         = reactive(input$plot_type),
-      vis_type          = reactive(input$vis_type),
       padj_thresh       = reactive(input$padj_thresh),
       lfc_thresh_min    = reactive(input$lfc_thresh[1]),
       lfc_thresh_max    = reactive(input$lfc_thresh[2]),
       cell_types        = reactive(input$cell_types),
-      organism          = reactive(input$organism),
-      selected_datasets = reactive(input$selected_datasets)
+      organism          = reactive(input$organism)
     )
   })
 }
