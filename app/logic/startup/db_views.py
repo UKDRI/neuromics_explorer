@@ -10,10 +10,14 @@ from datetime import datetime, timezone
 import duckdb
 import os
 
-def get_db_table_columns(con: duckdb.DuckDBPyConnection, db_alias: str, table_name: str) -> set[str]:
+def get_db_table_columns(con: duckdb.DuckDBPyConnection, db_alias: str, table_name: str, source_type: str = "duckdb", data_path: str = "") -> set[str]:
     """Get set of column names for a table to be used in views."""
     try:
-        result = con.execute(f"DESCRIBE {db_alias}.main.{table_name}").fetchall()
+        if source_type == "parquet":
+            full_path = os.path.join(data_path, table_name)
+            result = con.execute(f"DESCRIBE SELECT * FROM read_parquet('{full_path}')").fetchall()
+        else:
+            result = con.execute(f"DESCRIBE {db_alias}.main.{table_name}").fetchall()
         return {row[0] for row in result}
     except Exception:
         return set()
@@ -50,7 +54,7 @@ def get_sql_col(
     Used to safely embed original column names from column_mappings into SQL strings 
     without risk of injecting None or unquoted identifiers.
     """
-    original_name = name_mappings.get(canonical_name)
+    original_name = name_mappings.get(canonical_name)       # TODO check canonical vs original
     if original_name and original_name in col_names:
         if col_names is None or original_name in col_names:     # skip check if no col_names given
             return f'"{original_name}"'
@@ -109,9 +113,10 @@ def create_views(
     lab_source: str,
     dataset_name: str,
     db_alias: str,
-    # actual_table: str,
-    name_mappings: dict[str, str],  # {canonical_name: original_col}
-    table_map: dict[str, str],  # {}
+    name_mappings: dict[str, str],  # {canonical_name : original_col}
+    table_map: dict[str, str],  # {logical_table : actual_table}
+    source_type: str = "duckdb",
+    data_path: str = "",
 ) -> tuple[list[str], list[tuple]]:
     """
     Create or replace the canonical semantic view for a dataset.
@@ -141,7 +146,7 @@ def create_views(
     human_col       = name_mappings.get("human_gene")      # Identify human gene column if available for cross-species mapping
     organism_col    = name_mappings.get("organism")
     organism        = f"'{organism_col}'" if organism_col else "'unknown'"
-    expr_cols       = get_db_table_columns(con, db_alias, expr_table)   # to check where meta entities like sample names and conditions exist
+    expr_cols       = get_db_table_columns(con, db_alias, expr_table, source_type, data_path)   # to check where meta entities like sample names and conditions exist
 
     # Build COALESCE expression for primary gene column so Mouse_Gene NULLs and it falls through to Human_Gene
     gene_candidates = [simple_sql_col(c) for c in [gene_col, protein_col, human_col] if c and c in expr_cols]
@@ -156,6 +161,14 @@ def create_views(
         if len(gene_candidates) > 1
         else gene_candidates[0]
     )
+
+    if source_type == "parquet":
+        expr_table_ref = f"read_parquet('{os.path.join(data_path, expr_table)}') AS expr"
+        expr_where = f"WHERE {primary_gene_col} IS NOT NULL"
+        # expr_where = ""
+    else:
+        expr_table_ref = f"{db_alias}.main.{expr_table} AS expr"
+        expr_where = f"WHERE study_id = {study_id} AND {primary_gene_col} IS NOT NULL"
 
     print(f" [DEBUG] {lab_source} study_id={study_id} | alias={db_alias} | "
         f"expr_table={expr_table} | obs_table={obs_meta_table} | gene_col={gene_col} \n | primary_gene_col={primary_gene_col} \n | gene_candidates: {gene_candidates} \n | protein_col={protein_col} | human_col={human_col} | organism_col={organism_col} | expr_view={expr_view} | obs_meta_view={obs_meta_view}")
@@ -197,9 +210,8 @@ def create_views(
                     {get_sql_col(name_mappings, 'tissue',           expr_cols)}          AS tissue,
                     {get_sql_col(name_mappings, 'age',              expr_cols, 'NULL::INTEGER')} AS age,
                     {get_sql_col(name_mappings, 'sex',              expr_cols)}          AS sex
-                FROM {db_alias}.main.{expr_table}
-                WHERE study_id = {study_id}
-                AND {primary_gene_col} IS NOT NULL
+                FROM {expr_table_ref}
+                {expr_where}
             """)        # '{source_id}'.main.{expression_table} OR '{data_path}'.{actual_table} OR attach_alias.main.actual_table
             created.append(expr_view)
         except Exception as e:
@@ -212,8 +224,14 @@ def create_views(
     # --- Metadata view (sample/cell metadata from separate obs_metadata table) ---
     if obs_meta_table:
         try:
-            meta_cols = get_db_table_columns(con, db_alias, obs_meta_table)
+            meta_cols = get_db_table_columns(con, db_alias, obs_meta_table, source_type, data_path)
             print(f"     [DEBUG] meta_cols {meta_cols}")
+            if source_type == "parquet":
+                meta_table_ref = f"read_parquet('{os.path.join(data_path, obs_meta_table)}')"
+                meta_where = ""
+            else:
+                meta_table_ref = f"{db_alias}.main.{obs_meta_table}"
+                meta_where = f"WHERE study_id = {study_id}"
             con.execute(f"""
                 CREATE OR REPLACE VIEW {obs_meta_view} AS
                 SELECT
@@ -229,8 +247,8 @@ def create_views(
                     {get_sql_col(name_mappings, 'tissue',      meta_cols)}    AS tissue,
                     {get_sql_col(name_mappings, 'age',         meta_cols, 'NULL::INTEGER')} AS age,
                     {get_sql_col(name_mappings, 'sex',         meta_cols)}    AS sex
-                FROM {db_alias}.main.{obs_meta_table}
-                WHERE study_id = {study_id}
+                FROM {meta_table_ref}
+                {meta_where}
             """)
             created.append(obs_meta_view)
         except Exception as e:

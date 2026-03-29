@@ -455,6 +455,34 @@ sources:
       #     - name: "PCA"
       #       dim_name: "PCA"
 
+  # --- WEBBER LAB ---
+  webber:
+    lab_name: "Webber"
+    label: "iPSC microglia drug screen"
+    contact: ""
+
+    defaults:
+      source_type: "parquet"
+    
+    datasets:
+      iPSC_microglia_drug:
+        study_id: 1
+        display_name: "iPSC microglia drug screen"
+        source_type: "parquet"
+        data_path: "data/Webber/iPSC_microglia_drug/conversions_rds_parquet_3"
+        omic_type: ["bulk"]
+        tables:
+          expression: "expression.parquet"
+          obs_metadata: "obs_metadata.parquet"
+          gene_annotations: "gene_annotations.parquet"
+        feature_cols:
+          - gene_name #feature_id
+        metric_cols:
+          - expression_log2fc
+          - expression_padj
+          - expression_pvalue
+        annotations:
+          - obs
 
 # # Global Config
 # config:

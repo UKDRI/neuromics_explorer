@@ -79,20 +79,21 @@ def build_dataset_stats(registry_db_path: str, force: bool = False):
                 ))
                 continue
 
-            # Skip RDS/Parquet objects
-            if not data_path.endswith(".duckdb"):
-                print(f"   INFO: Skipping non-DuckDB source [{lab_source}] study_id={study_id} ({data_path})")
+            # Skip unsupported source types
+            if source_type not in ["duckdb", "parquet"]:
+                print(f"   INFO: Skipping unsupported source type [{source_type}] for [{lab_source}] study_id={study_id} ({data_path})")
                 continue
-            # TODO for Parquet
-            # if source_type == "parquet":
-            #     print(f"   INFO: Skipping Parquet dataset study_id={study_id}, lab={lab_source} (will convert to Parquet later)")
-                # Optionally log to skipped_datasets table
-                # con.execute("""
-                #     INSERT OR REPLACE INTO registry_load_issues 
-                #     VALUES (?,?,?,?,?)
-                # """, [datetime.now(timezone.utc), lab_source, dataset_name, study_id, "rds_not_indexed"])
-                # continue
-            db_alias = attached_dbs[os.path.realpath(data_path)]
+            if source_type == "parquet":
+                db_alias = None
+            else:
+                db_alias = attached_dbs[os.path.realpath(data_path)]
+                # db_alias = attached_dbs.get(os.path.realpath(data_path))
+                if not db_alias:
+                    issue_rows.append((
+                        datetime.now(timezone.utc), study_id, lab_source,
+                        dataset_name, "Issue giving db attachment an alias — skipped"
+                    ))
+                    continue
 
             # Mappings to extract data from any column that has an adjacent canonical name, from tables
             name_mappings = dict(

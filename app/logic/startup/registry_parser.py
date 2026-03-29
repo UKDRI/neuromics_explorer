@@ -54,11 +54,11 @@ CANONICAL_NAMES = {
 # Map original names to the canonical names. First match is used.
 HEURISTIC_MAPPINGS = {
     # features
-    "gene_symbol":          ["Mouse_Gene", "Gene_Symbol", "gene_symbol", "gene", "symbol", "gene_id", "gene_name"],
-    "human_gene":           ["Human_Gene", "human_gene", "HGNC_Symbol"],
+    "gene_symbol":          ["Mouse_Gene", "Gene_Symbol", "gene_symbol", "gene", "gene_id", "gene_name", "symbol", "Human_Gene"],
+    "human_gene":           ["Human_Gene", "human_gene", "HGNC_Symbol", "hgnc_id"],
     "protein_id":           ["Uniprot_id", "Uniprot_ID", "uniprot", "protein_id"],
     "ensembl_id":           ["Ensembl_id", "ensembl_id", "ENSEMBL"],
-    "entrez_id":            ["Entrez_id", "entrez_id", "ENTREZID"],
+    "entrez_id":            ["Entrez_id", "entrez_id", "ENTREZID"], #TODO add additional_ids: other_ID, gene_id
     "protein_name":         ["Protein_Name", "Protein_Description", "protein_name"],
     "feature_description":  ["Feature_Description", "feature_description", "gene_description", 
                                 "Gene_Description", "protein_description", "Protein_Description"],
@@ -66,9 +66,9 @@ HEURISTIC_MAPPINGS = {
                                 "localisation"],
     "biotype":              ["Biotype", "biotype", "gene_biotype", "Gene_Biotype"],
     # metrics
-    "log2fc":               ["logFC", "logfc", "log2FC", "log2FoldChange", "lfc", "avg_log2FC"],
-    "pvalue":               ["pvalue", "PValue", "p_value", "pval", "p.value"],
-    "padj":                 ["padj", "FDR", "adj.P.Val", "p_adj", "adjusted_pvalue"],
+    "log2fc":               ["logFC", "logfc", "log2FC", "log2FoldChange", "lfc", "avg_log2FC", "expression_log2fc"],
+    "pvalue":               ["pvalue", "PValue", "p_value", "pval", "p.value", "expression_pvalue"],
+    "padj":                 ["padj", "FDR", "adj.P.Val", "p_adj", "adjusted_pvalue", "expression_padj"],
     "abundance_a":          ["abundance_A", "mean_A", "avg_expr_A"],
     "abundance_b":          ["abundance_B", "mean_B", "avg_expr_B"],
     "pct_expressed_a":      ["pct_1", "pct.1", "pct_expressed_A"],
@@ -77,10 +77,10 @@ HEURISTIC_MAPPINGS = {
     "normalisation_method": ["normalisation_method", "normalization_method", "norm_method", 
                                 "normalisation", "normalization", "normalisation_type", "normalization_type"],
     # obs (sample/ cell) metadata
-    "sample_a":             ["Sample_or_condition_A", "sample_A", "Sample_A", "Sample_ID"],
+    "sample_a":             ["Sample_or_condition_A", "sample_A", "Sample_A", "Sample_ID"], #"obs"
     "sample_b":             ["Sample_or_condition_B", "sample_B", "Sample_B"],
     "condition_a":          ["condition_a", "condition_A", "group_A", "treatment", "Condition_A", 
-                                "Sample_or_condition_A", "condition", "Condition"],
+                                "Sample_or_condition_A", "condition", "Condition"], #"obs"
     "condition_b":          ["condition_b", "condition_B", "group_B", "control", "Condition_B",
                                 "Sample_or_condition_B", "condition"],
     "cell_type":            ["cell_type", "Cell_Type", "celltype", "cell_label", "cluster_label", 
@@ -250,7 +250,7 @@ def parse_and_load_registry(yaml_path: str, registry_db_path: str):
                         f"missing study_id"))
                     continue
 
-                data_path = ds.get("db_path")
+                data_path = ds.get("db_path") or ds.get("data_path")
                 source_type = ds.get("source_type")
                 if not data_path and source_type == "rds":
                     data_path = ds.get("rds_path")
@@ -443,9 +443,9 @@ def build_registry_index(registry_db_path: str, force_rebuild: bool = False):
                 ))
                 continue
 
-            # Skip RDS/Parquet objects
-            if not data_path.endswith(".duckdb"):
-                print(f"   INFO: Skipping non-DuckDB source [{lab_source}] study_id={study_id} ({data_path})")
+            # Skip RDS/Parquet objects that are not yet supported
+            if source_type not in ["duckdb", "parquet"]:
+                print(f"   INFO: Skipping unsupported source type [{source_type}] for [{lab_source}] study_id={study_id} ({data_path})")
                 continue
             # TODO for Parquet
             # if source_type == "parquet":
@@ -457,14 +457,17 @@ def build_registry_index(registry_db_path: str, force_rebuild: bool = False):
                 # """, [datetime.now(timezone.utc), lab_source, dataset_name, study_id, "rds_not_indexed"])
                 # continue
 
-            db_alias = attached_dbs[os.path.realpath(data_path)]
-            # db_alias = attached_dbs.get(data_path)
-            if not db_alias:
-                issue_rows.append((
-                    datetime.now(timezone.utc), study_id, lab_source,
-                    dataset_name, "Issue giving db attachment an alias — skipped"
-                ))
-                continue
+            if source_type == "parquet":
+                db_alias = None
+            else:
+                db_alias = attached_dbs[os.path.realpath(data_path)]               
+                # db_alias = attached_dbs.get(os.path.realpath(data_path))
+                if not db_alias:
+                    issue_rows.append((
+                        datetime.now(timezone.utc), study_id, lab_source,
+                        dataset_name, "Issue giving db attachment an alias — skipped"
+                    ))
+                    continue
 
             name_mappings = dict(
                 con.execute("""
@@ -505,7 +508,7 @@ def build_registry_index(registry_db_path: str, force_rebuild: bool = False):
             # Look up alias and create semantic view for each dataset, and insert
             created, view_failures = create_views(
                 con, study_id, lab_source, dataset_name,
-                db_alias, name_mappings, table_map
+                db_alias, name_mappings, table_map, source_type, data_path
             )
             issue_rows.extend(view_failures)
 
