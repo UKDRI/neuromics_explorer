@@ -4,7 +4,7 @@
 # -----------------------------------------------------------------------------
 # This script is the "simple files" path in the ingestion toolbox.
 # It is intended for labs that deliver multiple independent `.rds` files such as
-# `gene_annotations.rds`, `pheno.rds`, `log2fc.rds`, `padj.rds`, etc.
+# `feature_annotations.rds`, `pheno.rds`, `log2fc.rds`, `padj.rds`, etc.
 #
 # Important constraint:
 #   The values are assumed to already be processed by the submitting lab.
@@ -25,7 +25,7 @@
 guess_role <- function(path) {
   name <- tolower(tools::file_path_sans_ext(basename(path)))
 
-  if (grepl("annotation|gene_annot|feature_annot|anot", name)) return("gene_annotations")
+  if (grepl("annotation|gene_annot|feature_annot|anot", name)) return("feature_annotations")
   if (grepl("pheno|metadata|coldata|sample", name)) return("sample_metadata")
   if (grepl("count|expr|assay|abundance", name)) return("counts")
   if (grepl("log2fc|logfc|dea_log2fc|de_log2fc", name)) return("expression_log2fc")
@@ -40,7 +40,7 @@ guess_role <- function(path) {
 #' @return A single character logical table name.
 role_to_logical_table <- function(role) {
   mapping <- c(
-    gene_annotations = "gene_annotations",
+    feature_annotations = "feature_annotations",
     sample_metadata = "obs_metadata",
     counts = "counts",
     expression_log2fc = "expression",
@@ -229,7 +229,7 @@ create_dense_matrix <- function(x, value_name = "value") {
 
 # Sparse matrices are stored in coordinate form so large assays remain practical, size-wise
 # long columnar-format; i: row index (= features), j: column pointer (= samples, cells, contrasts), x: value (= count)
-create_sparse_matrix <- function(x, col_pointer_name = "obs", value_name = "counts") {
+create_sparse_matrix <- function(x, col_id = "obs", value_name = "counts") {
   if (!requireNamespace("Matrix", quietly = TRUE)) {
     stop("Package 'Matrix' is required to convert sparse matrix RDS objects.")
   }
@@ -244,7 +244,7 @@ create_sparse_matrix <- function(x, col_pointer_name = "obs", value_name = "coun
 
   df <- data.frame(
     feature_id = feature_ids[triplets$i],
-    col_pointer_name = obs[triplets$j],
+    col_id = obs[triplets$j],
     value_name = triplets$x,
     stringsAsFactors = FALSE
   )
@@ -402,7 +402,7 @@ convert_one_rds <- function(path_to_file, output_dir, role,
   if (is.data.frame(obj)) {
     id_name <- switch(role,
       counts = "feature_id",
-      gene_annotations = "feature_id",
+      feature_annotations = "feature_id",
       sample_metadata = "obs",
       NULL
     )

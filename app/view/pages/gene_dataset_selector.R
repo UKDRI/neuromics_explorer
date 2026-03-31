@@ -11,7 +11,7 @@
 # ─────────────────────────────────────────────────────────────────────────────────────────────
 
 box::use(
-  app/logic/api/api_client[fetch_datasets_for_terms, fetch_gene_index_genes,
+  app/logic/api/api_client[fetch_all_datasets, fetch_datasets_for_terms, fetch_gene_index_genes,
                            fetch_metadata_filter_options, fetch_protein_index_ids],
   dplyr[arrange, bind_rows, group_by, select, summarise],
   DT[ datatable, DTOutput, renderDT],
@@ -172,6 +172,15 @@ gene_selector_server <- function(id, selected_dataset) {
           )
         )
       )
+      registered_datasets <- tryCatch(
+        fetch_all_datasets(),
+        error = function(e) data.frame()
+      )
+      lab_choices <- c("All", sort(unique(registered_datasets$lab_source)))
+      lab_choices <- lab_choices[!is.na(lab_choices) & nzchar(lab_choices)]
+      # if (length(lab_choices) == 0) lab_choices <- c("All", "diaz", "hong", "williams")
+      updateSelectInput(session, "lab_filter", choices = lab_choices, selected = "All")
+
       # Load the first alphabetical slice of available genes/proteins so the
       # selectize dropdown shows starter suggestions before typing.
       genes_sql <- tryCatch(

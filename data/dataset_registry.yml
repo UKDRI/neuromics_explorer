@@ -234,226 +234,168 @@ sources:
   # --- WILLIAMS LAB ---
   williams:  
     lab_name: "Williams"
-    label: "03_HCA_astrocytes_Seeker2023"
+    label: "HCA_Seeker2023"
     contact: ""
 
-    # Source-level defaults (can be overridden per dataset)
     defaults:
-      source_type: "rds"
-      rds_path: "data/Williams/snrna/03_Seeker_sce_objects/*.RDS"
-    
-    # Datasets within this source - rds/sce object
+      source_type: "parquet"
+
     datasets:
-      # 01_HCA_all_celltypes_Seeker2023:
-      #   study_name: "01_HCA_all_celltypes_Seeker2023"
-      #   study_id: 1
-      #   display_name: "HCA all cell types"
-      #   source_type: "rds"    #overrides source-level defaults
-      #   rds_path: "data/Williams/snrna/03_Seeker_sce_objects/01_HCA_all_celltypes_sce.RDS"
-      #   omic_type: ["snrna"]
-      #   tables:
-      #     expression: "assay(sce, 'logcounts')"
-      #     counts: "assay(sce, 'counts')"
-      #     metadata: "colData(sce)"
-      #     features_metadata: "rowData(sce)"
-      #   feature_cols:
-      #     - feature_name
-      #     - feature_type
-      #   metric_cols:   # - cell_type
-      #   annotations:   # `- cell_type` OR `cell_label: "cell_type"`
-      #     - Tissue
-      #     - cluster_id
-      #     - seurat_clusters
-      #     - gender
-      #     - Age
-      #     # - high_n_features
-      #     # - percent.mt
-      #     # - nCount_RNA
-      #     # - nFeature_RNA
-      #     # - RIN
-      #     # - ageSex
-      #     # - AgeGroup
-      #   reductions:
-      #     - name: "UMAP"
-      #       dim_name: "UMAP"
-      #     - name: "tSNE"
-      #       dim_name: "tSNE"
-      #     - name: "PCA"
-      #       dim_name: "PCA"
-      # 02_HCA_oligodendroglia_Seeker2023:
-      #   study_name: "02_HCA_oligodendroglia_Seeker2023"
-      #   study_id: 2
-      #   display_name: "HCA oligodendroglia"
-      #   source_type: "rds"
-      #   rds_path: "data/Williams/snrna/03_Seeker_sce_objects/02_HCA_oligodendroglia_sce.RDS"
-      #   omic_type: ["snrna"]
-      #   tables:
-      #     expression: "assay(sce, 'logcounts')"
-      #     counts: "assay(sce, 'counts')"
-      #     metadata: "colData(sce)"
-      #     features_metadata: "rowData(sce)"
-      #   feature_cols:
-      #     - feature_name
-      #     - feature_type
-      #   metric_cols:
-      #   annotations:
-      #     - Tissue
-      #     - cluster_id
-      #     - seurat_clusters
-      #     - gender
-      #     - Age
-      #   reductions:
-      #     - name: "UMAP"
-      #       dim_name: "UMAP"
-      #     - name: "tSNE"
-      #       dim_name: "tSNE"
-      #     - name: "PCA"
-      #       dim_name: "PCA"
+      01_HCA_all_celltypes_Seeker2023:
+        study_name: "01_HCA_all_celltypes_Seeker2023"
+        study_id: 1
+        display_name: "HCA all cell types"
+        source_type: "parquet"
+        data_path: "data/Williams/snrna/conversions/01_HCA_all_celltypes"
+        omic_type: ["snrna"]
+        tables:
+          counts: "counts.parquet"  #"logcounts.parquet"
+          obs_metadata: "obs_metadata.parquet"
+          feature_annotations: "feature_annotations.parquet"
+        feature_cols:
+          - feature_id
+          - obs #cell_id
+        metric_cols:
+          - value_name
+        annotations:
+          - Tissue
+          - seurat_clusters
+          - gender
+          - Age
+          - scDblFinder_score
+          - total_percent_mito
+
+      02_HCA_oligodendroglia_Seeker2023:
+        study_name: "02_HCA_oligodendroglia_Seeker2023"
+        study_id: 2
+        display_name: "HCA oligodendroglia"
+        source_type: "parquet"
+        data_path: "data/Williams/snrna/conversions/02_HCA_oligodendroglia"
+        omic_type: ["snrna"]
+        tables:
+          counts: "counts.parquet"
+          obs_metadata: "obs_metadata.parquet"
+          feature_annotations: "feature_annotations.parquet"
+        feature_cols:
+          - feature_id
+          - obs #cell_id
+        metric_cols:
+          - value_name
+        annotations:
+          - Tissue
+          - seurat_clusters
+          - gender
+          - Age
       03_HCA_astrocytes_Seeker2023:
         study_name: "03_HCA_astrocytes_Seeker2023"
         study_id: 3
         display_name: "HCA astrocytes"
-        source_type: "rds"
-        rds_path: "data/Williams/snrna/03_Seeker_sce_objects/03_HCA_astrocytes_sce.RDS"
+        source_type: "parquet"
+        data_path: "data/Williams/snrna/conversions/03_HCA_astrocytes"
         omic_type: ["snrna"]
         tables:
-          expression: "assay(sce, 'logcounts')"
-          counts: "assay(sce, 'counts')"
-          metadata: "colData(sce)"
-          features_metadata: "rowData(sce)"
+          counts: "counts.parquet"
+          obs_metadata: "obs_metadata.parquet"
+          feature_annotations: "feature_annotations.parquet"
         feature_cols:
-          - feature_name
-          - feature_type
+          - feature_id
+          - obs #cell_id
         metric_cols:
+          - value_name
         annotations:
           - Tissue
           - cluster_id
           - seurat_clusters
           - gender
           - Age
-        reductions:
-          - name: "UMAP"
-            dim_name: "UMAP"
-          - name: "tSNE"
-            dim_name: "tSNE"
-          - name: "PCA"
-            dim_name: "PCA"
-      # 04_HCA_microglia_Seeker2023:
-      #   study_name: "04_HCA_microglia_Seeker2023"
-      #   study_id: 4
-      #   display_name: "HCA microglia"
-      #   source_type: "rds"
-      #   rds_path: "data/Williams/snrna/03_Seeker_sce_objects/04_HCA_microglia_sce.RDS"
-      #   omic_type: ["snrna"]
-      #   tables:
-      #     expression: "assay(sce, 'logcounts')"
-      #     counts: "assay(sce, 'counts')"
-      #     metadata: "colData(sce)"
-      #     features_metadata: "rowData(sce)"
-      #   feature_cols:
-      #     - feature_name
-      #     - feature_type
-      #   metric_cols:
-      #   annotations:
-      #     - Tissue
-      #     - cluster_id
-      #     - seurat_clusters
-      #     - gender
-      #     - Age
-      #   reductions:
-      #     - name: "UMAP"
-      #       dim_name: "UMAP"
-      #     - name: "tSNE"
-      #       dim_name: "tSNE"
-      #     - name: "PCA"
-      #       dim_name: "PCA"
-      # 05_HCA_vascular_cells_Seeker2023:
-      #   study_name: "05_HCA_vascular_cells_Seeker2023"
-      #   study_id: 5
-      #   display_name: "HCA vascular"
-      #   source_type: "rds"
-      #   rds_path: "data/Williams/snrna/03_Seeker_sce_objects/05_HCA_vascular_cells_sce.RDS"
-      #   omic_type: ["snrna"]
-      #   tables:
-      #     expression: "assay(sce, 'logcounts')"
-      #     counts: "assay(sce, 'counts')"
-      #     metadata: "colData(sce)"
-      #     features_metadata: "rowData(sce)"
-      #   feature_cols:
-      #     - feature_name
-      #     - feature_type
-      #   metric_cols:
-      #   annotations:
-      #     - Tissue
-      #     - cluster_id
-      #     - seurat_clusters
-      #     - gender
-      #     - Age
-      #   reductions:
-      #     - name: "UMAP"
-      #       dim_name: "UMAP"
-      #     - name: "tSNE"
-      #       dim_name: "tSNE"
-      #     - name: "PCA"
-      #       dim_name: "PCA"
-      # 06_HCA_neurons_Seeker2023:
-      #   study_name: "06_HCA_neurons_Seeker2023"
-      #   study_id: 6
-      #   display_name: "HCA neurons"
-      #   source_type: "rds"
-      #   rds_path: "data/Williams/snrna/03_Seeker_sce_objects/06_HCA_neurons_sce.RDS"
-      #   omic_type: ["snrna"]
-      #   tables:
-      #     expression: "assay(sce, 'logcounts')"
-      #     counts: "assay(sce, 'counts')"
-      #     metadata: "colData(sce)"
-      #     features_metadata: "rowData(sce)"
-      #   feature_cols:
-      #     - feature_name
-      #     - feature_type
-      #   metric_cols:
-      #   annotations:
-      #     - Tissue
-      #     - cluster_id
-      #     - seurat_clusters
-      #     - gender
-      #     - Age
-      #   reductions:
-      #     - name: "UMAP"
-      #       dim_name: "UMAP"
-      #     - name: "tSNE"
-      #       dim_name: "tSNE"
-      #     - name: "PCA"
-      #       dim_name: "PCA"
-      # 07_HCA_oligos_opcs_LS_Seeker2023:
-      #   study_name: "HCA_oligos_opcs_LS_Seeker2023"
-      #   study_id: 7
-      #   display_name: "HCA oligos opcs LS"
-      #   source_type: "rds"
-      #   rds_path: "data/Williams/snrna/03_Seeker_sce_objects/07_HCA_oligos_opcs_LS_sce.RDS"
-      #   omic_type: ["snrna"]  #???
-      #   tables:
-      #     expression: "assay(sce, 'logcounts')"
-      #     counts: "assay(sce, 'counts')"
-      #     metadata: "colData(sce)"
-      #     features_metadata: "rowData(sce)"
-      #   feature_cols:
-      #     - feature_name
-      #     - feature_type
-      #   metric_cols:
-      #   annotations:
-      #     - Tissue
-      #     - cluster_id
-      #     - seurat_clusters
-      #     - gender
-      #     - Age
-      #   reductions:
-      #     - name: "UMAP"
-      #       dim_name: "UMAP"
-      #     - name: "tSNE"
-      #       dim_name: "tSNE"
-      #     - name: "PCA"
-      #       dim_name: "PCA"
+      04_HCA_microglia_Seeker2023:
+        study_name: "04_HCA_microglia_Seeker2023"
+        study_id: 4
+        display_name: "HCA microglia"
+        source_type: "parquet"
+        data_path: "data/Williams/snrna/conversions/04_HCA_microglia"
+        omic_type: ["snrna"]
+        tables:
+          counts: "counts.parquet"
+          obs_metadata: "obs_metadata.parquet"
+          feature_annotations: "feature_annotations.parquet"
+        feature_cols:
+          - feature_name
+          - feature_type
+        metric_cols:
+          - value_name
+        annotations:
+          - seurat_clusters
+          - microglia_clu
+          - Tissue
+          - gender
+          - Age
+      05_HCA_vascular_cells_Seeker2023:
+        study_name: "05_HCA_vascular_cells_Seeker2023"
+        study_id: 5
+        display_name: "HCA vascular"
+        source_type: "parquet"
+        data_path: "data/Williams/snrna/conversions/05_HCA_vascular_cells"
+        omic_type: ["snrna"]
+        tables:
+          counts: "counts.parquet"
+          obs_metadata: "obs_metadata.parquet"
+          feature_annotations: "feature_annotations.parquet"
+        feature_cols:
+          - feature_id
+          - obs #cell_id
+        metric_cols:
+          - value_name
+        annotations:
+          - seurat_clusters
+          - vascular_cells_clu
+          - Tissue
+          - gender
+          - Age
+      06_HCA_neurons_Seeker2023:
+        study_name: "06_HCA_neurons_Seeker2023"
+        study_id: 6
+        display_name: "HCA neurons"
+        source_type: "parquet"
+        data_path: "data/Williams/snrna/conversions/06_HCA_neurons"
+        omic_type: ["snrna"]
+        tables:
+          counts: "counts.parquet"
+          obs_metadata: "obs_metadata.parquet"
+          feature_annotations: "feature_annotations.parquet"
+        feature_cols:
+          - feature_id
+          - obs #cell_id
+        metric_cols:
+          - value_name
+        annotations:
+          - seurat_clusters
+          - neurons_clu
+          - Tissue
+          - gender
+          - Age
+      07_HCA_oligos_opcs_LS_Seeker2023:
+        study_name: "07_HCA_oligos_opcs_LS_Seeker2023"
+        study_id: 7
+        display_name: "HCA oligos opcs LS"
+        source_type: "parquet"
+        data_path: "data/Williams/snrna/conversions/07_HCA_oligos_opcs_LS"
+        omic_type: ["snrna"]
+        tables:
+          counts: "counts.parquet"
+          obs_metadata: "obs_metadata.parquet"
+          feature_annotations: "feature_annotations.parquet"
+        feature_cols:
+          - feature_id
+          - obs #cell_id
+        metric_cols:
+          - value_name
+        annotations:
+          - seurat_clusters
+          - ol_clusters_named
+          - Tissue
+          - gender
+          - Age
 
   # --- WEBBER LAB ---
   webber:
@@ -469,14 +411,16 @@ sources:
         study_id: 1
         display_name: "iPSC microglia drug screen"
         source_type: "parquet"
-        data_path: "data/Webber/iPSC_microglia_drug/conversions_rds_parquet_3"
+        data_path: "data/Webber/iPSC_microglia_drug/conversions"
         omic_type: ["bulk"]
         tables:
+          counts: "counts.parquet"
           expression: "expression.parquet"
           obs_metadata: "obs_metadata.parquet"
-          gene_annotations: "gene_annotations.parquet"
+          feature_annotations.: "feature_annotations.parquet"
         feature_cols:
-          - gene_name #feature_id
+          - gene_name
+          - obs #ENSG ids
         metric_cols:
           - expression_log2fc
           - expression_padj

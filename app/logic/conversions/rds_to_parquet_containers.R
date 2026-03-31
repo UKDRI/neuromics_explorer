@@ -59,15 +59,18 @@ path_to_actual_table <- function(path, root) {
 #' @param output_path Path to the converted parquet output.
 #' @param output_dir Dataset-level output directory used to derive `actual_table`.
 #' @param logical_table Optional override for the logical table label.
+#' @param exp_name Optional experiment name recorded from a `SingleCellExperiment`.
 #'
 #' @return A one-row data frame describing the converted component.
 build_manifest_row <- function(component, component_class, output_path, output_dir,
-                               logical_table = component_to_logical_table(component)) {
+                               logical_table = component_to_logical_table(component),
+                               exp_name = NA_character_) {
   data.frame(
     component = component,
     logical_table = logical_table,
     actual_table = path_to_actual_table(output_path, output_dir),
     class = component_class,
+    exp_name = exp_name,
     output_path = output_path,
     source_type = "parquet",
     stringsAsFactors = FALSE
@@ -76,22 +79,47 @@ build_manifest_row <- function(component, component_class, output_path, output_d
 
 # Small helper so parquet tables always carry an explicit identifier column when
 # row names exist in the source object.
-#' Add an identifier column to a data frame while preserving values.
+#' Prepend an identifier column to a data frame while preserving values.
 #'
 #' @param df Data frame to augment.
 #' @param ids Optional vector of identifiers.
 #' @param id_name Name of the identifier column to create.
 #'
 #' @return A data frame with the identifier column prepended.
-add_row_id <- function(df, ids, id_name) {
+prepend_rownames_column <- function(df, ids, id_name) {
   if (is.null(ids)) ids <- as.character(seq_len(nrow(df)))
   cbind(stats::setNames(data.frame(ids, stringsAsFactors = FALSE), id_name), df)
+}
+
+#' Rename or move a parquet output into its final canonical filename.
+#'
+#' @param from Existing parquet path.
+#' @param to Final parquet path.
+#'
+#' @return Final parquet path.
+move_parquet_output <- function(from, to) {
+  if (normalizePath(from, winslash = "/", mustWork = FALSE) ==
+      normalizePath(to, winslash = "/", mustWork = FALSE)) {
+    return(to)
+  }
+
+  if (file.exists(to)) unlink(to)
+  moved <- suppressWarnings(file.rename(from, to))
+  if (!isTRUE(moved)) {
+    copied <- file.copy(from, to, overwrite = TRUE)
+    if (!isTRUE(copied)) {
+      stop("Failed to move parquet output from ", from, " to ", to)
+    }
+    unlink(from)
+  }
+
+  to
 }
 
 # Write a plain data.frame to parquet without changing the submitted values.
 #' Write a data frame to Parquet.
 #'
-#' @param df Data frame to serialize.
+#' @param df Data frame to serialise.
 #' @param path Output Parquet path.
 #' @param compression Parquet compression codec passed to Arrow.
 #'
@@ -109,7 +137,7 @@ write_df_parquet <- function(df, path, compression = "snappy") {
 # to reason about while still making it queryable.
 #' Write a dense matrix assay to Parquet.
 #'
-#' @param x Matrix-like object to serialize.
+#' @param x Matrix-like object to serialise.
 #' @param path Output Parquet path.
 #' @param row_id_name Name of the row identifier column.
 #' @param compression Parquet compression codec passed to Arrow.
@@ -117,15 +145,14 @@ write_df_parquet <- function(df, path, compression = "snappy") {
 #' @return The output path.
 write_dense_matrix_parquet <- function(x, path, row_id_name = "feature_id", compression = "snappy") {
   df <- as.data.frame(x, stringsAsFactors = FALSE)
-  df <- add_row_id(df, rownames(x), row_id_name)
+  df <- prepend_rownames_column(df, rownames(x), row_id_name)
   write_df_parquet(df, path, compression = compression)
 }
 
-# Sparse assays are better represented in coordinate form to avoid exploding
-# memory and parquet size. The values themselves are preserved exactly as stored.
-#' Write a sparse matrix assay to Parquet in triplet form.
+
+#' Write a sparse matrix assay to Parquet in triplet form to reduce memory and parquet size.
 #'
-#' @param x Sparse matrix-like object to serialize.
+#' @param x Sparse matrix-like object to serialise.
 #' @param path Output Parquet path.
 #' @param row_id_name Name of the row identifier column.
 #' @param col_id_name Name of the column identifier column.
@@ -133,19 +160,19 @@ write_dense_matrix_parquet <- function(x, path, row_id_name = "feature_id", comp
 #'
 #' @return The output path.
 write_sparse_matrix_parquet <- function(x, path, row_id_name = "feature_id",
-                                        col_id_name = "sample_id", compression = "snappy") {
+                                        col_id_name = "obs", compression = "snappy") {
   if (!requireNamespace("Matrix", quietly = TRUE)) {
-    stop("Package 'Matrix' is required to serialize sparse assay matrices.")
+    stop("Package 'Matrix' is required to serialise sparse assay matrices.")
   }
 
   triplets <- Matrix::summary(x)  #Matrix::summary(as(assay(x, "counts"), "dgCMatrix"))  - sce obj  # or TsparseMatrix
   row_ids <- rownames(x) %||% as.character(seq_len(nrow(x)))  #feature_ids
-  col_ids <- colnames(x) %||% as.character(seq_len(ncol(x)))  #samples, cells or contrasts
+  obs_ids <- colnames(x) %||% as.character(seq_len(ncol(x)))  #samples, cells or contrasts
 
   df <- data.frame(
     feature_id = row_ids[triplets$i],
-    sample_id = col_ids[triplets$j],
-    value = triplets$x,
+    obs = obs_ids[triplets$j],
+    value_name = triplets$x,
     stringsAsFactors = FALSE
   )
   names(df)[1] <- row_id_name
@@ -153,12 +180,12 @@ write_sparse_matrix_parquet <- function(x, path, row_id_name = "feature_id",
   write_df_parquet(df, path, compression = compression)
 }
 
-# Generic assay serializer used by SummarizedExperiment-like containers.
+# Generic assay serialiser used by SummarizedExperiment-like containers.
 # Assay names are preserved in output filenames, while storage strategy depends
 # on the in-memory representation of that assay.
 #' Write one assay component from a container object to Parquet.
 #'
-#' @param x Assay object to serialize.
+#' @param x Assay object to serialise.
 #' @param output_dir Directory for assay outputs.
 #' @param assay_name Assay name used in the output filename.
 #' @param compression Parquet compression codec passed to Arrow.
@@ -188,13 +215,13 @@ write_assay_component <- function(x, output_dir, assay_name, compression = "snap
 # more useful than a plain rowData frame downstream.
 #' Write row-level annotations from a container object to Parquet.
 #'
-#' @param x Row metadata or genomic range object to serialize.
+#' @param x Row metadata or genomic range object to serialise.
 #' @param output_dir Directory for dataset outputs.
 #' @param compression Parquet compression codec passed to Arrow.
 #'
 #' @return The output path.
 write_row_component <- function(x, output_dir, compression = "snappy") {
-  out <- file.path(output_dir, "row_data.parquet")
+  out <- file.path(output_dir, "feature_annotations.parquet")
 
   if (methods::is(x, "GenomicRanges")) {
     df <- as.data.frame(x)
@@ -202,12 +229,12 @@ write_row_component <- function(x, output_dir, compression = "snappy") {
   }
 
   if (is.data.frame(x) || methods::is(x, "SingleCellExperiment")) {
-    df <- add_row_id(x, rownames(x), "feature_id")
+    df <- prepend_rownames_column(rowData(x), rownames(x), "feature_id")
     return(write_df_parquet(df, out, compression = compression))
   }
 
   df <- as.data.frame(x)
-  df <- add_row_id(df, rownames(df), "feature_id")
+  df <- prepend_rownames_column(df, rownames(df), "feature_id")
   write_df_parquet(df, out, compression = compression)
 }
 
@@ -215,15 +242,15 @@ write_row_component <- function(x, output_dir, compression = "snappy") {
 # metadata for filters such as condition, sample, tissue, or cell type.
 #' Write column-level annotations from a container object to Parquet.
 #'
-#' @param x Column metadata object to serialize.
+#' @param x Column metadata object to serialise.
 #' @param output_dir Directory for dataset outputs.
 #' @param compression Parquet compression codec passed to Arrow.
 #'
 #' @return The output path.
 write_col_component <- function(x, output_dir, compression = "snappy") {
-  out <- file.path(output_dir, "col_data.parquet")
+  out <- file.path(output_dir, "obs_metadata.parquet")
   df <- as.data.frame(x)
-  df <- add_row_id(df, rownames(df), "sample_id")
+  df <- prepend_rownames_column(df, rownames(df), "obs")
   write_df_parquet(df, out, compression = compression)
 }
 
@@ -245,14 +272,42 @@ write_reduced_dims <- function(x, output_dir, compression = "snappy") {
   reduced_names <- SingleCellExperiment::reducedDimNames(x)
   if (length(reduced_names) == 0) return(character(0))
 
-  out_dir <- file.path(output_dir, "reduced_dims")
+  out_dir <- file.path(output_dir)  #, "reduced_dims"
   dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
   vapply(reduced_names, function(name) {
     mat <- SingleCellExperiment::reducedDim(x, name)
     out <- file.path(out_dir, paste0(name, ".parquet"))
-    write_dense_matrix_parquet(mat, out, row_id_name = "sample_id", compression = compression)
+    write_dense_matrix_parquet(mat, out, row_id_name = "obs", compression = compression)
   }, character(1))
+}
+
+#' Canonicalise unique logical-table filenames after conversion.
+#'
+#' When exactly one output represents a logical table, rename it to
+#' `<logical_table>.parquet` so container and independent workflows are easier
+#' to reason about together. Ambiguous groups, such as both `counts` and
+#' `logcounts`, are left in place.
+#'
+#' @param manifest Conversion manifest built during this run.
+#' @param output_dir Dataset output directory.
+#'
+#' @return Updated manifest with any moved paths recorded.
+finalise_container_manifest <- function(manifest, output_dir) {
+  if (nrow(manifest) == 0) return(manifest)
+
+  canonical_tables <- c("counts", "expression", "feature_annotations", "obs_metadata")
+
+  for (logical_table in canonical_tables) {
+    idx <- which(manifest$logical_table == logical_table)
+    if (length(idx) != 1) next
+
+    target_path <- file.path(output_dir, paste0(logical_table, ".parquet"))
+    manifest$output_path[idx] <- move_parquet_output(manifest$output_path[idx], target_path)
+    manifest$actual_table[idx] <- path_to_actual_table(target_path, output_dir)
+  }
+
+  manifest
 }
 
 # This is the main class-driven dispatch. It is intentionally explicit so the
@@ -269,13 +324,18 @@ convert_container_rds <- function(input_rds, output_dir, compression = "snappy")
   dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
 
   manifest <- list()
+  exp_name <- if (inherits(obj, "SingleCellExperiment")) {
+    tryCatch(SingleCellExperiment::mainExpName(obj), error = function(e) NA_character_)
+  } else {
+    NA_character_
+  }
 
   if (inherits(obj, "SingleCellExperiment") || inherits(obj, "SummarizedExperiment")) {
     if (!requireNamespace("SummarizedExperiment", quietly = TRUE)) {
       stop("Package 'SummarizedExperiment' is required for SE/SCE conversion.")
     }
 
-    assays_dir <- file.path(output_dir, "assays")
+    assays_dir <- file.path(output_dir) #, "assays"
     assay_names <- SummarizedExperiment::assayNames(obj)
     if (length(assay_names) == 0) assay_names <- "assay"
 
@@ -311,19 +371,21 @@ convert_container_rds <- function(input_rds, output_dir, compression = "snappy")
           component = paste0("assay:", assay_names[[i]]),
           component_class = class(SummarizedExperiment::assay(obj, assay_names[[i]]))[1],
           output_path = assay_outputs[[i]],
-          output_dir = output_dir
+          output_dir = output_dir,
+          exp_name = exp_name
         )
       }),
       list(
-        build_manifest_row("row_data", "row_component", row_out, output_dir),
-        build_manifest_row("col_data", "col_component", col_out, output_dir)
+        build_manifest_row("row_data", "row_component", row_out, output_dir, exp_name = exp_name),
+        build_manifest_row("col_data", "col_component", col_out, output_dir, exp_name = exp_name)
       ),
       lapply(seq_along(reduced_out), function(i) {
         build_manifest_row(
           component = paste0("reduced_dim:", reduced_names[[i]]),
           component_class = "reduced_dim",
           output_path = reduced_out[[i]],
-          output_dir = output_dir
+          output_dir = output_dir,
+          exp_name = exp_name
         )
       })
     ))
@@ -350,7 +412,8 @@ convert_container_rds <- function(input_rds, output_dir, compression = "snappy")
         component = name,
         component_class = paste(class(value), collapse = ", "),
         output_path = target,
-        output_dir = output_dir
+        output_dir = output_dir,
+        exp_name = exp_name
       )
     })
 
@@ -362,7 +425,8 @@ convert_container_rds <- function(input_rds, output_dir, compression = "snappy")
       component_class = paste(class(obj), collapse = ", "),
       output_path = table_out,
       output_dir = output_dir,
-      logical_table = "expression"
+      logical_table = "expression",
+      exp_name = exp_name
     )
   } else if (inherits(obj, "Matrix")) {
     matrix_out <- write_sparse_matrix_parquet(obj, file.path(output_dir, "matrix.parquet"), compression = compression)
@@ -371,7 +435,8 @@ convert_container_rds <- function(input_rds, output_dir, compression = "snappy")
       component_class = paste(class(obj), collapse = ", "),
       output_path = matrix_out,
       output_dir = output_dir,
-      logical_table = "counts"
+      logical_table = "counts",
+      exp_name = exp_name
     )
   } else if (is.matrix(obj)) {
     matrix_out <- write_dense_matrix_parquet(obj, file.path(output_dir, "matrix.parquet"), compression = compression)
@@ -380,12 +445,14 @@ convert_container_rds <- function(input_rds, output_dir, compression = "snappy")
       component_class = paste(class(obj), collapse = ", "),
       output_path = matrix_out,
       output_dir = output_dir,
-      logical_table = "counts"
+      logical_table = "counts",
+      exp_name = exp_name
     )
   } else {
     stop("Unsupported top-level RDS object class: ", paste(class(obj), collapse = ", "))
   }
 
+  manifest <- finalise_container_manifest(manifest, output_dir)
   utils::write.csv(manifest, file.path(output_dir, "conversion_manifest.csv"), row.names = FALSE)
   manifest
 }
