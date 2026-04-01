@@ -131,12 +131,9 @@ def _dataset_unions(
             FROM {view}
             WHERE 1 = 1
               {term_clause}
-              AND (padj IS NULL OR padj < ?)
-              AND (log2fc IS NULL OR ABS(log2fc) >= ?)
               {cell_type_clause}
         """)
 
-        params.extend([padj, lfc])
         if cell_type:
             params.append(cell_type)
 
@@ -379,8 +376,6 @@ def expression(
     proteins = _clean_optional_terms(protein)
     predicates, params = _term_predicates(genes, proteins)
 
-    params.extend([padj, lfc])
-
     cell_type_clause = ""
     term_clause = ""
     if predicates:
@@ -401,8 +396,6 @@ def expression(
         FROM {view}
         WHERE 1 = 1
           {term_clause}
-          AND (padj IS NULL OR padj < ?)
-          AND (log2fc IS NULL OR ABS(log2fc) >= ?)
           {cell_type_clause}
         ORDER BY gene_symbol, padj ASC NULLS LAST, ABS(log2fc) DESC NULLS LAST
     """

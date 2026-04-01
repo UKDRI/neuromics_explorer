@@ -249,15 +249,16 @@ sources:
         data_path: "data/Williams/snrna/conversions/01_HCA_all_celltypes"
         omic_type: ["snrna"]
         tables:
-          counts: "counts.parquet"  #"logcounts.parquet"
+          expression: "logcounts.parquet"   # this file is used to heuristically map genes/features for indexing in registry
+          counts: "counts.parquet"
           obs_metadata: "obs_metadata.parquet"
           feature_annotations: "feature_annotations.parquet"
         feature_cols:
           - feature_id
-          - obs #cell_id
         metric_cols:
-          - value_name
+          - counts
         annotations:
+          - obs
           - Tissue
           - seurat_clusters
           - gender
@@ -273,15 +274,16 @@ sources:
         data_path: "data/Williams/snrna/conversions/02_HCA_oligodendroglia"
         omic_type: ["snrna"]
         tables:
+          expression: "logcounts.parquet"
           counts: "counts.parquet"
           obs_metadata: "obs_metadata.parquet"
           feature_annotations: "feature_annotations.parquet"
         feature_cols:
           - feature_id
-          - obs #cell_id
         metric_cols:
-          - value_name
+          - counts
         annotations:
+          - obs
           - Tissue
           - seurat_clusters
           - gender
@@ -294,15 +296,16 @@ sources:
         data_path: "data/Williams/snrna/conversions/03_HCA_astrocytes"
         omic_type: ["snrna"]
         tables:
+          expression: "logcounts.parquet"
           counts: "counts.parquet"
           obs_metadata: "obs_metadata.parquet"
           feature_annotations: "feature_annotations.parquet"
         feature_cols:
           - feature_id
-          - obs #cell_id
         metric_cols:
-          - value_name
+          - counts
         annotations:
+          - obs
           - Tissue
           - cluster_id
           - seurat_clusters
@@ -316,15 +319,16 @@ sources:
         data_path: "data/Williams/snrna/conversions/04_HCA_microglia"
         omic_type: ["snrna"]
         tables:
+          expression: "logcounts.parquet"
           counts: "counts.parquet"
           obs_metadata: "obs_metadata.parquet"
           feature_annotations: "feature_annotations.parquet"
         feature_cols:
-          - feature_name
-          - feature_type
+          - feature_id
         metric_cols:
-          - value_name
+          - counts
         annotations:
+          - obs
           - seurat_clusters
           - microglia_clu
           - Tissue
@@ -338,15 +342,16 @@ sources:
         data_path: "data/Williams/snrna/conversions/05_HCA_vascular_cells"
         omic_type: ["snrna"]
         tables:
+          expression: "logcounts.parquet"
           counts: "counts.parquet"
           obs_metadata: "obs_metadata.parquet"
           feature_annotations: "feature_annotations.parquet"
         feature_cols:
           - feature_id
-          - obs #cell_id
         metric_cols:
-          - value_name
+          - counts
         annotations:
+          - obs
           - seurat_clusters
           - vascular_cells_clu
           - Tissue
@@ -360,15 +365,16 @@ sources:
         data_path: "data/Williams/snrna/conversions/06_HCA_neurons"
         omic_type: ["snrna"]
         tables:
+          expression: "logcounts.parquet"
           counts: "counts.parquet"
           obs_metadata: "obs_metadata.parquet"
           feature_annotations: "feature_annotations.parquet"
         feature_cols:
           - feature_id
-          - obs #cell_id
         metric_cols:
-          - value_name
+          - counts
         annotations:
+          - obs
           - seurat_clusters
           - neurons_clu
           - Tissue
@@ -382,15 +388,16 @@ sources:
         data_path: "data/Williams/snrna/conversions/07_HCA_oligos_opcs_LS"
         omic_type: ["snrna"]
         tables:
+          expression: "logcounts.parquet"
           counts: "counts.parquet"
           obs_metadata: "obs_metadata.parquet"
           feature_annotations: "feature_annotations.parquet"
         feature_cols:
           - feature_id
-          - obs #cell_id
         metric_cols:
-          - value_name
+          - counts
         annotations:
+          - obs
           - seurat_clusters
           - ol_clusters_named
           - Tissue
@@ -417,10 +424,11 @@ sources:
           counts: "counts.parquet"
           expression: "expression.parquet"
           obs_metadata: "obs_metadata.parquet"
-          feature_annotations.: "feature_annotations.parquet"
+          feature_annotations: "feature_annotations.parquet"
         feature_cols:
           - gene_name
-          - obs #ENSG ids
+          - ID  #ENSG ids
+          - obs #TODO: rerun conversion script and rename/remove if not present in expression.parquet
         metric_cols:
           - expression_log2fc
           - expression_padj

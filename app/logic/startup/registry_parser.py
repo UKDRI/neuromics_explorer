@@ -54,7 +54,7 @@ CANONICAL_NAMES = {
 # Map original names to the canonical names. First match is used.
 HEURISTIC_MAPPINGS = {
     # features
-    "gene_symbol":          ["Mouse_Gene", "Gene_Symbol", "gene_symbol", "gene", "gene_id", "gene_name", "symbol", "Human_Gene"],
+    "gene_symbol":          ["Mouse_Gene", "Gene_Symbol", "gene_symbol", "gene", "gene_id", "gene_name", "symbol", "Human_Gene", "feature_id", "feature_name"],
     "human_gene":           ["Human_Gene", "human_gene", "HGNC_Symbol", "hgnc_id"],
     "protein_id":           ["Uniprot_id", "Uniprot_ID", "uniprot", "protein_id"],
     "ensembl_id":           ["Ensembl_id", "ensembl_id", "ENSEMBL"],
@@ -64,7 +64,7 @@ HEURISTIC_MAPPINGS = {
                                 "Gene_Description", "protein_description", "Protein_Description"],
     "location":             ["Location", "location", "Subcellular_Location", "subcellular_location",
                                 "localisation"],
-    "biotype":              ["Biotype", "biotype", "gene_biotype", "Gene_Biotype"],
+    "biotype":              ["Biotype", "biotype", "gene_biotype", "Gene_Biotype", "gene_type"],
     # metrics
     "log2fc":               ["logFC", "logfc", "log2FC", "log2FoldChange", "lfc", "avg_log2FC", "expression_log2fc"],
     "pvalue":               ["pvalue", "PValue", "p_value", "pval", "p.value", "expression_pvalue"],
@@ -77,7 +77,7 @@ HEURISTIC_MAPPINGS = {
     "normalisation_method": ["normalisation_method", "normalization_method", "norm_method", 
                                 "normalisation", "normalization", "normalisation_type", "normalization_type"],
     # obs (sample/ cell) metadata
-    "sample_a":             ["Sample_or_condition_A", "sample_A", "Sample_A", "Sample_ID"], #"obs"
+    "sample_a":             ["Sample_or_condition_A", "sample_A", "Sample_A", "Sample_ID"], #"obs", "SampleName"
     "sample_b":             ["Sample_or_condition_B", "sample_B", "Sample_B"],
     "condition_a":          ["condition_a", "condition_A", "group_A", "treatment", "Condition_A", 
                                 "Sample_or_condition_A", "condition", "Condition"], #"obs"
@@ -123,7 +123,7 @@ RDS_OBJ_MAPPINGS = {
     "metadata(obj)":           "obs_metadata",     #or 'extra_metadata' or 'expression' results
     "rowData(obj)":            "feature_annotations",
     "rownames(obj)":           "gene_annotations",
-}
+}   # TODO: redundant due to parquet mappings in yaml??
 
 
 def resolve_column_mappings(feature_cols: list, metric_cols: list,
@@ -146,7 +146,7 @@ def resolve_column_mappings(feature_cols: list, metric_cols: list,
 def resolve_logical_table(yaml_key: str, actual_table: str, source_type: str) -> str:
     """
     Map a YAML table key + actual original table name to a canonical logical name.
-    Logical tables will match those in Parquet files: 'expression', 'obs_metadata'(cell/sample), 
+    Logical tables will match those in Parquet files: 'expression', 'obs_metadata'(cell/sample/contrasts), 
         'counts', 'gene_annotations' &/or 'feature_annotations', 'extra_metadata' etc.
     Current yaml key in table dict: 'expression', 'metadata'
     Actual db table names (and how to access rds objects): 'proteomics_exp', 'proteomics_metadata',
@@ -321,7 +321,7 @@ def parse_and_load_registry(yaml_path: str, registry_db_path: str):
                         VALUES (?,?,?,?,?)
                     """, [(study_id, source_id, source.get("lab_name"),
                         resolve_logical_table(yaml_key, actual_table, source_type or ""), actual_table)])
-                    print(f"  [DEBUG] resolve_logical_table(): {resolve_logical_table(yaml_key, actual_table, source_type or "")}")
+                    print(f"  [DEBUG] resolve_logical_table(): {resolve_logical_table(yaml_key, actual_table, source_type or '')}")
 
         if issue_rows:
             con.executemany("""
@@ -447,16 +447,7 @@ def build_registry_index(registry_db_path: str, force_rebuild: bool = False):
             if source_type not in ["duckdb", "parquet"]:
                 print(f"   INFO: Skipping unsupported source type [{source_type}] for [{lab_source}] study_id={study_id} ({data_path})")
                 continue
-            # TODO for Parquet
-            # if source_type == "parquet":
-            #     print(f"   INFO: Skipping Parquet dataset study_id={study_id}, lab={lab_source} (will convert to Parquet later)")
-                # Optionally log to skipped_datasets table
-                # con.execute("""
-                #     INSERT OR REPLACE INTO registry_load_issues 
-                #     VALUES (?,?,?,?,?)
-                # """, [datetime.now(timezone.utc), lab_source, dataset_name, study_id, "rds_not_indexed"])
-                # continue
-
+            
             if source_type == "parquet":
                 db_alias = None
             else:
@@ -521,7 +512,7 @@ def build_registry_index(registry_db_path: str, force_rebuild: bool = False):
                     INSERT INTO gene_study_index (gene_symbol, protein_id, study_id, lab_source, dataset_name, omic_type, organism)
                     SELECT DISTINCT 
                         gene_symbol,
-                        TO_JSON(LIST(DISTINCT protein_id)) AS protein_id,       -- e.g. '["Q9Z223","Q9Z224"]' for gene MOCS2
+                        TO_JSON(LIST(DISTINCT protein_id) FILTER (WHERE protein_id IS NOT NULL)) AS protein_id,       -- e.g. '["Q9Z223","Q9Z224"]' for gene MOCS2
                         study_id,
                         '{lab_source}',
                         '{dataset_name}',
@@ -530,8 +521,8 @@ def build_registry_index(registry_db_path: str, force_rebuild: bool = False):
                     FROM v_{lab_source}_{study_id}
                     WHERE gene_symbol IS NOT NULL
                     AND gene_symbol != ''
-                    GROUP BY gene_symbol, study_id, protein_id, organism
-                """) #OR protein_id IS NOT NULL ;   WHERE NULLIF(TRIM(gene_symbol), '') IS NOT NULL
+                    GROUP BY gene_symbol, study_id, organism
+                """) # protein_id IS NOT NULL;  # GROUP BY ...., protein_id, organism   #  WHERE NULLIF(TRIM(gene_symbol), '') IS NOT NULL
 
                 inserted_rows = con.execute(f"""
                     SELECT COUNT(*) FROM gene_study_index

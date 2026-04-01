@@ -13,6 +13,7 @@
 box::use(
   app/logic/api/api_client[fetch_all_datasets, fetch_datasets_for_terms, fetch_gene_index_genes,
                            fetch_metadata_filter_options, fetch_protein_index_ids],
+  bslib[tooltip],
   dplyr[arrange, bind_rows, group_by, select, summarise],
   DT[ datatable, DTOutput, renderDT],
   jsonlite[fromJSON],
@@ -117,6 +118,18 @@ gene_selector_server <- function(id, selected_dataset) {
             tags$div(
               style = "flex: 0 0 290px;",   #fixed-width
               div(class = "well well-sm", style = "margin-bottom: 0;",
+                tags$div(
+                  style = "display: flex; align-items: center; gap: 8px; margin-bottom: 10px;",
+                  tags$span("Search help", style = "font-weight: 600; color: #333;"),
+                  bslib::tooltip(
+                    tags$span(
+                      shiny::icon("circle-question"),
+                      style = "display: inline-flex; align-items: center; color: #667eea; cursor: help; font-size: 1.1rem;"
+                    ),
+                    "First type or select one or more genes or proteins, click Search, select the available dataset rows, review the metadata preview, then click Explore selected dataset(s).",
+                    placement = "right"
+                  )
+                ),
                 # tags$label("Gene symbol or protein ID", style = "font-weight:600"),
                 selectizeInput(ns("gene_query"), "Gene symbol(s)",
                     choices  = NULL,
@@ -132,6 +145,18 @@ gene_selector_server <- function(id, selected_dataset) {
                         plugins     = list("remove_button"),           # adds × on each tag 
                         loadThrottle = 300
                 )),
+                tags$div(
+                  style = "display: flex; align-items: center; gap: 6px; margin-top: -8px; margin-bottom: 10px; color: #555; font-size: 12px;",
+                  tags$span("Why do some genes appear twice?"),
+                  bslib::tooltip(
+                    tags$span(
+                      shiny::icon("circle-info"),
+                      style = "display: inline-flex; align-items: center; color: #667eea; cursor: help;"
+                    ),
+                    "The app preserves submitted gene symbols as provided by each dataset. Human genes are often uppercase, while mouse genes often use only an initial capital, so both forms can appear separately in the modal.",
+                    placement = "right"
+                  )
+                ),
                 selectizeInput(ns("protein_query"), "Protein ID(s)",
                     choices  = NULL,
                     multiple = TRUE,

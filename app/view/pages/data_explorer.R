@@ -32,7 +32,7 @@ box::use(
   app/view/pages/gene_dataset_selector[gene_selector_ui, gene_selector_server],
   app/view/pages/explore_sidebar[sidebar_ui, sidebar_server],
   app/logic/api/api_client[fetch_dataset_expression, fetch_expression_multi_dataset,
-                           fetch_metadata_filter_options, fetch_top_de],
+                           fetch_metadata_filter_options],
 )
 
 
@@ -306,6 +306,29 @@ explorer_server <- function(id) {
         hoverinfo = "text",
         marker = list(size = 6, opacity = 0.7)
       ) |>
+        plotly::add_segments(
+          x = -max(abs(plot_df$log2fc), na.rm = TRUE) * 1.1,
+          xend = max(abs(plot_df$log2fc), na.rm = TRUE) * 1.1,
+          y = -log10(padj_thresh),
+          yend = -log10(padj_thresh),
+          line = list(dash = "dot", color = "#7F8C8D", width = 1),
+          showlegend = FALSE,
+          hoverinfo = "skip"
+        ) |>
+        plotly::add_segments(
+          x = lfc_thresh, xend = lfc_thresh,
+          y = 0, yend = max(plot_df$neg_log10p, na.rm = TRUE) * 1.05,
+          line = list(dash = "dot", color = "#7F8C8D", width = 1),
+          showlegend = FALSE,
+          hoverinfo = "skip"
+        ) |>
+        plotly::add_segments(
+          x = -lfc_thresh, xend = -lfc_thresh,
+          y = 0, yend = max(plot_df$neg_log10p, na.rm = TRUE) * 1.05,
+          line = list(dash = "dot", color = "#7F8C8D", width = 1),
+          showlegend = FALSE,
+          hoverinfo = "skip"
+        ) |>
         plotly::layout(
           title = list(text = dataset_name, x = 0.02),
           xaxis = list(title = "log2 Fold Change"),
@@ -315,32 +338,73 @@ explorer_server <- function(id) {
         )
     }
 
-    render_compare_violin <- function(df, dataset_name) {
+    render_compare_violin <- function(df, dataset_name, padj_thresh, lfc_thresh) {
       group_col <- compare_group_col(df)
+      plot_df <- df |>
+        dplyr::mutate(
+          sig = dplyr::case_when(
+            !is.na(padj) & padj < padj_thresh & log2fc >  lfc_thresh ~ "Up",
+            !is.na(padj) & padj < padj_thresh & log2fc < -lfc_thresh ~ "Down",
+            TRUE ~ "NS"
+          )
+        )
 
       plotly::plot_ly(
-        df,
-        x = df[[group_col]],
-        y = df$log2fc,
+        plot_df,
+        x = plot_df[[group_col]],
+        y = plot_df$log2fc,
         type = "violin",
         box = list(visible = TRUE),
         meanline = list(visible = TRUE),
-        points = "outliers",
+        points = FALSE,
         hovertemplate = paste0(
           "<b>%{x}</b><br>log2FC: %{y:.3f}<extra></extra>"
         )
       ) |>
+        plotly::add_markers(
+          data = plot_df,
+          x = plot_df[[group_col]],
+          y = plot_df$log2fc,
+          color = ~sig,
+          colors = c(Up = "#C0392B", Down = "#2980B9", NS = "#BDC3C7"),
+          marker = list(size = 6, opacity = 0.65),
+          text = ~paste0(
+            "<b>", gene_symbol, "</b><br>",
+            "log2FC: ", round(log2fc, 3), "<br>",
+            "padj: ", signif(padj, 3), "<br>",
+            "class: ", sig
+          ),
+          hoverinfo = "text",
+          inherit = FALSE
+        ) |>
         plotly::layout(
           title = list(text = dataset_name, x = 0.02),
           xaxis = list(title = group_col, tickangle = -25),
           yaxis = list(title = "log2FC"),
-          showlegend = FALSE,
+          legend = list(title = list(text = "Significance"), orientation = "h",
+                        y = -0.15),
+          showlegend = TRUE,
           margin = list(t = 50)
         )
     }
 
-    render_compare_heatmap <- function(df, dataset_name) {
+    render_compare_heatmap <- function(df, dataset_name, padj_thresh, lfc_thresh) {
       group_col <- compare_group_col(df)
+      ranked_genes <- df |>
+        dplyr::mutate(
+          sig = dplyr::case_when(
+            !is.na(padj) & padj < padj_thresh & log2fc >  lfc_thresh ~ "Up",
+            !is.na(padj) & padj < padj_thresh & log2fc < -lfc_thresh ~ "Down",
+            TRUE ~ "NS"
+          ),
+          rank_bucket = ifelse(sig == "NS", 1L, 0L),
+          abs_lfc = abs(log2fc)
+        ) |>
+        dplyr::arrange(rank_bucket, dplyr::desc(abs_lfc), padj)
+      ranked_genes <- unique(ranked_genes$gene_symbol)
+      ranked_genes <- ranked_genes[seq_len(min(50L, length(ranked_genes)))]
+
+      df <- df[df$gene_symbol %in% ranked_genes, , drop = FALSE]
       agg <- stats::aggregate(
         df$log2fc,
         by = list(gene_symbol = df$gene_symbol, group = df[[group_col]]),
@@ -425,33 +489,6 @@ explorer_server <- function(id) {
     compare_plot_data <- reactive({
       datasets <- compare_source_rows()
       req(nrow(datasets) > 1)
-
-      ds <- selected_dataset()
-      plot_type <- sidebar_vals$plot_type()
-
-      if (identical(plot_type, "Heatmap")) {
-        rows <- lapply(seq_len(nrow(datasets)), function(i) {
-          row <- datasets[i, , drop = FALSE]
-          top_df <- tryCatch(
-            fetch_top_de(
-              lab_source = row$lab_source[1],
-              study_id = row$study_id[1],
-              n = 50L,
-              padj_thresh = sidebar_vals$padj_thresh(),
-              lfc_thresh = sidebar_vals$lfc_thresh_min()
-            ),
-            error = function(e) data.frame()
-          )
-
-          if (nrow(top_df) == 0) return(NULL)
-          top_df$lab_source <- row$lab_source[1]
-          top_df$study_id <- row$study_id[1]
-          top_df$dataset_name <- row$dataset_name[1]
-          top_df
-        })
-
-        return(dplyr::bind_rows(rows))
-      }
 
       fetch_expression_multi_dataset(
         dataset_list = datasets,
@@ -609,14 +646,22 @@ explorer_server <- function(id) {
             validate(
               need(
                 nrow(plot_df) > 0,
-                "No rows matched the current search terms and thresholds for this dataset."
+                "No expression rows are available for this dataset."
               )
             )
 
             switch(
               plot_type,
-              Heatmap = render_compare_heatmap(plot_df, row$dataset_name[1]),
-              Violin = render_compare_violin(plot_df, row$dataset_name[1]),
+              Heatmap = render_compare_heatmap(
+                plot_df, row$dataset_name[1],
+                sidebar_vals$padj_thresh(),
+                sidebar_vals$lfc_thresh_min()
+              ),
+              Violin = render_compare_violin(
+                plot_df, row$dataset_name[1],
+                sidebar_vals$padj_thresh(),
+                sidebar_vals$lfc_thresh_min()
+              ),
               render_compare_volcano(
                 plot_df,
                 row$dataset_name[1],
@@ -773,7 +818,9 @@ explorer_server <- function(id) {
                    padj_thresh = sidebar_vals$padj_thresh,
                    lfc_thresh  = sidebar_vals$lfc_thresh_min,
                    n_genes     = reactive(50L))
-    violin_server("violin",    de_data)
+    violin_server("violin",    de_data,
+                  padj_thresh = sidebar_vals$padj_thresh,
+                  lfc_thresh  = sidebar_vals$lfc_thresh_min)
     
     # ── Value boxes (tied to dataset_stats) ─────────────────────────────
     # stats_row <- reactive({

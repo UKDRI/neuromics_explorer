@@ -156,11 +156,14 @@ write_dense_matrix_parquet <- function(x, path, row_id_name = "feature_id", comp
 #' @param path Output Parquet path.
 #' @param row_id_name Name of the row identifier column.
 #' @param col_id_name Name of the column identifier column.
+#' @param value_name Name of the value column written to parquet.
 #' @param compression Parquet compression codec passed to Arrow.
 #'
 #' @return The output path.
 write_sparse_matrix_parquet <- function(x, path, row_id_name = "feature_id",
-                                        col_id_name = "obs", compression = "snappy") {
+                                        col_id_name = "obs",
+                                        value_name = "counts",
+                                        compression = "snappy") {
   if (!requireNamespace("Matrix", quietly = TRUE)) {
     stop("Package 'Matrix' is required to serialise sparse assay matrices.")
   }
@@ -172,11 +175,12 @@ write_sparse_matrix_parquet <- function(x, path, row_id_name = "feature_id",
   df <- data.frame(
     feature_id = row_ids[triplets$i],
     obs = obs_ids[triplets$j],
-    value_name = triplets$x,
+    counts = triplets$x,
     stringsAsFactors = FALSE
   )
   names(df)[1] <- row_id_name
   names(df)[2] <- col_id_name
+  names(df)[3] <- value_name
   write_df_parquet(df, path, compression = compression)
 }
 
