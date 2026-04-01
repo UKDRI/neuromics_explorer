@@ -6,6 +6,12 @@ box::use(
   app/logic/query_data/reductions[get_reduction, list_reductions],
 )
 
+# Legacy note:
+# This module still uses the older plotly-first implementation because it is
+# not yet wired into the active explorer flow. Keep it as the reminder/backlog
+# for the later ggplot + ggplotly alignment work alongside the other plot
+# modules.
+
 #' @export
 umap_ui <- function(id) {
   ns <- NS(id)

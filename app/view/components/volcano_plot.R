@@ -137,11 +137,16 @@ volcano_server <- function(id, de_data, padj_thresh, lfc_thresh, gene = reactive
 
       # Annotate searched gene if present
       g <- gene()
-      if (!is.null(g) && g %in% df$gene_symbol) {
-        gp <- df[df$gene_symbol == g, ][1, ]
+      if (!is.null(g) && "gene_symbol" %in% names(df)) {
+        match_idx <- which(toupper(df$gene_symbol) == toupper(g))[1]
+      } else {
+        match_idx <- NA_integer_
+      }
+      if (!is.na(match_idx)) {
+        gp <- df[match_idx, , drop = FALSE][1, ]
         p <- p |> plotly::add_annotations(
           x    = gp$log2fc, y = gp$neg_log10p,
-          text = paste0("<b>", g, "</b>"),
+          text = paste0("<b>", gp$gene_symbol, "</b>"),
           showarrow = TRUE, arrowhead = 2, arrowsize = 0.8,
           font = list(size = 12, color = "#2C3E50")
         )
