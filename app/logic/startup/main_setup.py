@@ -77,7 +77,7 @@ async def lifespan(app: FastAPI):
     # --- CLEANUP & SHUTDOWN ---
     finally:
         if duckdb_pool is not None:
-            get_conn(duckdb_pool) #.close_all()
+            # get_conn(duckdb_pool) #.close_all()
             duckdb_pool.close_all()
             print("Connection pool closed.")
 
