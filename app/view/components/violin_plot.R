@@ -64,7 +64,7 @@ violin_server <- function(id, de_data, padj_thresh, lfc_thresh) {
       plotly::plot_ly(
         plot_df,
         x    = ~group_value,
-        y    = as.formula(paste0("~", y_col)),
+        y    = stats::as.formula(paste0("~", y_col)),
         type = "violin",
         color = I("#D7DEE5"),
         box  = list(visible = isTRUE(input$show_box)),   # list(visible = input$show_box),
@@ -77,7 +77,7 @@ violin_server <- function(id, de_data, padj_thresh, lfc_thresh) {
         plotly::add_markers(
           data = plot_df,
           x = ~group_value,
-          y = as.formula(paste0("~", y_col)),
+          y = stats::as.formula(paste0("~", y_col)),
           color = ~sig,
           colors = c(Up = "#C0392B", Down = "#2980B9", NS = "#BDC3C7"),
           marker = list(size = 6, opacity = 0.65),

@@ -149,8 +149,10 @@ def create_views(
     expr_cols       = get_db_table_columns(con, db_alias, expr_table, source_type, data_path)   # to check where meta entities like sample names and conditions exist
 
     # Build COALESCE expression for primary gene column so Mouse_Gene NULLs and it falls through to Human_Gene
-    gene_candidates = [simple_sql_col(c) for c in [gene_col, protein_col, human_col] if c and c in expr_cols]
-    if not gene_candidates:
+    # Build expression for all feature columns
+    gene_candidates = [simple_sql_col(c) for c in [gene_col, human_col] if c and c in expr_cols]
+    feature_presence_candidates = [simple_sql_col(c) for c in [gene_col, human_col, protein_col] if c and c in expr_cols]
+    if not feature_presence_candidates:
         err = f"No gene or protein column mapping for [{lab_source}] study_id={study_id}"
         print(f"   WARNING: {err} — skipping views")
         failed.append((datetime.now(timezone.utc), study_id, lab_source, dataset_name, err))
@@ -159,16 +161,21 @@ def create_views(
     primary_gene_col = (
         f"COALESCE({', '.join(gene_candidates)})"
         if len(gene_candidates) > 1
-        else gene_candidates[0]
+        else (gene_candidates[0] if gene_candidates else "NULL")
+    )
+    feature_presence_col = (
+        f"COALESCE({', '.join(feature_presence_candidates)})"
+        if len(feature_presence_candidates) > 1
+        else feature_presence_candidates[0]
     )
 
     if source_type == "parquet":
         expr_table_ref = f"read_parquet('{os.path.join(data_path, expr_table)}') AS expr"
-        expr_where = f"WHERE {primary_gene_col} IS NOT NULL"
+        expr_where = f"WHERE {feature_presence_col} IS NOT NULL"
         # expr_where = ""
     else:
         expr_table_ref = f"{db_alias}.main.{expr_table} AS expr"
-        expr_where = f"WHERE study_id = {study_id} AND {primary_gene_col} IS NOT NULL"
+        expr_where = f"WHERE study_id = {study_id} AND {feature_presence_col} IS NOT NULL"
 
     print(f" [DEBUG] {lab_source} study_id={study_id} | alias={db_alias} | "
         f"expr_table={expr_table} | obs_table={obs_meta_table} | gene_col={gene_col} \n | primary_gene_col={primary_gene_col} \n | gene_candidates: {gene_candidates} \n | protein_col={protein_col} | human_col={human_col} | organism_col={organism_col} | expr_view={expr_view} | obs_meta_view={obs_meta_view}")

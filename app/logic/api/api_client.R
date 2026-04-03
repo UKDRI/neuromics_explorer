@@ -239,7 +239,12 @@ fetch_protein_index_ids <- function(query = NULL, limit = 500L) {
   )
 
   if (!"protein_id" %in% names(tbl)) return(character(0))
-  tbl$protein_id
+  unique(unlist(lapply(tbl$protein_id, function(value) {
+    if (is.null(value) || is.na(value) || !nzchar(value)) return(character(0))
+    parsed <- tryCatch(jsonlite::fromJSON(value), error = function(e) value)
+    parsed <- as.character(parsed)
+    parsed[!is.na(parsed) & nzchar(parsed)]
+  }), use.names = FALSE))
 }
 
 #' Search registered datasets for one or more genes and/or proteins.

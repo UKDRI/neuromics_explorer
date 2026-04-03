@@ -81,7 +81,13 @@ gene_selector_server <- function(id, selected_dataset) {
           n_cell_types, n_conditions, cell_types_json, conditions_json
         ) |>
         dplyr::summarise(
-          matched_terms = paste(sort(unique(c(gene_symbol, protein_id))), collapse = ", "),
+          matched_terms = paste(
+            sort(unique(c(
+              gene_symbol,
+              unlist(lapply(protein_id, parse_json_text), use.names = FALSE)
+            ))),
+            collapse = ", "
+          ),
           .groups = "drop"
         ) |>
         dplyr::arrange(lab_source, study_id)
@@ -276,11 +282,14 @@ gene_selector_server <- function(id, selected_dataset) {
 
       results <- tryCatch({
         fetch_datasets_for_terms(
-          genes      = search_genes,
-          proteins   = search_proteins,
-          omic_type  = if (input$omic_filter  == "All") NULL else input$omic_filter,
-          lab_source = if (input$lab_filter   == "All") NULL else input$lab_filter
-        ) |>
+            genes      = search_genes,
+            proteins   = search_proteins,
+            omic_type  = if (input$omic_filter  == "All") NULL else input$omic_filter,
+            lab_source = if (input$lab_filter   == "All") NULL else input$lab_filter
+          ) |>
+          dplyr::mutate(
+            protein_label = vapply(protein_id, format_json_values, character(1))
+          ) |>
           dplyr::arrange(lab_source, study_id, gene_symbol)
       }, error = function(e) {
         shiny::showNotification(paste("Search error:", e$message), type = "error")
@@ -304,7 +313,7 @@ gene_selector_server <- function(id, selected_dataset) {
           `Dataset`    = dataset_name,
           `Modality`   = omic_type,
           `Gene`       = gene_symbol,
-          `Protein`    = protein_id,
+          `Protein`    = protein_label,
           `Total Features` = total_features,
           `Total Significant (padj<0.05)` = n_sig_features,
           `Total Samples`  = total_samples,
@@ -406,4 +415,19 @@ gene_selector_server <- function(id, selected_dataset) {
 coalesce_na <- function(...) {
   for (x in list(...)) if (!is.null(x) && !is.na(x)) return(x)
   NA
+}
+
+parse_json_text <- function(value) {
+  if (is.null(value) || length(value) == 0 || is.na(value) || identical(value, "")) {
+    return(character(0))
+  }
+  parsed <- tryCatch(jsonlite::fromJSON(value), error = function(e) value)
+  parsed <- as.character(parsed)
+  parsed[!is.na(parsed) & nzchar(parsed)]
+}
+
+format_json_values <- function(value) {
+  values <- parse_json_text(value)
+  if (length(values) == 0) return("—")
+  paste(unique(values), collapse = ", ")
 }

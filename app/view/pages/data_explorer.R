@@ -101,8 +101,7 @@ explorer_ui <- function(id) {
             card_header(
               class = "d-flex justify-content-between align-items-center",
               div(
-                tags$h4("Data Visualisation", class = "mb-0"),
-                tags$small(class = "text-muted", textOutput(ns("plot_subtitle")))
+                tags$h4("Data Visualisation", class = "mb-0")
               ),
               div(
                 style = "display: flex; gap: 8px; align-items: center;",
@@ -136,12 +135,14 @@ explorer_ui <- function(id) {
                 nav_panel(
                   title = "Expression data",
                   icon = icon("chart-area"),
+                  uiOutput(ns("active_dataset_banner")),
                   results_ui(ns("results"))
                 ),
 
                 nav_panel(
                   title = "Plot",
                   icon = icon("chart-line"),
+                  uiOutput(ns("active_dataset_banner_plot")),
                   uiOutput(ns("plot_ui"))
                 ),
 
@@ -265,7 +266,9 @@ explorer_server <- function(id) {
     flatten_json_values <- function(values) {
       unique(unlist(lapply(values, function(value) {
         if (is.null(value) || is.na(value) || !nzchar(value)) return(character(0))
-        tryCatch(jsonlite::fromJSON(value), error = function(e) character(0))
+        parsed <- tryCatch(jsonlite::fromJSON(value), error = function(e) character(0))
+        parsed <- as.character(parsed)
+        parsed[!is.na(parsed) & nzchar(parsed) & parsed != "null"]
       }), use.names = FALSE))
     }
 
@@ -411,7 +414,7 @@ explorer_server <- function(id) {
         FUN = mean
       )
       names(agg)[3] <- "log2fc"
-      mat <- xtabs(log2fc ~ gene_symbol + group, data = agg)
+      mat <- stats::xtabs(log2fc ~ gene_symbol + group, data = agg)
       mat[is.na(mat)] <- 0
 
       plotly::plot_ly(
@@ -533,11 +536,29 @@ explorer_server <- function(id) {
       )
     })
     
-    # ── Plot subtitle ────────────────────────────────────────────────────
-    output$plot_subtitle <- renderText({
+    # ── Active dataset banners ────────────────────────────────────────────────────
+    output$active_dataset_banner <- renderUI({
       ds <- selected_dataset()
-      if (is.null(ds)) return("")
-      paste0("search terms: ", paste(c(ds$genes, ds$proteins), collapse = ", "))
+      if (is.null(ds)) return(NULL)
+      tags$div(
+        class = "alert alert-secondary",
+        role = "alert",
+        style = "margin-bottom: 12px;",
+        tags$strong("Expression data is showing: "),
+        paste(ds$dataset_name, "·", ds$lab_source, "·", ds$omic_type)
+      )
+    })
+
+    output$active_dataset_banner_plot <- renderUI({
+      ds <- selected_dataset()
+      if (is.null(ds)) return(NULL)
+      tags$div(
+        class = "alert alert-secondary",
+        role = "alert",
+        style = "margin-bottom: 12px;",
+        tags$strong("Plot is showing: "),
+        paste(ds$dataset_name, "·", ds$lab_source, "·", ds$omic_type)
+      )
     })
 
     # This reactive fetches the combined DE / expression rows for every dataset

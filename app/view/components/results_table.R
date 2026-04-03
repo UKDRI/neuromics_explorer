@@ -2,7 +2,7 @@
 # The CSV export control is rendered by the parent explorer header.
 
 box::use(
-  shiny[NS, moduleServer, reactive, req, tagList, downloadHandler],
+  shiny[NS, moduleServer, reactive, req, tagList],
   DT[DTOutput, renderDT, datatable, formatSignif, formatRound],
 )
 
@@ -23,26 +23,29 @@ results_server <- function(id, de_data) {
 
       # Drop internal/ redundant columns for display
       display_cols <- intersect(
-        c("gene_symbol", "human_gene", "protein_id", "cell_type",
+        c("dataset_name", "gene_symbol", "human_gene", "protein_id", "cell_type",
           "condition_a", "condition_b", "log2fc", "pvalue", "padj",
           "abundance_a", "abundance_b", "pct_expressed_a", "pct_expressed_b",
-          "organism", "study_id"),
+          "organism"),
         names(df)
       )
       df <- df[, display_cols, drop = FALSE]
+      if ("dataset_name" %in% names(df)) {
+        names(df)[names(df) == "dataset_name"] <- "dataset"
+      }
 
       dt <- datatable(df,
         filter      = "top",
         rownames    = FALSE,
         class       = "table-sm table-condensed table-hover",
-        extensions  = c("Buttons", "Scroller"),
+        extensions  = c("Scroller"),
         options     = list(
           pageLength = 25,
           scrollX    = TRUE,
           scrollY    = "420px",
           scroller   = TRUE,
           dom        = "Bfrtip",    # controls which DT widgets appear: B=Buttons, f=filter/search, r=processing, t=table, i=info, p=pagination
-          buttons    = c("csv", "excel"),
+          # buttons    = c("csv", "excel"),
           #autoWidth = TRUE,
           columnDefs = list(
             list(className = "dt-right", targets = which(sapply(df, is.numeric)) - 1)   # right-align numbers (DT default is left-align)
@@ -60,10 +63,5 @@ results_server <- function(id, de_data) {
       if (length(lfc_cols))  dt <- DT::formatRound(dt, lfc_cols,  digits = 3)
       dt
     })
-
-    output$dl_csv <- downloadHandler(
-      filename = function() paste0("de_results_", Sys.Date(), ".csv"),
-      content  = function(file) write.csv(de_data(), file, row.names = FALSE)
-    )
   })
 }
