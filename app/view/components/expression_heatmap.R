@@ -32,6 +32,8 @@ heatmap_server <- function(id, selected_dataset,
       df <- fetch_dataset_expression(
         ds$lab_source,
         ds$study_id,
+        genes = ds$genes,
+        proteins = ds$proteins,
         padj_thresh = padj_thresh(),
         lfc_thresh  = lfc_thresh()
       )

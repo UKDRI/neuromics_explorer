@@ -339,10 +339,19 @@ fetch_de_for_terms <- function(genes = NULL, proteins = NULL,
 #' @export
 fetch_dataset_expression <- function(lab_source, study_id,
                                      padj_thresh = 0.05, lfc_thresh = 0,
-                                     cell_type = NULL) {
+                                     cell_type = NULL,
+                                     genes = NULL,
+                                     proteins = NULL) {
+  genes <- unique(trimws(genes %||% character(0)))
+  genes <- genes[nzchar(genes)]
+  proteins <- unique(trimws(proteins %||% character(0)))
+  proteins <- proteins[nzchar(proteins)]
+
   perform_arrow_request(
     sprintf("/datasets/%s/%s/expression", lab_source, study_id),
     query = list(
+      gene      = genes,
+      protein   = proteins,
       padj      = padj_thresh,
       lfc       = lfc_thresh,
       cell_type = cell_type
@@ -401,7 +410,9 @@ fetch_de_for_gene <- function(gene, lab_source, study_id,
 #' @export
 fetch_expression_multi_dataset <- function(dataset_list,
                                            padj_thresh = 0.05, lfc_thresh = 0,
-                                           cell_type = NULL) {
+                                           cell_type = NULL,
+                                           genes = NULL,
+                                           proteins = NULL) {
   if (is.null(dataset_list)) return(data.frame())
 
   if (is.data.frame(dataset_list)) {
@@ -421,6 +432,8 @@ fetch_expression_multi_dataset <- function(dataset_list,
     "/compare/expression",
     query = list(
       dataset = dataset_keys,
+      gene = unique(trimws(genes %||% character(0))),
+      protein = unique(trimws(proteins %||% character(0))),
       padj = padj_thresh,
       lfc = lfc_thresh,
       cell_type = cell_type

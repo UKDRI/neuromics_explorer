@@ -491,10 +491,13 @@ explorer_server <- function(id) {
     # It reruns when selected datasets, search terms, or thresholds change.
     compare_plot_data <- reactive({
       datasets <- compare_source_rows()
-      req(nrow(datasets) > 1)
+      ds <- selected_dataset()
+      req(nrow(datasets) > 1, ds)
 
       fetch_expression_multi_dataset(
         dataset_list = datasets,
+        genes = ds$genes,
+        proteins = ds$proteins,
         padj_thresh = sidebar_vals$padj_thresh(),
         lfc_thresh = sidebar_vals$lfc_thresh_min()
       )
@@ -585,6 +588,8 @@ explorer_server <- function(id) {
         single_df <- fetch_dataset_expression(
           lab_source = row$lab_source[1],
           study_id = row$study_id[1],
+          genes = ds$genes,
+          proteins = ds$proteins,
           padj_thresh = sidebar_vals$padj_thresh(),
           lfc_thresh = sidebar_vals$lfc_thresh_min()
         )
@@ -602,6 +607,8 @@ explorer_server <- function(id) {
 
       fetch_expression_multi_dataset(
         dataset_list = datasets,
+        genes = ds$genes,
+        proteins = ds$proteins,
         padj_thresh = sidebar_vals$padj_thresh(),
         lfc_thresh = sidebar_vals$lfc_thresh_min()
       )
@@ -617,6 +624,8 @@ explorer_server <- function(id) {
       fetch_dataset_expression(
         lab_source  = ds$lab_source,
         study_id    = ds$study_id,
+        genes       = ds$genes,
+        proteins    = ds$proteins,
         padj_thresh = sidebar_vals$padj_thresh(),
         lfc_thresh  = sidebar_vals$lfc_thresh_min()
       )
