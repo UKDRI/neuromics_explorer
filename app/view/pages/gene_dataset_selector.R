@@ -105,11 +105,12 @@ gene_selector_server <- function(id, selected_dataset) {
     observeEvent(input$open_btn, {
       showModal(
         modalDialog(
-          title     = "Find dataset(s) containing your gene(s) or protein(s) of interest",
+          title     = "Find datasets containing your genes or proteins of interest",
           size      = "xl",
           easyClose = TRUE,
           footer    = NULL,
-          style     = "max-width: 1400px; width: 95vw;",
+          # style     = "max-width: 1400px; width: 95vw;",
+          style     = "flex: 1 1 auto; min-width: 0;",
 
           tags$div(
             style = "display: flex; gap: 16px; align-items: flex-start;",
@@ -147,13 +148,13 @@ gene_selector_server <- function(id, selected_dataset) {
                 )),
                 tags$div(
                   style = "display: flex; align-items: center; gap: 6px; margin-top: -8px; margin-bottom: 10px; color: #555; font-size: 12px;",
-                  tags$span("Why do some genes appear twice?"),
+                  tags$span("Why do some genes appear more than once?"),
                   bslib::tooltip(
                     tags$span(
                       shiny::icon("circle-info"),
-                      style = "display: inline-flex; align-items: center; color: #667eea; cursor: help;"
+                      style = "display: inline-flex; align-items: left; color: #667eea; cursor: help;"
                     ),
-                    "The app preserves submitted gene symbols as provided by each dataset. Human genes are often uppercase, while mouse genes often use only an initial capital, so both forms can appear separately in the modal.",
+                    "The app preserves gene symbols as they were provided by each dataset. Human genes are often uppercase, while mouse genes only capitalise the first letter, so both forms can appear separately in the search box.",
                     placement = "right"
                   )
                 ),
@@ -188,7 +189,21 @@ gene_selector_server <- function(id, selected_dataset) {
             # ── Right: preview results ──────────────────────────────────
             tags$div(
               style = "flex: 1 1 auto; min-width: 0;",      #flexible results area grows with modal width
-              h5("Datasets containing selected gene/protein terms:"),
+              div(
+                class = "alert alert-info",
+                role = "alert",
+                style = "font-size: 16px; line-height: 1.45; margin-bottom: 12px;",
+                tags$strong("How to use this search"),
+                tags$ol(
+                  style = "font-size: 14px; padding-left: 18px; margin: 8px 0 0;",
+                  tags$li("Type or select one or more genes and/or proteins."),
+                  tags$li("Click 'Search' button to list datasets containing those terms."),
+                  tags$li("Click to select one or more dataset rows from the results table below."),
+                  tags$li("Review the metadata preview shown below the table."),
+                  tags$li("Click 'Explore selected dataset(s)' to open them in the main explorer page.")
+                )
+              ),
+              h5("Datasets containing searched gene and protein terms:"),
               DTOutput(ns("hits_tbl")),
               hr(),
               h5("Selected datasets — metadata preview:"),
@@ -212,11 +227,11 @@ gene_selector_server <- function(id, selected_dataset) {
         fetch_gene_index_genes(),
         error = function(e) {
             showNotification(
-                paste0(
-                  "Gene index route unavailable. Restart the FastAPI service. ",
-                  e$message
-                ),
-                type = "error", duration = 10
+              paste0(
+                "Gene index route unavailable. Restart the FastAPI service. ",
+                e$message
+              ),
+              type = "error", duration = 10
             )
             character(0)   # empty — selectize works without suggestions
         }
@@ -261,11 +276,11 @@ gene_selector_server <- function(id, selected_dataset) {
 
       results <- tryCatch({
         fetch_datasets_for_terms(
-            genes      = search_genes,
-            proteins   = search_proteins,
-            omic_type  = if (input$omic_filter  == "All") NULL else input$omic_filter,
-            lab_source = if (input$lab_filter   == "All") NULL else input$lab_filter
-          ) |>
+          genes      = search_genes,
+          proteins   = search_proteins,
+          omic_type  = if (input$omic_filter  == "All") NULL else input$omic_filter,
+          lab_source = if (input$lab_filter   == "All") NULL else input$lab_filter
+        ) |>
           dplyr::arrange(lab_source, study_id, gene_symbol)
       }, error = function(e) {
         shiny::showNotification(paste("Search error:", e$message), type = "error")
@@ -316,17 +331,6 @@ gene_selector_server <- function(id, selected_dataset) {
     # compact side-by-side metadata cards for those candidate datasets.
     output$meta_preview <- renderUI({
       row_idx <- input$hits_tbl_rows_selected
-      if (is.null(row_idx) || length(row_idx) == 0 || nrow(hits_data()) == 0) {
-        return(
-          tags$div(
-            class = "alert alert-secondary",
-            role = "alert",
-            style = "margin-bottom: 0; display: inline-block; max-width: 100%;",
-            "Select one or more dataset rows above to preview their metadata side-by-side."
-          )
-        )
-      }
-
       rows <- hits_data()[row_idx, , drop = FALSE]
 
       # Parse JSON arrays for display
