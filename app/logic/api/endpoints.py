@@ -6,6 +6,7 @@ data so the Shiny client stays a thin rendering layer.
 from __future__ import annotations
 
 import io
+import os
 import re
 
 import pyarrow.ipc as ipc
@@ -53,6 +54,10 @@ def _safe_view_name(prefix: str, lab: str, study_id: int) -> str:
     return f"{prefix}_{lab}_{study_id}"
 
 
+def _quote_identifier(identifier: str) -> str:
+    return '"' + identifier.replace('"', '""') + '"'
+
+
 def _clean_terms(values: list[str]) -> list[str]:
     """Trim, deduplicate, and validate search terms before they reach SQL."""
     cleaned = [value.strip() for value in values if value and value.strip()]
@@ -65,6 +70,84 @@ def _clean_optional_terms(values: list[str] | None) -> list[str]:
     if not values:
         return []
     return _clean_terms(values)
+
+
+def _first_existing(columns: set[str], *candidates: str | None) -> str | None:
+    for candidate in candidates:
+        if candidate and candidate in columns:
+            return candidate
+    return None
+
+
+def _dataset_context(con, lab: str, study_id: int) -> dict:
+    row = con.execute(
+        """
+        SELECT dataset_name, omic_type, source_type, data_path
+        FROM dataset_registry
+        WHERE lab_source = ? AND study_id = ?
+        LIMIT 1
+        """,
+        [lab, study_id],
+    ).fetchone()
+
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"Dataset not found for {lab}:{study_id}")
+
+    dataset_name, omic_type, source_type, data_path = row
+    table_map = dict(con.execute(
+        """
+        SELECT logical_table, actual_table
+        FROM table_mappings
+        WHERE lab_source = ? AND study_id = ?
+        """,
+        [lab, study_id],
+    ).fetchall())
+    name_map = dict(con.execute(
+        """
+        SELECT canonical_name, original_name
+        FROM column_mappings
+        WHERE lab_source = ? AND study_id = ?
+        """,
+        [lab, study_id],
+    ).fetchall())
+
+    return {
+        "dataset_name": dataset_name,
+        "omic_type": omic_type,
+        "source_type": source_type,
+        "data_path": data_path,
+        "table_map": table_map,
+        "name_map": name_map,
+        "lab": lab,
+        "study_id": study_id,
+    }
+
+
+def _table_ref(ctx: dict, actual_table: str, alias: str | None = None) -> str:
+    source_type = ctx["source_type"]
+    if source_type == "parquet":
+        path = os.path.join(ctx["data_path"], actual_table)
+        ref = f"read_parquet('{path}')"
+    elif source_type == "duckdb":
+        ref = f"src_{ctx['lab']}.main.{_quote_identifier(actual_table)}"
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Embeddings endpoint does not support source type {source_type!r}."
+        )
+
+    if alias:
+        return f"{ref} AS {alias}"
+    return ref
+
+
+def _table_columns(con, ctx: dict, actual_table: str) -> set[str]:
+    table_ref = _table_ref(ctx, actual_table)
+    return {
+        row[0] for row in con.execute(
+            f"DESCRIBE SELECT * FROM {table_ref}"
+        ).fetchall()
+    }
 
 
 def _term_predicates(genes: list[str], proteins: list[str]) -> tuple[list[str], list]:
@@ -83,6 +166,11 @@ def _term_predicates(genes: list[str], proteins: list[str]) -> tuple[list[str], 
         params.extend(term.upper() for term in proteins)
 
     return predicates, params
+
+
+def _terms_cte(terms: list[str]) -> tuple[str, list[str]]:
+    placeholders = ", ".join(["(?)"] * len(terms))
+    return f"terms(term) AS (SELECT * FROM (VALUES {placeholders}) AS t(term))", terms
 
 
 def _dataset_unions(
@@ -400,6 +488,210 @@ def expression(
         ORDER BY gene_symbol, padj ASC NULLS LAST, ABS(log2fc) DESC NULLS LAST
     """
     return _query_arrow(request, sql, params)
+
+
+@router.get("/datasets/{lab}/{study_id}/embeddings")
+def embeddings(
+    request: Request,
+    lab: str,
+    study_id: int,
+    reduction: str = Query("umap", pattern="^(?i:umap|pca|tsne)$"),
+    assay: str = Query("expression", pattern="^(?i:expression|counts)$"),
+    gene: list[str] | None = Query(None),
+    protein: list[str] | None = Query(None),
+    max_points: int = Query(75000, ge=1000, le=250000),
+):
+    """
+    Return embedding coordinates plus optional expression overlays for selected terms.
+
+    UI connection:
+    powers the single-cell Plot-tab embedding explorer, where checked search
+    genes are rendered as separate expression-coloured panels or combined
+    overlay traces on top of UMAP/PCA/tSNE coordinates.
+    """
+    genes = _clean_optional_terms(gene)
+    proteins = _clean_optional_terms(protein)
+    selected_terms = genes + [term for term in proteins if term not in genes]
+
+    pool = _require_pool(request)
+    with get_conn(pool) as con:
+        ctx = _dataset_context(con, lab, study_id)
+        if ctx["omic_type"] not in {"scrna", "snrna"}:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Embeddings are only available for sc/snRNA datasets, not {ctx['omic_type']!r}."
+            )
+
+        reduction_key = reduction.lower()
+        reduction_table = ctx["table_map"].get(reduction_key)
+        if not reduction_table:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No {reduction_key.upper()} embedding table is registered for {lab}:{study_id}."
+            )
+
+        emb_cols = _table_columns(con, ctx, reduction_table)
+        obs_col = _first_existing(emb_cols, "obs", "cell_id", "Cell_ID", "barcode")
+        if obs_col is None:
+            raise HTTPException(status_code=500, detail="Embedding table is missing an observation identifier column.")
+
+        dim_cols = [col for col in emb_cols if col != obs_col]
+        if len(dim_cols) < 2:
+            raise HTTPException(status_code=500, detail="Embedding table does not expose two coordinate columns.")
+        dim_cols = dim_cols[:2]
+
+        obs_meta_table = ctx["table_map"].get("obs_metadata") or ctx["table_map"].get("extra_metadata")
+        meta_select = ["emb.obs"]
+        meta_join = ""
+        if obs_meta_table:
+            meta_cols = _table_columns(con, ctx, obs_meta_table)
+            meta_obs_col = _first_existing(meta_cols, "obs", "cell_id", "Cell_ID", "barcode", obs_col)
+            if meta_obs_col:
+                for canonical_name in ("cell_type", "cluster_id", "condition_a", "condition_b", "tissue", "sex", "age", "cell_id"):
+                    original_name = ctx["name_map"].get(canonical_name)
+                    if original_name and original_name in meta_cols:
+                        meta_select.append(f"meta.{_quote_identifier(original_name)} AS {canonical_name}")
+                meta_join = (
+                    f"LEFT JOIN {_table_ref(ctx, obs_meta_table, 'meta')} "
+                    f"ON emb.obs = CAST(meta.{_quote_identifier(meta_obs_col)} AS VARCHAR)"
+                )
+
+        emb_sql = f"""
+            emb AS (
+              SELECT
+                CAST({_quote_identifier(obs_col)} AS VARCHAR) AS obs,
+                CAST({_quote_identifier(dim_cols[0])} AS DOUBLE) AS dim_1,
+                CAST({_quote_identifier(dim_cols[1])} AS DOUBLE) AS dim_2
+              FROM {_table_ref(ctx, reduction_table)}
+              LIMIT {int(max_points)}
+            )
+        """
+
+        if not selected_terms:
+            sql = f"""
+                WITH {emb_sql}
+                SELECT
+                  {", ".join(meta_select)},
+                  emb.dim_1,
+                  emb.dim_2,
+                  NULL::VARCHAR AS term,
+                  NULL::DOUBLE AS expression_value
+                FROM emb
+                {meta_join}
+                ORDER BY emb.obs
+            """
+            return _query_arrow(request, sql)
+
+        assay_key = assay.lower()
+        assay_table = ctx["table_map"].get(assay_key)
+        if not assay_table:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No assay table registered for {assay_key!r} in {lab}:{study_id}."
+            )
+
+        feature_table = ctx["table_map"].get("feature_annotations") or ctx["table_map"].get("gene_annotations")
+        if not feature_table:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No feature annotation table is registered for {lab}:{study_id}."
+            )
+
+        assay_cols = _table_columns(con, ctx, assay_table)
+        feature_cols = _table_columns(con, ctx, feature_table)
+
+        assay_obs_col = _first_existing(assay_cols, "obs", "cell_id", "Cell_ID", "barcode")
+        assay_feature_col = _first_existing(assay_cols, "feature_id", "ID", "gene_id")
+        assay_value_col = next((col for col in assay_cols if col not in {assay_obs_col, assay_feature_col}), None)
+        feature_id_col = _first_existing(feature_cols, "feature_id", "ID", "gene_id")
+
+        if not assay_obs_col or not assay_feature_col or not assay_value_col or not feature_id_col:
+            raise HTTPException(
+                status_code=500,
+                detail="Assay or feature annotation parquet schema is missing obs/feature/value columns needed for embedding overlays."
+            )
+
+        gene_label_col = _first_existing(
+            feature_cols,
+            ctx["name_map"].get("gene_symbol"),
+            ctx["name_map"].get("human_gene"),
+            "feature_name",
+            "gene_name",
+            "gene_symbol",
+            "Human_Gene",
+            "Mouse_Gene",
+            "symbol",
+        )
+        protein_label_col = _first_existing(
+            feature_cols,
+            ctx["name_map"].get("protein_id"),
+            "protein_id",
+            "Uniprot_id",
+            "Uniprot_ID",
+        )
+
+        term_predicates = []
+        params: list[str] = []
+
+        if genes and gene_label_col:
+            placeholders = ",".join(["?"] * len(genes))
+            term_predicates.append(
+                f"UPPER(CAST(ann.{_quote_identifier(gene_label_col)} AS VARCHAR)) IN ({placeholders})"
+            )
+            params.extend(term.upper() for term in genes)
+
+        if proteins and protein_label_col:
+            placeholders = ",".join(["?"] * len(proteins))
+            term_predicates.append(
+                f"UPPER(CAST(ann.{_quote_identifier(protein_label_col)} AS VARCHAR)) IN ({placeholders})"
+            )
+            params.extend(term.upper() for term in proteins)
+
+        if not term_predicates:
+            raise HTTPException(
+                status_code=400,
+                detail="Selected terms cannot be resolved against the available feature annotation columns."
+            )
+
+        term_expr_candidates = []
+        if gene_label_col:
+            term_expr_candidates.append(f"NULLIF(CAST(ann.{_quote_identifier(gene_label_col)} AS VARCHAR), '')")
+        if protein_label_col:
+            term_expr_candidates.append(f"NULLIF(CAST(ann.{_quote_identifier(protein_label_col)} AS VARCHAR), '')")
+        term_expr = "COALESCE(" + ", ".join(term_expr_candidates) + ")"
+
+        terms_sql, term_params = _terms_cte(selected_terms)
+        sql = f"""
+            WITH
+            {emb_sql},
+            {terms_sql},
+            expr_overlay AS (
+              SELECT
+                CAST(expr.{_quote_identifier(assay_obs_col)} AS VARCHAR) AS obs,
+                {term_expr} AS term,
+                MAX(CAST(expr.{_quote_identifier(assay_value_col)} AS DOUBLE)) AS expression_value
+              FROM {_table_ref(ctx, assay_table, 'expr')}
+              LEFT JOIN {_table_ref(ctx, feature_table, 'ann')}
+                ON CAST(expr.{_quote_identifier(assay_feature_col)} AS VARCHAR) =
+                   CAST(ann.{_quote_identifier(feature_id_col)} AS VARCHAR)
+              WHERE {" OR ".join(term_predicates)}
+              GROUP BY 1, 2
+            )
+            SELECT
+              {", ".join(meta_select)},
+              emb.dim_1,
+              emb.dim_2,
+              terms.term,
+              COALESCE(expr_overlay.expression_value, 0) AS expression_value
+            FROM emb
+            CROSS JOIN terms
+            {meta_join}
+            LEFT JOIN expr_overlay
+              ON emb.obs = expr_overlay.obs
+             AND UPPER(terms.term) = UPPER(expr_overlay.term)
+            ORDER BY emb.obs, terms.term
+        """
+        return _query_arrow(request, sql, term_params + params)
 
 
 @router.get("/datasets/{lab}/{study_id}/top-de")

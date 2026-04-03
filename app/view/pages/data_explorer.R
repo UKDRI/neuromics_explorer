@@ -26,9 +26,9 @@ box::use(
   app/view/components/dataset_table[dataset_table_ui, dataset_table_server],
   app/view/components/expression_heatmap[heatmap_ui, heatmap_server],
   app/view/components/results_table[results_ui, results_server],
+  app/view/components/umap_plot[umap_ui, umap_server],
   app/view/components/violin_plot[violin_ui, violin_server],
   app/view/components/volcano_plot[volcano_ui, volcano_server],
-  # app/view/components/umap_plot[umap_ui, umap_server],
   app/view/pages/gene_dataset_selector[gene_selector_ui, gene_selector_server],
   app/view/pages/explore_sidebar[sidebar_ui, sidebar_server],
   app/logic/api/api_client[fetch_dataset_expression, fetch_expression_multi_dataset,
@@ -528,10 +528,22 @@ explorer_server <- function(id) {
         )
       }
 
+      if (identical(plot_type, "UMAP") &&
+          !isTRUE(selected_dataset()$omic_type %in% c("scrna", "snrna"))) {
+        return(
+          tags$div(
+            class = "alert alert-info",
+            role = "alert",
+            "Embedding plots are only available for scRNA-seq and snRNA-seq datasets."
+          )
+        )
+      }
+
       switch(
         plot_type,
         Heatmap = heatmap_ui(session$ns("heatmap")),
         Violin = violin_ui(session$ns("violin")),
+        UMAP = umap_ui(session$ns("umap")),
         volcano_ui(session$ns("volcano"))
       )
     })
@@ -839,6 +851,7 @@ explorer_server <- function(id) {
                    padj_thresh = sidebar_vals$padj_thresh,
                    lfc_thresh  = sidebar_vals$lfc_thresh_min,
                    n_genes     = reactive(50L))
+    umap_server("umap",       selected_dataset)
     violin_server("violin",    de_data,
                   padj_thresh = sidebar_vals$padj_thresh,
                   lfc_thresh  = sidebar_vals$lfc_thresh_min)

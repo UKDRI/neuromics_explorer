@@ -323,6 +323,23 @@ def parse_and_load_registry(yaml_path: str, registry_db_path: str):
                         resolve_logical_table(yaml_key, actual_table, source_type or ""), actual_table)])
                     print(f"  [DEBUG] resolve_logical_table(): {resolve_logical_table(yaml_key, actual_table, source_type or '')}")
 
+                for reduction in ds.get("reductions", []):
+                    reduction_name = (reduction.get("name") or reduction.get("dim_name") or "").strip()
+                    actual_table = (reduction.get("actual_table") or reduction.get("dim_name") or reduction_name).strip()
+                    if not reduction_name or not actual_table:
+                        continue
+                    con.executemany("""
+                        INSERT OR REPLACE INTO table_mappings (study_id, lab_source, lab_name, logical_table, actual_table)
+                        VALUES (?,?,?,?,?)
+                    """, [(
+                        study_id,
+                        source_id,
+                        source.get("lab_name"),
+                        reduction_name.lower(),
+                        actual_table
+                    )])
+                    print(f"  [DEBUG] reduction mapping: {reduction_name.lower()} -> {actual_table}")
+
         if issue_rows:
             con.executemany("""
                 INSERT INTO registry_load_issues

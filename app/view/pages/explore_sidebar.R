@@ -138,6 +138,21 @@ sidebar_server <- function(id, selected_dataset) {
       updateSelectInput(session, "organism",     selected = "All")
       # session$reload()
     })
+
+    observeEvent(selected_dataset(), {
+      ds <- selected_dataset()
+      choices <- c("Volcano", "Heatmap", "Violin")
+      if (!is.null(ds) && ds$omic_type %in% c("scrna", "snrna")) {
+        choices <- c(choices, "UMAP")
+      }
+
+      selected_plot <- input$plot_type %||% "Volcano"
+      if (!selected_plot %in% choices) {
+        selected_plot <- choices[[1]]
+      }
+
+      updateSelectInput(session, "plot_type", choices = choices, selected = selected_plot)
+    }, ignoreInit = FALSE)
     
     # ── Return reactive list for use by data_explore.R ────────────────────
     list(
@@ -150,6 +165,8 @@ sidebar_server <- function(id, selected_dataset) {
     )
   })
 }
+
+`%||%` <- function(a, b) if (!is.null(a)) a else b
 
 
 

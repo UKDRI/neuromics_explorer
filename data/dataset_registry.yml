@@ -253,6 +253,9 @@ sources:
           counts: "counts.parquet"
           obs_metadata: "obs_metadata.parquet"
           feature_annotations: "feature_annotations.parquet"
+          umap: "UMAP.parquet"
+          pca: "PCA.parquet"
+          tsne: "TSNE.parquet"
         feature_cols:
           - feature_id
         metric_cols:
@@ -278,6 +281,9 @@ sources:
           counts: "counts.parquet"
           obs_metadata: "obs_metadata.parquet"
           feature_annotations: "feature_annotations.parquet"
+          umap: "UMAP.parquet"
+          pca: "PCA.parquet"
+          tsne: "TSNE.parquet"
         feature_cols:
           - feature_id
         metric_cols:
@@ -300,6 +306,9 @@ sources:
           counts: "counts.parquet"
           obs_metadata: "obs_metadata.parquet"
           feature_annotations: "feature_annotations.parquet"
+          umap: "UMAP.parquet"
+          pca: "PCA.parquet"
+          tsne: "TSNE.parquet"
         feature_cols:
           - feature_id
         metric_cols:
@@ -323,6 +332,9 @@ sources:
           counts: "counts.parquet"
           obs_metadata: "obs_metadata.parquet"
           feature_annotations: "feature_annotations.parquet"
+          umap: "UMAP.parquet"
+          pca: "PCA.parquet"
+          tsne: "TSNE.parquet"
         feature_cols:
           - feature_id
         metric_cols:
@@ -346,6 +358,9 @@ sources:
           counts: "counts.parquet"
           obs_metadata: "obs_metadata.parquet"
           feature_annotations: "feature_annotations.parquet"
+          umap: "UMAP.parquet"
+          pca: "PCA.parquet"
+          tsne: "TSNE.parquet"
         feature_cols:
           - feature_id
         metric_cols:
@@ -369,6 +384,9 @@ sources:
           counts: "counts.parquet"
           obs_metadata: "obs_metadata.parquet"
           feature_annotations: "feature_annotations.parquet"
+          umap: "UMAP.parquet"
+          pca: "PCA.parquet"
+          tsne: "TSNE.parquet"
         feature_cols:
           - feature_id
         metric_cols:
@@ -392,6 +410,9 @@ sources:
           counts: "counts.parquet"
           obs_metadata: "obs_metadata.parquet"
           feature_annotations: "feature_annotations.parquet"
+          umap: "UMAP.parquet"
+          pca: "PCA.parquet"
+          tsne: "TSNE.parquet"
         feature_cols:
           - feature_id
         metric_cols:

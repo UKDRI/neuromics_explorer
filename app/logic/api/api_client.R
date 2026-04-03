@@ -15,7 +15,7 @@ ARROW_MEDIA_TYPE <- "application/vnd.apache.arrow.stream"
 
 #' @export
 set_api_base_url <- function(base_url) {
-  options(nex.api_base_url = sub("/+$", "", base_url))
+  options(nex.api_base_url = normalise_api_base_url(base_url))
 }
 
 #' Resolve the configured API base URL.
@@ -27,21 +27,31 @@ api_base_url <- function() {
     "nex.api_base_url",
     Sys.getenv("NEX_API_BASE_URL", "http://127.0.0.1:7000/api")
   )
-  sub("/+$", "", base_url)
+  normalise_api_base_url(base_url)
 }
 
-#' Generate fallback API base URLs with and without the `/api` suffix.
+#' Normalise a configured service base URL to the FastAPI router mount point.
 #'
-#' @return Character vector of candidate base URLs.
+#' The production app mounts query routes under `/api`, so probing both
+#' `http://host` and `http://host/api` just creates misleading 404 noise when
+#' the bare root is not a valid dataset route.
+#'
+#' @param base_url Base service URL supplied by env var or setter.
+#'
+#' @return Canonical API base URL ending in `/api`.
+#' @noRd
+normalise_api_base_url <- function(base_url) {
+  base <- sub("/+$", "", base_url)
+  if (grepl("/api$", base)) return(base)
+  paste0(base, "/api")
+}
+
+#' Return the single canonical API base URL.
+#'
+#' @return Character vector of length 1.
 #' @noRd
 candidate_base_urls <- function() {
-  base <- api_base_url()
-
-  if (grepl("/api$", base)) {
-    unique(c(base, sub("/api$", "", base)))
-  } else {
-    unique(c(base, paste0(base, "/api")))
-  }
+  api_base_url()
 }
 
 #' Drop `NULL`, empty, and zero-length query items before URL construction.
@@ -336,6 +346,37 @@ fetch_dataset_expression <- function(lab_source, study_id,
       padj      = padj_thresh,
       lfc       = lfc_thresh,
       cell_type = cell_type
+    )
+  )
+}
+
+#' Fetch embedding coordinates and optional selected-term expression overlays.
+#'
+#' UI connection: powers the single-cell UMAP/PCA/tSNE plot in the explorer
+#' Plot tab for parquet-backed sc/snRNA datasets.
+#' @export
+fetch_dataset_embeddings <- function(lab_source, study_id,
+                                     reduction = c("umap", "pca", "tsne"),
+                                     assay = c("expression", "counts"),
+                                     genes = NULL,
+                                     proteins = NULL,
+                                     max_points = 75000L) {
+  reduction <- match.arg(reduction)
+  assay <- match.arg(assay)
+
+  genes <- unique(trimws(genes %||% character(0)))
+  genes <- genes[nzchar(genes)]
+  proteins <- unique(trimws(proteins %||% character(0)))
+  proteins <- proteins[nzchar(proteins)]
+
+  perform_arrow_request(
+    sprintf("/datasets/%s/%s/embeddings", lab_source, study_id),
+    query = list(
+      reduction = reduction,
+      assay = assay,
+      gene = genes,
+      protein = proteins,
+      max_points = as.integer(max_points)
     )
   )
 }
