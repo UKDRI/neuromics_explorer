@@ -1,0 +1,95 @@
+:root {
+  --ukdri-dark-blue: #00236e;
+  --ukdri-light-grey: #d6dee8;
+  --ukdri-dark-grey: #315b7a;
+  --ukdri-sky-blue: #0a7aff;
+  --ukdri-petrol-blue: #007faf;
+  --ukdri-bright-blue: #00cbff;
+  --ukdri-fuchsia: #e1235c;
+  --ukdri-white: #ffffff;
+  --ukdri-black: #111828;
+  --font-heading: "FS Untitled Regular 450", "Helvetica Neue LT Standard", "Helvetica", Arial, sans-serif;
+  --font-body: "Helvetica Neue LT Standard", "Helvetica", Arial, sans-serif;
+}
+
+.hero-banner,
+.hero-section {
+  /* background: linear-gradient(135deg, #667eea 0%, #667eea 100%) !important; */
+  background: linear-gradient(135deg, rgb(0, 50, 110) 0%, rgb(79, 42, 136) 45%, rgb(225, 35, 92) 100%) !important;
+  color: white !important;
+  border-radius: 10px;
+  padding: 24px;
+}
+
+.hero-banner h5,
+.hero-section h1,
+.hero-section p {
+  color: #ffffff !important;
+}
+
+body {
+  font-family: var(--font-body);
+  color: #162333;
+  background-color: #f4f7fb;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-heading);
+  color: var(--ukdri-dark-blue);
+}
+
+.sidebar-heading {
+  color: var(--ukdri-sky-blue);
+  margin-top: 0;
+}
+
+.explore-sidebar {
+  position: sticky;
+  top: 88px;
+  max-height: calc(100vh - 96px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  background-color: var(--ukdri-white);
+  border: 1px solid var(--ukdri-light-grey);
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(24, 69, 116, 0.08);
+  padding: 16px;
+}
+
+
+.card, .panel, .panel-default {
+  border-color: var(--ukdri-light-grey) !important;
+  box-shadow: 0 4px 14px rgba(8, 36, 75, 0.08) !important;
+}
+
+.btn-primary, .btn-primary:hover, .btn-primary:focus {
+  background-color: var(--ukdri-sky-blue) !important;
+  border-color: var(--ukdri-petrol-blue) !important;
+  color: #fff !important;
+}
+
+.alert-info {
+  background-color: #eaf2ff;
+  color: #23467d;
+  border-color: #bed4f5;
+}
+
+.value-box {
+  background: linear-gradient(135deg, var(--ukdri-bright-blue), var(--ukdri-petrol-blue));
+  color: #fff;
+}
+
+.table thead th {
+  background-color: var(--ukdri-dark-grey) !important;
+  color: #fff !important;
+}
+
+.navbar-nav .nav-link, .navbar-brand {
+  color: var(--ukdri-dark-blue) !important;
+}
+
+.navbar-brand img {
+  margin-right: 10px;
+  height: 50px !important;
+  width: auto;
+}
