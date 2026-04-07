@@ -29,6 +29,11 @@ box::use(
   app/view/components/umap_plot[umap_ui, umap_server],
   app/view/components/violin_plot[violin_ui, violin_server],
   app/view/components/volcano_plot[volcano_ui, volcano_server],
+  app/view/components/feature_scatter_plot[feature_scatter_ui, feature_scatter_server],
+  app/view/components/histogram_plot[histogram_ui, histogram_server],
+  app/view/components/dots_plot[dots_ui, dots_server],
+  app/view/components/highest_expr_plot[highest_expr_ui, highest_expr_server],
+  app/view/components/mds_plot[mds_ui, mds_server],
   app/view/pages/gene_dataset_selector[gene_selector_ui, gene_selector_server],
   app/view/pages/explore_sidebar[sidebar_ui, sidebar_server],
   app/logic/api/api_client[fetch_dataset_expression, fetch_expression_multi_dataset,
@@ -40,49 +45,46 @@ box::use(
 explorer_ui <- function(id) {
   ns <- NS(id)
 
-  fluidRow(
-
-    # ── LEFT collapsible sidebar (filters)   ───────────────────────────────
-    page_sidebar(
-      sidebar = sidebar(
-        title = div(tags$h6("Data Filters and Threshold Options", style = "margin-top: 0; color: #667eea;"), tags$hr()),
+  # Two-column layout: sidebar (320px) + main content (flexible)
+  # Uses CSS grid for natural page scrolling (sidebar moves with page, not sticky)
+  div(
+    style = "display: grid; grid-template-columns: 320px 1fr; gap: 2rem; padding: 1rem;",
+    
+    # ── LEFT COLUMN: SIDEBAR ──────────────────────────────────────────
+    div(
+      class = "explore-sidebar",
+      sidebar(
+        title = div(tags$h6("Data Filters and Threshold Options", class = "sidebar-heading"), tags$hr()),
         collapsible = TRUE,
         open = TRUE,
-        fillable = TRUE, #FALSE,
-        # width = 300,
-        # bg = "#f8f9fa",
-        # style = "background-color: #f8f9fa; padding: 15px; min-height: 100vh;",
-
+        fillable = FALSE,
         # Embed sidebar controls from explore_sidebar.R module
         sidebar_ui(ns("filters"))
-      ),
-      
+      )
+    ),
+    
+    # ── RIGHT COLUMN: MAIN CONTENT ────────────────────────────────────
+    div(
       # Hero banner for modal popup
       div(
-        class = "text-center",
-        style = "background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                   border-radius: 10px; padding: 24px; margin-bottom: 16px; color: white;",
+        class = "hero-banner",
         tags$h5("Find and explore all available datasets by clicking the button below to get started.",
-                style = "color: white; margin-bottom: 8px;"),
+                style = "margin-bottom: 8px;"),
         gene_selector_ui(ns("gene_selector"))
       ),
       # # Everything below is hidden until a dataset is selected
       # conditionalPanel(
       #   condition = paste0("output['", ns("has_selection"), "']"),
-      
 
-      # ── Main content column ─────────────────────────────────────────────
+      # ── Main content: Two-column layout (75% left, 25% right) ─────────
       layout_columns(
         col_widths = c(9, 3),
         gap = "1rem",
         
-        # ── Gene search modal trigger ─────────────────────────────────────
-        div(
-        #   style = "margin-bottom: 10px;",
-        #   # gene_selector_ui(ns("gene_selector")),  # render "Search" button
-
-          # ──  Left column - top card: Datasets results table ─────────────
+        # ── LEFT INNER COLUMN: Main content ────────────────────────────
+        tags$div(
           class = "explore-content",
+          # ──  Top card: Datasets results table ──────────────────────
           card(
             full_screen = TRUE,
             style = "height: auto;",
@@ -95,7 +97,7 @@ explorer_ui <- function(id) {
             )
           ),
 
-          # ── Left column - middle card: Main visualisations ──────────────
+          # ──  Middle card: Main visualisations ──────────────────────
           card(
             full_screen = TRUE,
             card_header(
@@ -120,13 +122,6 @@ explorer_ui <- function(id) {
             ),
             card_body(
               min_height = "500px",
-              tags$div(
-                class = "alert alert-info",
-                role = "alert",
-                style = "margin-bottom: 12px;",
-                tags$strong("NB: "),
-                "Select one dataset row in **Dataset Listings** above to drive the Expression and Plot tab. Select two or more rows to activate **Compare** tab."
-              ),
 
               # Tab navigation for expression and various other plots
               navset_card_tab(
@@ -147,6 +142,41 @@ explorer_ui <- function(id) {
                 ),
 
                 nav_panel(
+                  title = "Feature Scatter",
+                  icon = icon("object-group"),
+                  uiOutput(ns("active_dataset_banner_plot")),
+                  feature_scatter_ui(ns("feature_scatter"))
+                ),
+
+                nav_panel(
+                  title = "Histograms",
+                  icon = icon("bars"),
+                  uiOutput(ns("active_dataset_banner_plot")),
+                  histogram_ui(ns("histogram"))
+                ),
+
+                nav_panel(
+                  title = "Dots Plot",
+                  icon = icon("th"),
+                  uiOutput(ns("active_dataset_banner_plot")),
+                  dots_ui(ns("dots"))
+                ),
+
+                nav_panel(
+                  title = "Top Genes",
+                  icon = icon("arrow-up"),
+                  uiOutput(ns("active_dataset_banner_plot")),
+                  highest_expr_ui(ns("highest_expr"))
+                ),
+
+                nav_panel(
+                  title = "MDS",
+                  icon = icon("project-diagram"),
+                  uiOutput(ns("active_dataset_banner_plot")),
+                  mds_ui(ns("mds"))
+                ),
+
+                nav_panel(
                   title = "Compare",
                   icon = icon("table-columns"),
                   uiOutput(ns("compare_ui"))
@@ -155,16 +185,12 @@ explorer_ui <- function(id) {
             )
           ),
 
-          # ── Left column - bottom row of cards: Quick Stats ─────────────
+          # ──  Bottom row of cards: Quick Stats ──────────────────
           tags$div(
             style = "margin-top: 20px;",
-            # tags$h5("Quick Statistics", class = "mb-3"),
             layout_columns(
               fill = FALSE,
-              # col_widths = c(2, 2, 2, 2, 2, 2),
-              # full_screen = FALSE,
-              style = "text-align:center; font-size:1.2rem;
-        background-color: #f9f9f9; padding: 10px; border-radius: 8px;",
+              style = "text-align:center; font-size:1.2rem; background-color: #f9f9f9; padding: 10px; border-radius: 8px;",
               card(valueBoxOutput(ns("box_datasets"))),
               card(valueBoxOutput(ns("box_genes"))),
               card(valueBoxOutput(ns("box_sig_genes"))),
@@ -172,21 +198,14 @@ explorer_ui <- function(id) {
               card(valueBoxOutput(ns("box_cell_types"))),
               card(valueBoxOutput(ns("box_samples"))),
               card(valueBoxOutput(ns("box_conditions")))
-              # card(valueBoxOutput("selected_datasets_box")),
-              # card(valueBoxOutput("total_genes_box")),
-              # card(valueBoxOutput("selected_genes_box")),
-              # card(valueBoxOutput("total_cells_box")),
-              # card(valueBoxOutput("cell_types_box")),
-              # card(valueBoxOutput("total_samples_box")),
-              # card(valueBoxOutput("qc_rate_box"))
             )
           )
         ),
 
-        # ── Right column - Project info accordion ────────────────────────
+        # ── RIGHT INNER COLUMN: Project info accordion ──────────────
         card(
           max_height = "90vh",
-          style = "overflow-y: auto;", #"margin-top: 20px; position: sticky; top: 1rem;",
+          style = "overflow-y: auto;",
           card_header("Project Information"),
           card_body(
             style = "padding: 0;",
@@ -241,10 +260,7 @@ explorer_ui <- function(id) {
           )
         )
       )
-    ),
-
-    # Spacer at the bottom
-    tags$div(style = "height: 30px;")
+    )
   )
 }
 
@@ -491,13 +507,10 @@ explorer_server <- function(id) {
     # It reruns when selected datasets, search terms, or thresholds change.
     compare_plot_data <- reactive({
       datasets <- compare_source_rows()
-      ds <- selected_dataset()
-      req(nrow(datasets) > 1, ds)
+      req(nrow(datasets) > 1)
 
       fetch_expression_multi_dataset(
         dataset_list = datasets,
-        genes = ds$genes,
-        proteins = ds$proteins,
         padj_thresh = sidebar_vals$padj_thresh(),
         lfc_thresh = sidebar_vals$lfc_thresh_min()
       )
@@ -519,17 +532,6 @@ explorer_server <- function(id) {
     # sidebar plot selector while keeping the active dataset row in control.
     output$plot_ui <- renderUI({
       plot_type <- sidebar_vals$plot_type()
-
-      if (is.null(selected_dataset())) {
-        return(
-          tags$div(
-            class = "alert alert-info",
-            role = "alert",
-            tags$strong("NB: "),
-            "Select one or more datasets in the modal, then choose a row in Dataset Listings to render a plot."
-          )
-        )
-      }
 
       if (identical(plot_type, "UMAP") &&
           !isTRUE(selected_dataset()$omic_type %in% c("scrna", "snrna"))) {
@@ -588,8 +590,6 @@ explorer_server <- function(id) {
         single_df <- fetch_dataset_expression(
           lab_source = row$lab_source[1],
           study_id = row$study_id[1],
-          genes = ds$genes,
-          proteins = ds$proteins,
           padj_thresh = sidebar_vals$padj_thresh(),
           lfc_thresh = sidebar_vals$lfc_thresh_min()
         )
@@ -607,8 +607,6 @@ explorer_server <- function(id) {
 
       fetch_expression_multi_dataset(
         dataset_list = datasets,
-        genes = ds$genes,
-        proteins = ds$proteins,
         padj_thresh = sidebar_vals$padj_thresh(),
         lfc_thresh = sidebar_vals$lfc_thresh_min()
       )
@@ -624,8 +622,6 @@ explorer_server <- function(id) {
       fetch_dataset_expression(
         lab_source  = ds$lab_source,
         study_id    = ds$study_id,
-        genes       = ds$genes,
-        proteins    = ds$proteins,
         padj_thresh = sidebar_vals$padj_thresh(),
         lfc_thresh  = sidebar_vals$lfc_thresh_min()
       )
@@ -725,15 +721,7 @@ explorer_server <- function(id) {
             class = "alert alert-info",
             role = "alert",
             tags$strong("NB: "),
-            "Use the search modal to select one or more datasets."
-          ),
-          tags$div(
-            style = "border: 1px solid #ddd; padding: 15px; border-radius: 8px; background: white; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin: 10px 0;",
-            tags$h5(style = "margin-top: 0; color: #2196F3;", "Default Behaviour"),
-            tags$p(
-              style = "margin-bottom: 0;",
-              "Choose one or more datasets in the modal, then use row selection here to drive the combined table, Compare tab, and the active dataset shown in Plots."
-            )
+            "Once dataset table appears below, click on one or more datasets to drive the expression table, and plot tabs. Select two or more rows to activate the compare tab."
           )
         ))
       }
@@ -864,6 +852,13 @@ explorer_server <- function(id) {
     violin_server("violin",    de_data,
                   padj_thresh = sidebar_vals$padj_thresh,
                   lfc_thresh  = sidebar_vals$lfc_thresh_min)
+    
+    # ── New plot modules ──────────────────────────────────────────────────
+    feature_scatter_server("feature_scatter", de_data)
+    histogram_server("histogram", de_data)
+    dots_server("dots", de_data)
+    highest_expr_server("highest_expr", de_data)
+    mds_server("mds", de_data)
     
     # ── Value boxes (tied to dataset_stats) ─────────────────────────────
     # stats_row <- reactive({

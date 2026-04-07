@@ -9,7 +9,7 @@ message("API: ", API_BASE_URL)
 
 # ── Load modules, define ui and server ─────────────────────────────────────
 box::use(
-  shiny[...],  
+  shiny[addResourcePath, ...],  
   # shiny[bootstrapPage, div, moduleServer, NS, renderUI, tags, uiOutput, observeEvent],
   bslib[...],
   shinyjs[useShinyjs],
@@ -20,11 +20,21 @@ box::use(
   app/view/pages/data_submit[submit_ui, submit_server],
 )
 
+# Register app/static as a Shiny resource path so the logo and custom stylesheet are served correctly.
+static_path <- "app/static"
+if (!dir.exists(static_path)) {
+  static_path <- "static"
+}
+if (!dir.exists(static_path)) {
+  stop("Could not locate the app static asset folder. Expected app/static or static.")
+}
+addResourcePath("static", normalizePath(static_path))
+
 #' @export
 ui <- page_navbar(
   title = div(
     style = "display: flex; align-items: center;",
-    img(src = "static/images/logo.png", height = "30px", style = "margin-right: 10px;"),
+    img(src = "static/images/ukdri_logo.png", height = "30px", style = "margin-right: 10px;"),
     "NeurOmicsExplorer"
   ),
   id = "main_nav",

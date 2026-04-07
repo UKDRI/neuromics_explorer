@@ -18,7 +18,7 @@ homepage_ui <- function(id) {
         .hero-section {
           text-align: center;
           padding: 60px 20px;
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          background: linear-gradient(135deg, #667eea 80%, #764ba2 0%);
           color: white;
           margin: -20px -20px 40px -20px;
         }
@@ -83,7 +83,7 @@ homepage_ui <- function(id) {
           border: none;
           padding: 12px 30px;
           border-radius: 25px;
-          font-weight: 600;
+          font-weight: 700;
           cursor: pointer;
           transition: all 0.3s;
         }

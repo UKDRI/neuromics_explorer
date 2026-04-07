@@ -29,7 +29,7 @@ gene_selector_ui <- function(id) {
   tagList(
     actionButton(
       ns("open_btn"),
-      label = "Search Gene or Protein",
+      label = "Search gene or protein",
       class = "btn btn-primary btn-lg",
       # multiple = TRUE,
       # options = list(
@@ -38,7 +38,7 @@ gene_selector_ui <- function(id) {
       #   maxItems = NULL,
       #   create = FALSE
       # ),
-      style = "margin-bottom: 12px;"
+      style = "margin-bottom: 12px; background: linear-gradient(135deg, rgb(225, 35, 92) 100%);"
     )
     # The modal is injected by the server on click — no static placeholder needed
   )
