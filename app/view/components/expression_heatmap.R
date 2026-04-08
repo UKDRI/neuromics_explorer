@@ -6,7 +6,7 @@ box::use(
   dplyr[mutate, filter, select, arrange, desc, case_when, slice_head],
   tidyr[pivot_wider],
   tibble[column_to_rownames],
-  app/logic/api/api_client[fetch_dataset_expression],
+  app/logic/api/api_client[fetch_top_de],
 )
 
 #' @export
@@ -29,30 +29,15 @@ heatmap_server <- function(id, selected_dataset,
     top_genes <- reactive({
       ds <- selected_dataset()
       req(ds)
-      df <- fetch_dataset_expression(
-        ds$lab_source,
-        ds$study_id,
+      df <- fetch_top_de(
+        lab_source = ds$lab_source,
+        study_id = ds$study_id,
+        n = n_genes(),
         padj_thresh = padj_thresh(),
         lfc_thresh  = lfc_thresh()
       )
       req(nrow(df) > 0)
-
-      ranked <- df |>
-        dplyr::mutate(
-          sig = dplyr::case_when(
-            !is.na(padj) & padj < padj_thresh() & log2fc >  lfc_thresh() ~ "Up",
-            !is.na(padj) & padj < padj_thresh() & log2fc < -lfc_thresh() ~ "Down",
-            TRUE ~ "NS"
-          ),
-          rank_bucket = ifelse(sig == "NS", 1L, 0L),
-          abs_lfc = abs(log2fc)
-        ) |>
-        dplyr::arrange(rank_bucket, dplyr::desc(abs_lfc), padj) |>
-        dplyr::select(gene_symbol) |>
-        unique() |>
-        dplyr::slice_head(n = n_genes())
-
-      df[df$gene_symbol %in% ranked$gene_symbol, , drop = FALSE]
+      df
     })
 
     output$plot <- renderPlotly({

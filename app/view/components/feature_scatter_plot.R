@@ -1,259 +1,115 @@
-# ─────────────────────────────────────────────────────────────────────────────
-# Feature Scatter Plot Module
-# ─────────────────────────────────────────────────────────────────────────────
-# Plotly scatter plot showing expression/features across samples/cells
-# Features:
-#   - Dropdown to select features (searched terms)
-#   - Checkboxes to toggle individual genes on/off
-#   - Interactive hover with cell metadata
-# ─────────────────────────────────────────────────────────────────────────────
+# Targeted feature scatter plot for genes/proteins of interest.
 
 box::use(
-  shiny[moduleServer, NS, reactive, observe, uiOutput, renderUI, req, div, tags,
-         selectInput, textInput, checkboxInput],
-  shinyjs[runjs],
-  bslib[card, card_header, card_body, layout_columns],
-  plotly[plotlyOutput, renderPlotly, plot_ly, add_trace, layout],
-  dplyr[mutate, select, filter, everything],
+  shiny[moduleServer, NS, reactive, renderUI, req, validate, need, tagList],
+  plotly[plotlyOutput, renderPlotly, plot_ly, layout],
+  bslib[card, card_body, card_header],
+  dplyr[mutate, case_when],
+  app/logic/api/api_client[fetch_expression_goi],
 )
-
-# ─────────────────────────────────────────────────────────────────────────────
-# UI Function
-# ─────────────────────────────────────────────────────────────────────────────
 
 #' @export
 feature_scatter_ui <- function(id) {
   ns <- NS(id)
-
-  div(
-    # Controls: Feature dropdown and gene selector checkboxes
+  tagList(
     card(
       full_screen = FALSE,
       style = "margin-bottom: 1rem;",
-      card_header(
-        "Feature Selection"
-      ),
+      card_header("Selected gene/protein scatter"),
       card_body(
-        layout_columns(
-          col_widths = c(6, 6),
-          # Feature dropdown selector
-          div(
-            tags$label("Select Features:", class = "form-label"),
-            selectInput(
-              ns("feature_select"),
-              label = NULL,
-              choices = c("None" = ""),
-              selected = "",
-              width = "100%"
-            )
-          ),
-          # Gene/term filter
-          div(
-            tags$label("Filter Genes:", class = "form-label"),
-            textInput(
-              ns("gene_filter"),
-              label = NULL,
-              placeholder = "Type to filter genes...",
-              width = "100%"
-            )
-          )
-        ),
-        # Gene selection checkboxes
-        tags$div(
-          id = ns("gene_checkboxes_container"),
-          style = "border: 1px solid #dee2e6; padding: 0.75rem; border-radius: 4px; max-height: 200px; overflow-y: auto;",
-          tags$p("No genes selected", style = "color: #6c757d; font-size: 0.875rem;")
-        )
+        shiny::uiOutput(ns("term_note"))
       )
     ),
-
-    # Scatter plot
-    plotlyOutput(ns("scatter_plot"), height = "500px"),
-
-    # Plot info/summary
-    uiOutput(ns("scatter_info"))
+    plotlyOutput(ns("scatter_plot"), height = "520px")
   )
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Server Function
-# ─────────────────────────────────────────────────────────────────────────────
-
+#' @param selected_dataset Reactive list describing the active dataset and modal selections.
+#' @param padj_thresh Reactive numeric significance threshold used for colouring.
+#' @param lfc_thresh Reactive numeric fold-change threshold used for colouring.
 #' @export
-feature_scatter_server <- function(id, de_data) {
+feature_scatter_server <- function(id, selected_dataset, padj_thresh, lfc_thresh) {
   moduleServer(id, function(input, output, session) {
-    ns <- session$ns
 
-    # Sample data structure:
-    # de_data() contains:
-    #   - gene names in rows
-    #   - cell_id, cell_type, condition, log2fc, padj, pval, mean_expr
-    #   - expression matrix (normalized log2)
-
-    # Reactive: Extract available genes from de_data
-    available_genes <- reactive({
-      req(de_data())
-      data <- de_data()
-      if (is.null(data) || nrow(data) == 0) {
-        return(c())
-      }
-      # Assuming de_data has gene column
-      unique(sort(data$gene))
+    selected_terms <- reactive({
+      ds <- selected_dataset()
+      req(ds)
+      terms <- unique(c(ds$genes %||% character(0), ds$proteins %||% character(0)))
+      terms[nzchar(terms)]
     })
 
-    # Reactive: Filtered genes based on text input
-    filtered_genes <- reactive({
-      genes <- available_genes()
-      filter_text <- tolower(input$gene_filter)
-      if (filter_text == "") {
-        return(genes)
-      }
-      genes[tolower(genes) %like% filter_text]
-    })
-
-    # Reactive: Selected genes from checkboxes
-    selected_genes <- reactive({
-      genes <- filtered_genes()
-      selected <- c()
-      for (gene in genes) {
-        if (isTRUE(input[[paste0("gene_", gene)]])) {
-          selected <- c(selected, gene)
-        }
-      }
-      selected
-    })
-
-    # Render dynamic gene checkboxes
-    observe({
-      genes <- filtered_genes()
-      selected <- selected_genes()
-
-      if (length(genes) == 0) {
-        output$gene_checkboxes_container <- renderUI({
-          tags$p("No genes match filter", style = "color: #6c757d; font-size: 0.875rem;")
-        })
-        return()
-      }
-
-      checkboxes <- lapply(genes, function(gene) {
-        tags$div(
-          style = "display: flex; align-items: center; padding: 0.25rem 0;",
-          checkboxInput(
-            ns(paste0("gene_", gene)),
-            label = gene,
-            value = gene %in% selected
-          )
-        )
-      })
-
-      output$gene_checkboxes_container <- renderUI({
-        do.call(tags$div, c(checkboxes, style = "max-height: 200px; overflow-y: auto;"))
-      })
-    })
-
-    # Scatter plot reactive
     plot_data <- reactive({
-      req(de_data())
-      req(input$feature_select)
-      req(length(selected_genes()) > 0)
+      ds <- selected_dataset()
+      req(ds)
+      terms <- selected_terms()
+      req(length(terms) > 0)
 
-      data <- de_data()
-      selected <- selected_genes()
-
-      # Filter to selected genes
-      plot_df <- data %>%
-        filter(gene %in% selected)
-
-      if (nrow(plot_df) == 0) {
-        return(NULL)
-      }
-
-      plot_df
+      fetch_expression_goi(
+        lab_source = ds$lab_source,
+        study_id = ds$study_id,
+        genes = ds$genes %||% character(0),
+        proteins = ds$proteins %||% character(0),
+        limit = 2000L
+      )
     })
 
-    # Render scatter plot
+    output$term_note <- renderUI({
+      terms <- selected_terms()
+      if (length(terms) == 0) {
+        return("Select one or more genes or proteins in the modal to inspect them here.")
+      }
+
+      paste(
+        "Showing rows for:",
+        paste(terms, collapse = ", "),
+        "This plot uses the GOI endpoint so it stays focused on selected features."
+      )
+    })
+
     output$scatter_plot <- renderPlotly({
-      req(plot_data())
-
       df <- plot_data()
-      selected <- selected_genes()
+      validate(need(nrow(df) > 0, "No rows are available for the selected genes/proteins."))
 
-      if (length(selected) == 0 | nrow(df) == 0) {
-        return(
-          plot_ly() %>%
-            layout(
-              title = "Select genes to display",
-              xaxis = list(title = "Feature 1"),
-              yaxis = list(title = "Feature 2")
-            )
-        )
-      }
-
-      # Create scatter plot with genes as different colors/traces
-      p <- plot_ly()
-
-      # Color palette for genes
-      cols <- c(
-        "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
-        "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf"
-      )
-
-      for (i in seq_along(selected)) {
-        gene <- selected[i]
-        gene_data <- df %>% filter(gene == !!gene)
-
-        p <- p %>%
-          add_trace(
-            data = gene_data,
-            x = ~feature_1,  # Adjust column names as needed
-            y = ~feature_2,  # Adjust column names as needed
-            type = "scatter",
-            mode = "markers",
-            name = gene,
-            marker = list(
-              size = 6,
-              color = cols[(i - 1) %% length(cols) + 1],
-              opacity = 0.7
-            ),
-            text = ~ paste0(
-              "<b>", gene, "</b><br>",
-              "Cell ID: ", cell_id, "<br>",
-              "Cell Type: ", cell_type, "<br>",
-              "Condition: ", condition, "<br>",
-              "Expression: ", round(mean_expr, 2)
-            ),
-            hovertemplate = "%{text}<extra></extra>"
+      x_col <- if ("abundance_a" %in% names(df) && any(!is.na(df$abundance_a))) "abundance_a" else "log2fc"
+      y_col <- if ("abundance_b" %in% names(df) && any(!is.na(df$abundance_b))) "abundance_b" else "pvalue"
+      df <- df |>
+        dplyr::mutate(
+          feature_label = ifelse(!is.na(gene_symbol) & nzchar(gene_symbol), gene_symbol, protein_id),
+          sig = dplyr::case_when(
+            !is.na(padj) & padj < padj_thresh() & log2fc >  lfc_thresh() ~ "Up",
+            !is.na(padj) & padj < padj_thresh() & log2fc < -lfc_thresh() ~ "Down",
+            TRUE ~ "NS"
           )
-      }
-
-      p <- p %>%
-        layout(
-          title = paste("Featured Gene Expression:", paste(selected, collapse = ", ")),
-          xaxis = list(title = "Feature 1"),
-          yaxis = list(title = "Feature 2"),
-          hovermode = "closest",
-          plot_bgcolor = "#f8f9fa",
-          paper_bgcolor = "white"
         )
+      x_values <- df[[x_col]]
+      df$y_value <- if (identical(y_col, "pvalue")) -log10(pmax(df$pvalue, 1e-300)) else df[[y_col]]
 
-      p
-    })
-
-    # Summary info
-    output$scatter_info <- renderUI({
-      selected <- selected_genes()
-      if (length(selected) == 0) {
-        return(NULL)
-      }
-
-      tags$div(
-        style = "margin-top: 1rem; padding: 0.75rem; background-color: #e7f3ff; border-left: 4px solid #0a7aff; border-radius: 4px;",
-        tags$p(
-          tags$strong("Selected genes: "),
-          paste(selected, collapse = ", "),
-          style = "margin: 0; font-size: 0.9rem;"
+      plotly::plot_ly(
+        df,
+        x = x_values,
+        y = ~y_value,
+        type = "scatter",
+        mode = "markers",
+        color = ~sig,
+        colors = c(Up = "#C0392B", Down = "#2980B9", NS = "#BDC3C7"),
+        text = ~paste0(
+          "<b>", feature_label, "</b><br>",
+          x_col, ": ", signif(x_values, 3), "<br>",
+          if (identical(y_col, "pvalue")) "-log10(pvalue)" else y_col, ": ", signif(y_value, 3), "<br>",
+          "cell_type: ", ifelse(is.na(cell_type), "NA", cell_type), "<br>",
+          "padj: ", signif(padj, 3)
+        ),
+        hoverinfo = "text",
+        marker = list(size = 8, opacity = 0.75)
+      ) |>
+        plotly::layout(
+          xaxis = list(title = x_col),
+          yaxis = list(title = if (identical(y_col, "pvalue")) "-log10(pvalue)" else y_col),
+          legend = list(title = list(text = "Significance"), orientation = "h", y = -0.15)
         )
-      )
     })
   })
 }
+
+#' @noRd
+`%||%` <- function(a, b) if (!is.null(a)) a else b
