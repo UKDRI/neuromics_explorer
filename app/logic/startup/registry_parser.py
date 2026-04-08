@@ -67,8 +67,8 @@ HEURISTIC_MAPPINGS = {
     "biotype":              ["Biotype", "biotype", "gene_biotype", "Gene_Biotype", "gene_type"],
     # metrics
     "log2fc":               ["logFC", "logfc", "log2FC", "log2FoldChange", "lfc", "avg_log2FC", "expression_log2fc"],
-    "pvalue":               ["pvalue", "PValue", "p_value", "pval", "p.value", "expression_pvalue"],
-    "padj":                 ["padj", "FDR", "adj.P.Val", "p_adj", "adjusted_pvalue", "expression_padj"],
+    "pvalue":               ["pvalue", "PValue", "p_value", "pval", "p.value", "expression_pvalue", "p_val"],
+    "padj":                 ["padj", "FDR", "adj.P.Val", "p_adj", "adjusted_pvalue", "expression_padj", "p_val_adj"],
     "abundance_a":          ["abundance_A", "mean_A", "avg_expr_A"],
     "abundance_b":          ["abundance_B", "mean_B", "avg_expr_B"],
     "pct_expressed_a":      ["pct_1", "pct.1", "pct_expressed_A"],

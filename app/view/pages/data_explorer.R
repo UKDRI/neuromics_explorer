@@ -10,8 +10,8 @@
 #
 # Data flow:
 #   gene_dataset_selector → selected_dataset reactiveVal
-#   selected_dataset + sidebar thresholds → de_data reactive
-#   de_data → plot components
+#   selected_dataset + sidebar controls → endpoint-specific reactives
+#   table / volcano / grouped-summary endpoints → plot components
 # ─────────────────────────────────────────────────────────────────────────────
 
 box::use(
@@ -21,7 +21,7 @@ box::use(
   shinyjs[runjs],
   bslib[...],
   plotly[plotlyOutput, renderPlotly, plot_ly, layout, add_trace],
-  DT[DTOutput, renderDT, datatable, dataTableProxy, selectRows],
+  DT[DTOutput, renderDT, datatable],
   htmlwidgets[JS],
   app/view/components/dataset_table[dataset_table_ui, dataset_table_server],
   app/view/components/expression_heatmap[heatmap_ui, heatmap_server],
@@ -33,10 +33,12 @@ box::use(
   app/view/components/histogram_plot[histogram_ui, histogram_server],
   app/view/components/dots_plot[dots_ui, dots_server],
   app/view/components/highest_expr_plot[highest_expr_ui, highest_expr_server],
-  app/view/components/mds_plot[mds_ui, mds_server],
   app/view/pages/gene_dataset_selector[gene_selector_ui, gene_selector_server],
   app/view/pages/explore_sidebar[sidebar_ui, sidebar_server],
-  app/logic/api/api_client[fetch_dataset_expression, fetch_expression_multi_dataset,
+  app/logic/api/api_client[fetch_expression_table, fetch_expression_volcano,
+                           fetch_expression_multi_dataset, fetch_expression_histogram,
+                           fetch_expression_groups, fetch_expression_goi,
+                           fetch_dataset_embeddings, fetch_top_de,
                            fetch_metadata_filter_options],
 )
 
@@ -139,41 +141,6 @@ explorer_ui <- function(id) {
                   icon = icon("chart-line"),
                   uiOutput(ns("active_dataset_banner_plot")),
                   uiOutput(ns("plot_ui"))
-                ),
-
-                nav_panel(
-                  title = "Feature Scatter",
-                  icon = icon("object-group"),
-                  uiOutput(ns("active_dataset_banner_plot")),
-                  feature_scatter_ui(ns("feature_scatter"))
-                ),
-
-                nav_panel(
-                  title = "Histograms",
-                  icon = icon("bars"),
-                  uiOutput(ns("active_dataset_banner_plot")),
-                  histogram_ui(ns("histogram"))
-                ),
-
-                nav_panel(
-                  title = "Dots Plot",
-                  icon = icon("th"),
-                  uiOutput(ns("active_dataset_banner_plot")),
-                  dots_ui(ns("dots"))
-                ),
-
-                nav_panel(
-                  title = "Top Genes",
-                  icon = icon("arrow-up"),
-                  uiOutput(ns("active_dataset_banner_plot")),
-                  highest_expr_ui(ns("highest_expr"))
-                ),
-
-                nav_panel(
-                  title = "MDS",
-                  icon = icon("project-diagram"),
-                  uiOutput(ns("active_dataset_banner_plot")),
-                  mds_ui(ns("mds"))
                 ),
 
                 nav_panel(
@@ -288,46 +255,116 @@ explorer_server <- function(id) {
       }), use.names = FALSE))
     }
 
+    has_values <- function(df, col) {
+      col %in% names(df) &&
+        any(!is.na(df[[col]]) & nzchar(trimws(as.character(df[[col]]))))
+    }
+
+    feature_labels <- function(df) {
+      label <- rep("feature", nrow(df))
+      for (candidate in c("gene_symbol", "human_gene", "protein_id")) {
+        if (!candidate %in% names(df)) next
+        values <- as.character(df[[candidate]])
+        keep <- !is.na(values) & nzchar(values) & label == "feature"
+        label[keep] <- values[keep]
+      }
+      label
+    }
+
+    build_de_category <- function(df, padj_thresh, lfc_thresh) {
+      direction_ref <- rep("", nrow(df))
+      if ("condition_b" %in% names(df)) {
+        direction_ref <- as.character(df$condition_b)
+      }
+      if ("condition_a" %in% names(df)) {
+        empty_idx <- is.na(direction_ref) | !nzchar(direction_ref)
+        direction_ref[empty_idx] <- as.character(df$condition_a[empty_idx])
+      }
+      direction_ref[is.na(direction_ref) | !nzchar(direction_ref)] <- "reference"
+
+      dplyr::case_when(
+        !is.na(df$padj) & df$padj < padj_thresh & !is.na(df$log2fc) & df$log2fc > lfc_thresh ~ paste("Up with", direction_ref),
+        !is.na(df$padj) & df$padj < padj_thresh & !is.na(df$log2fc) & df$log2fc < -lfc_thresh ~ paste("Down with", direction_ref),
+        TRUE ~ "No"
+      )
+    }
+
+    compare_violin_group <- function(df, padj_thresh, lfc_thresh) {
+      if (all(c("padj", "log2fc") %in% names(df)) &&
+          any(!is.na(df$padj)) &&
+          any(!is.na(df$log2fc))) {
+        return(list(
+          name = "DE category",
+          values = build_de_category(df, padj_thresh, lfc_thresh)
+        ))
+      }
+
+      for (candidate in c("cluster_id", "cell_type", "condition_a", "condition_b",
+                          "sample_a", "sample_b", "tissue", "sex", "age", "cell_id")) {
+        if (has_values(df, candidate)) {
+          values <- as.character(df[[candidate]])
+          values[is.na(values) | !nzchar(values)] <- "unlabelled"
+          return(list(name = candidate, values = values))
+        }
+      }
+
+      list(name = "dataset", values = rep("all", nrow(df)))
+    }
+
     compare_group_col <- function(df) {
-      if ("cell_type" %in% names(df) && any(!is.na(df$cell_type) & nzchar(df$cell_type))) {
-        return("cell_type")
+      for (candidate in c("cluster_id", "cell_type", "condition_a", "condition_b",
+                          "sample_a", "sample_b", "tissue", "sex")) {
+        if (has_values(df, candidate)) {
+          return(candidate)
+        }
       }
-      if ("condition_a" %in% names(df) && any(!is.na(df$condition_a) & nzchar(df$condition_a))) {
-        return("condition_a")
+      if ("gene_symbol" %in% names(df)) {
+        return("gene_symbol")
       }
-      "gene_symbol"
+      if ("obs" %in% names(df)) {
+        return("obs")
+      }
+      names(df)[1]
     }
 
     render_compare_volcano <- function(df, dataset_name, padj_thresh, lfc_thresh) {
+      validate(need(nrow(df) > 0, "No volcano rows are available for this dataset."))
       plot_df <- df |>
         dplyr::mutate(
           neg_log10p = -log10(pmax(pvalue, 1e-300)),
+          feature_label = feature_labels(df),
           sig = dplyr::case_when(
             !is.na(padj) & padj < padj_thresh & log2fc >  lfc_thresh ~ "Up",
             !is.na(padj) & padj < padj_thresh & log2fc < -lfc_thresh ~ "Down",
             TRUE ~ "NS"
           )
         )
+      x_values <- plot_df$log2fc
+      y_values <- plot_df$neg_log10p
+      x_limit <- suppressWarnings(max(abs(x_values), na.rm = TRUE))
+      y_limit <- suppressWarnings(max(y_values, na.rm = TRUE))
+      if (!is.finite(x_limit)) x_limit <- 1
+      if (!is.finite(y_limit)) y_limit <- 1
+      hover_text <- paste0(
+        "<b>", plot_df$feature_label, "</b><br>",
+        "log2FC: ", round(x_values, 3), "<br>",
+        "padj: ", signif(plot_df$padj, 3)
+      )
 
       plotly::plot_ly(
-        plot_df,
-        x = ~log2fc,
-        y = ~neg_log10p,
+        x = x_values,
+        y = y_values,
         type = "scatter",
         mode = "markers",
-        color = ~sig,
+        color = plot_df$sig,
         colors = c(Up = "#C0392B", Down = "#2980B9", NS = "#BDC3C7"),
-        text = ~paste0(
-          "<b>", gene_symbol, "</b><br>",
-          "log2FC: ", round(log2fc, 3), "<br>",
-          "padj: ", signif(padj, 3)
-        ),
+        text = hover_text,
         hoverinfo = "text",
         marker = list(size = 6, opacity = 0.7)
       ) |>
         plotly::add_segments(
-          x = -max(abs(plot_df$log2fc), na.rm = TRUE) * 1.1,
-          xend = max(abs(plot_df$log2fc), na.rm = TRUE) * 1.1,
+          x = -x_limit * 1.1,
+          xend = x_limit * 1.1,
           y = -log10(padj_thresh),
           yend = -log10(padj_thresh),
           line = list(dash = "dot", color = "#7F8C8D", width = 1),
@@ -336,14 +373,14 @@ explorer_server <- function(id) {
         ) |>
         plotly::add_segments(
           x = lfc_thresh, xend = lfc_thresh,
-          y = 0, yend = max(plot_df$neg_log10p, na.rm = TRUE) * 1.05,
+          y = 0, yend = y_limit * 1.05,
           line = list(dash = "dot", color = "#7F8C8D", width = 1),
           showlegend = FALSE,
           hoverinfo = "skip"
         ) |>
         plotly::add_segments(
           x = -lfc_thresh, xend = -lfc_thresh,
-          y = 0, yend = max(plot_df$neg_log10p, na.rm = TRUE) * 1.05,
+          y = 0, yend = y_limit * 1.05,
           line = list(dash = "dot", color = "#7F8C8D", width = 1),
           showlegend = FALSE,
           hoverinfo = "skip"
@@ -358,47 +395,66 @@ explorer_server <- function(id) {
     }
 
     render_compare_violin <- function(df, dataset_name, padj_thresh, lfc_thresh) {
-      group_col <- compare_group_col(df)
+      group_info <- compare_violin_group(df, padj_thresh, lfc_thresh)
       plot_df <- df |>
         dplyr::mutate(
+          group_value = group_info$values,
+          feature_label = feature_labels(df),
           sig = dplyr::case_when(
             !is.na(padj) & padj < padj_thresh & log2fc >  lfc_thresh ~ "Up",
             !is.na(padj) & padj < padj_thresh & log2fc < -lfc_thresh ~ "Down",
             TRUE ~ "NS"
           )
         )
+      plot_df <- plot_df[!is.na(plot_df$log2fc), , drop = FALSE]
+      validate(need(nrow(plot_df) > 0, "No log2FC values are available for this dataset."))
 
-      plotly::plot_ly(
-        plot_df,
-        x = plot_df[[group_col]],
-        y = plot_df$log2fc,
-        type = "violin",
-        box = list(visible = TRUE),
-        meanline = list(visible = TRUE),
-        points = FALSE,
-        hovertemplate = paste0(
-          "<b>%{x}</b><br>log2FC: %{y:.3f}<extra></extra>"
-        )
-      ) |>
-        plotly::add_markers(
-          data = plot_df,
-          x = plot_df[[group_col]],
+      group_levels <- unique(plot_df$group_value)
+      p <- plotly::plot_ly()
+      for (group_name in group_levels) {
+        group_df <- plot_df[plot_df$group_value == group_name, , drop = FALSE]
+        p <- p |>
+          plotly::add_trace(
+            x = rep(group_name, nrow(group_df)),
+            y = group_df$log2fc,
+            type = "violin",
+            name = group_name,
+            box = list(visible = TRUE),
+            meanline = list(visible = TRUE),
+            points = FALSE,
+            line = list(color = "#D7DEE5"),
+            fillcolor = "rgba(215, 222, 229, 0.45)",
+            hovertemplate = paste0(
+              "<b>", group_name, "</b><br>log2FC: %{y:.3f}<extra></extra>"
+            ),
+            showlegend = FALSE
+          )
+      }
+
+      hover_text <- paste0(
+        "<b>", plot_df$feature_label, "</b><br>",
+        group_info$name, ": ", plot_df$group_value, "<br>",
+        "log2FC: ", round(plot_df$log2fc, 3), "<br>",
+        "padj: ", signif(plot_df$padj, 3), "<br>",
+        "class: ", plot_df$sig
+      )
+
+      p |>
+        plotly::add_trace(
+          x = plot_df$group_value,
           y = plot_df$log2fc,
-          color = ~sig,
+          type = "scatter",
+          mode = "markers",
+          color = plot_df$sig,
           colors = c(Up = "#C0392B", Down = "#2980B9", NS = "#BDC3C7"),
           marker = list(size = 6, opacity = 0.65),
-          text = ~paste0(
-            "<b>", gene_symbol, "</b><br>",
-            "log2FC: ", round(log2fc, 3), "<br>",
-            "padj: ", signif(padj, 3), "<br>",
-            "class: ", sig
-          ),
+          text = hover_text,
           hoverinfo = "text",
-          inherit = FALSE
+          showlegend = TRUE
         ) |>
         plotly::layout(
           title = list(text = dataset_name, x = 0.02),
-          xaxis = list(title = group_col, tickangle = -25),
+          xaxis = list(title = group_info$name, tickangle = -25),
           yaxis = list(title = "log2FC"),
           legend = list(title = list(text = "Significance"), orientation = "h",
                         y = -0.15),
@@ -408,6 +464,7 @@ explorer_server <- function(id) {
     }
 
     render_compare_heatmap <- function(df, dataset_name, padj_thresh, lfc_thresh) {
+      validate(need(nrow(df) > 0, "No heatmap rows are available for this dataset."))
       group_col <- compare_group_col(df)
       ranked_genes <- df |>
         dplyr::mutate(
@@ -424,6 +481,7 @@ explorer_server <- function(id) {
       ranked_genes <- ranked_genes[seq_len(min(50L, length(ranked_genes)))]
 
       df <- df[df$gene_symbol %in% ranked_genes, , drop = FALSE]
+      validate(need(nrow(df) > 0, "No heatmap rows remain after ranking/filtering."))
       agg <- stats::aggregate(
         df$log2fc,
         by = list(gene_symbol = df$gene_symbol, group = df[[group_col]]),
@@ -450,6 +508,210 @@ explorer_server <- function(id) {
           title = list(text = dataset_name, x = 0.02),
           xaxis = list(title = "", tickangle = -35),
           yaxis = list(title = "", automargin = TRUE),
+          margin = list(t = 50)
+        )
+    }
+
+    render_compare_histogram <- function(row) {
+      df <- fetch_expression_histogram(
+        lab_source = row$lab_source[1],
+        study_id = row$study_id[1],
+        metric = "log2fc",
+        bins = 30L
+      )
+      validate(need(nrow(df) > 0, "No histogram bins are available for this dataset."))
+
+      groups <- unique(df$group_value)
+      p <- plotly::plot_ly()
+      for (group in groups) {
+        group_df <- df[df$group_value == group, , drop = FALSE]
+        midpoints <- (group_df$bin_start + group_df$bin_end) / 2
+        p <- p |>
+          plotly::add_bars(
+            x = midpoints,
+            y = group_df$row_count,
+            name = group,
+            hovertemplate = paste0(
+              "<b>", group, "</b><br>",
+              "bin: %{x:.3f}<br>",
+              "rows: %{y}<extra></extra>"
+            )
+          )
+      }
+
+      p |>
+        plotly::layout(
+          title = list(text = row$dataset_name[1], x = 0.02),
+          barmode = if (length(groups) > 1) "overlay" else "group",
+          xaxis = list(title = "log2fc"),
+          yaxis = list(title = "Row count"),
+          margin = list(t = 50)
+        )
+    }
+
+    render_compare_dots <- function(row, current_state) {
+      validate(need(row$omic_type[1] %in% c("scrna", "snrna"),
+                    "Dot plot is only available for scRNA-seq and snRNA-seq datasets."))
+
+      df <- fetch_expression_groups(
+        lab_source = row$lab_source[1],
+        study_id = row$study_id[1],
+        group_by = "cluster_id",
+        metric = "log2fc",
+        top_n = 20L
+      )
+      validate(need(nrow(df) > 0, "No grouped feature summaries are available for this dataset."))
+      df$mean_pct_expressed[is.na(df$mean_pct_expressed)] <- 0
+      df$mean_value[is.na(df$mean_value)] <- 0
+
+      plotly::plot_ly(
+        x = df$group_value,
+        y = df$feature_label,
+        type = "scatter",
+        mode = "markers",
+        size = pmax(df$mean_pct_expressed, 0) * 0.18 + 6,
+        color = df$mean_value,
+        colors = c("#2980B9", "#FFFFFF", "#C0392B"),
+        marker = list(showscale = TRUE, colorbar = list(title = "Mean log2FC")),
+        text = paste0(
+          "<b>", df$feature_label, "</b><br>",
+          "group: ", df$group_value, "<br>",
+          "mean log2FC: ", signif(df$mean_value, 3), "<br>",
+          "mean % expressed: ", signif(df$mean_pct_expressed, 3)
+        ),
+        hoverinfo = "text"
+      ) |>
+        plotly::layout(
+          title = list(text = row$dataset_name[1], x = 0.02),
+          xaxis = list(title = "Cluster"),
+          yaxis = list(title = "Feature", autorange = "reversed"),
+          margin = list(t = 50)
+        )
+    }
+
+    render_compare_top_features <- function(row, current_state) {
+      validate(need(row$omic_type[1] %in% c("scrna", "snrna"),
+                    "Top features is only available for scRNA-seq and snRNA-seq datasets."))
+
+      df <- fetch_expression_groups(
+        lab_source = row$lab_source[1],
+        study_id = row$study_id[1],
+        group_by = "cluster_id",
+        metric = "abundance_a",
+        top_n = 15L,
+        genes = current_state$genes %||% character(0),
+        proteins = current_state$proteins %||% character(0)
+      )
+      validate(need(nrow(df) > 0, "No ranked features are available for this dataset."))
+      ranked <- stats::aggregate(mean_value ~ feature_label, data = df, FUN = mean)
+      ranked <- ranked[order(ranked$mean_value, decreasing = TRUE), , drop = FALSE]
+
+      plotly::plot_ly(
+        x = ranked$mean_value,
+        y = reorder(ranked$feature_label, ranked$mean_value),
+        type = "bar",
+        orientation = "h",
+        text = paste0("<b>", ranked$feature_label, "</b><br>mean value: ", signif(ranked$mean_value, 3)),
+        hoverinfo = "text"
+      ) |>
+        plotly::layout(
+          title = list(text = row$dataset_name[1], x = 0.02),
+          xaxis = list(title = "Mean value"),
+          yaxis = list(title = "Feature"),
+          margin = list(l = 160, t = 50)
+        )
+    }
+
+    render_compare_feature_scatter <- function(row, current_state, padj_thresh, lfc_thresh) {
+      terms <- unique(c(current_state$genes %||% character(0), current_state$proteins %||% character(0)))
+      validate(need(length(terms) > 0, "Select one or more genes or proteins in the modal to compare GOI scatter plots."))
+
+      df <- fetch_expression_goi(
+        lab_source = row$lab_source[1],
+        study_id = row$study_id[1],
+        genes = current_state$genes %||% character(0),
+        proteins = current_state$proteins %||% character(0),
+        limit = 2000L
+      )
+      validate(need(nrow(df) > 0, "No rows are available for the selected genes/proteins."))
+
+      x_col <- if ("abundance_a" %in% names(df) && any(!is.na(df$abundance_a))) "abundance_a" else "log2fc"
+      y_col <- if ("abundance_b" %in% names(df) && any(!is.na(df$abundance_b))) "abundance_b" else "pvalue"
+      df$feature_label <- feature_labels(df)
+      df$sig <- dplyr::case_when(
+        !is.na(df$padj) & df$padj < padj_thresh & df$log2fc >  lfc_thresh ~ "Up",
+        !is.na(df$padj) & df$padj < padj_thresh & df$log2fc < -lfc_thresh ~ "Down",
+        TRUE ~ "NS"
+      )
+      x_values <- df[[x_col]]
+      y_values <- if (identical(y_col, "pvalue")) -log10(pmax(df$pvalue, 1e-300)) else df[[y_col]]
+
+      plotly::plot_ly(
+        x = x_values,
+        y = y_values,
+        type = "scatter",
+        mode = "markers",
+        color = df$sig,
+        colors = c(Up = "#C0392B", Down = "#2980B9", NS = "#BDC3C7"),
+        text = paste0(
+          "<b>", df$feature_label, "</b><br>",
+          x_col, ": ", signif(x_values, 3), "<br>",
+          if (identical(y_col, "pvalue")) "-log10(pvalue)" else y_col, ": ", signif(y_values, 3)
+        ),
+        hoverinfo = "text",
+        marker = list(size = 8, opacity = 0.75)
+      ) |>
+        plotly::layout(
+          title = list(text = row$dataset_name[1], x = 0.02),
+          xaxis = list(title = x_col),
+          yaxis = list(title = if (identical(y_col, "pvalue")) "-log10(pvalue)" else y_col),
+          margin = list(t = 50)
+        )
+    }
+
+    render_compare_umap <- function(row, current_state) {
+      validate(need(row$omic_type[1] %in% c("scrna", "snrna"),
+                    "Embedding plots are only available for scRNA-seq and snRNA-seq datasets."))
+
+      df <- fetch_dataset_embeddings(
+        lab_source = row$lab_source[1],
+        study_id = row$study_id[1],
+        reduction = "umap",
+        assay = "expression",
+        genes = current_state$genes %||% character(0),
+        proteins = current_state$proteins %||% character(0),
+        max_points = 50000L
+      )
+      validate(need(nrow(df) > 0, "No embedding coordinates are available for this dataset."))
+
+      if ("term" %in% names(df) && any(!is.na(df$term) & nzchar(df$term))) {
+        first_term <- unique(df$term[!is.na(df$term) & nzchar(df$term)])[1]
+        df <- df[df$term == first_term, , drop = FALSE]
+        color_values <- df$expression_value
+        color_scale <- c("#F7FBFF", "#6BAED6", "#08306B")
+        color_title <- first_term
+      } else {
+        color_col <- compare_group_col(df)
+        color_values <- as.character(df[[color_col]])
+        color_scale <- NULL
+        color_title <- color_col
+      }
+
+      plotly::plot_ly(
+        x = df$dim_1,
+        y = df$dim_2,
+        type = "scatter",
+        mode = "markers",
+        color = color_values,
+        colors = color_scale,
+        marker = list(size = 4, opacity = 0.7),
+        text = paste0("obs: ", df$obs),
+        hoverinfo = "text"
+      ) |>
+        plotly::layout(
+          title = list(text = paste(row$dataset_name[1], "·", color_title), x = 0.02),
+          xaxis = list(title = "UMAP 1"),
+          yaxis = list(title = "UMAP 2"),
           margin = list(t = 50)
         )
     }
@@ -503,19 +765,6 @@ explorer_server <- function(id) {
       ds$selected_datasets[idx, , drop = FALSE]
     })
 
-    # This reactive performs the cross-dataset fetch used by the Compare tab.
-    # It reruns when selected datasets, search terms, or thresholds change.
-    compare_plot_data <- reactive({
-      datasets <- compare_source_rows()
-      req(nrow(datasets) > 1)
-
-      fetch_expression_multi_dataset(
-        dataset_list = datasets,
-        padj_thresh = sidebar_vals$padj_thresh(),
-        lfc_thresh = sidebar_vals$lfc_thresh_min()
-      )
-    })
-    
     # ── Datasets & sub-modules ────────────────────────────────────────────
     # selected_dataset holds: list(
     #   genes, lab_source, study_id, dataset_name, omic_type,
@@ -524,7 +773,6 @@ explorer_server <- function(id) {
     selected_dataset <- reactiveVal(NULL)
     gene_selector_server("gene_selector", selected_dataset)
     sidebar_vals <- sidebar_server("filters", selected_dataset)
-    listing_proxy <- DT::dataTableProxy(session$ns("dataset_listing"))
 
     # ── Plot area UI follows the sidebar plot selector while the active dataset
     # row in Dataset Listings controls which dataset is rendered. ────────────
@@ -532,20 +780,25 @@ explorer_server <- function(id) {
     # sidebar plot selector while keeping the active dataset row in control.
     output$plot_ui <- renderUI({
       plot_type <- sidebar_vals$plot_type()
+      requires_single_cell <- plot_type %in% c("UMAP", "Dots Plot", "Top Features")
 
-      if (identical(plot_type, "UMAP") &&
+      if (requires_single_cell &&
           !isTRUE(selected_dataset()$omic_type %in% c("scrna", "snrna"))) {
         return(
           tags$div(
             class = "alert alert-info",
             role = "alert",
-            "Embedding plots are only available for scRNA-seq and snRNA-seq datasets."
+            paste(plot_type, "is only available for scRNA-seq and snRNA-seq datasets.")
           )
         )
       }
 
       switch(
         plot_type,
+        "Feature Scatter" = feature_scatter_ui(session$ns("feature_scatter")),
+        Histogram = histogram_ui(session$ns("histogram")),
+        "Dots Plot" = dots_ui(session$ns("dots")),
+        "Top Features" = highest_expr_ui(session$ns("highest_expr")),
         Heatmap = heatmap_ui(session$ns("heatmap")),
         Violin = violin_ui(session$ns("violin")),
         UMAP = umap_ui(session$ns("umap")),
@@ -560,9 +813,11 @@ explorer_server <- function(id) {
       tags$div(
         class = "alert alert-secondary",
         role = "alert",
-        style = "margin-bottom: 12px;",
+        # style = "margin-bottom: 12px;",
         tags$strong("Expression data is showing: "),
-        paste(ds$dataset_name, "·", ds$lab_source, "·", ds$omic_type)
+        paste(ds$dataset_name, "·", ds$lab_source, "·", ds$omic_type),
+        tags$br(),
+        tags$small("Preview is served from `/expression/table` and loads the first 1,000 rows sorted by padj.")
       )
     })
 
@@ -572,9 +827,11 @@ explorer_server <- function(id) {
       tags$div(
         class = "alert alert-secondary",
         role = "alert",
-        style = "margin-bottom: 12px;",
+        # style = "margin-bottom: 12px;",
         tags$strong("Plot is showing: "),
-        paste(ds$dataset_name, "·", ds$lab_source, "·", ds$omic_type)
+        paste(ds$dataset_name, "·", ds$lab_source, "·", ds$omic_type),
+        tags$br(),
+        tags$small("Each plot uses a task-specific endpoint so the API can filter, paginate, or aggregate before the data reaches Shiny.")
       )
     })
 
@@ -587,11 +844,13 @@ explorer_server <- function(id) {
 
       if (nrow(datasets) == 1) {
         row <- datasets[1, , drop = FALSE]
-        single_df <- fetch_dataset_expression(
+        single_df <- fetch_expression_table(
           lab_source = row$lab_source[1],
           study_id = row$study_id[1],
-          padj_thresh = sidebar_vals$padj_thresh(),
-          lfc_thresh = sidebar_vals$lfc_thresh_min()
+          limit = 1000L,
+          offset = 0L,
+          sort_by = "padj",
+          sort_dir = "asc"
         )
 
         if (nrow(single_df) == 0) {
@@ -612,18 +871,32 @@ explorer_server <- function(id) {
       )
     })
 
-    # ── DE data reactive ─────────────────────────────────────────────────
-    # This reactive is the active-dataset query backing the single-dataset
-    # Plots tab. It reruns when the active row, terms, or thresholds change.
-    de_data <- reactive({
+    # ── Plot-specific data reactives ──────────────────────────────────────
+    # Volcano gets a lean payload; violin uses a wider but still paginated
+    # table slice; the other plot modules fetch their own purpose-built shapes.
+    volcano_data <- reactive({
       ds <- selected_dataset()
-      req(ds, length(c(ds$genes, ds$proteins)) > 0)
+      req(ds)
 
-      fetch_dataset_expression(
-        lab_source  = ds$lab_source,
-        study_id    = ds$study_id,
-        padj_thresh = sidebar_vals$padj_thresh(),
-        lfc_thresh  = sidebar_vals$lfc_thresh_min()
+      fetch_expression_volcano(
+        lab_source = ds$lab_source,
+        study_id = ds$study_id,
+        limit = 20000L,
+        offset = 0L
+      )
+    })
+
+    violin_data <- reactive({
+      ds <- selected_dataset()
+      req(ds)
+
+      fetch_expression_table(
+        lab_source = ds$lab_source,
+        study_id = ds$study_id,
+        limit = 3000L,
+        offset = 0L,
+        sort_by = "padj",
+        sort_dir = "asc"
       )
     })
 
@@ -664,8 +937,6 @@ explorer_server <- function(id) {
     observe({
       datasets <- compare_source_rows()
       plot_type <- sidebar_vals$plot_type()
-      compare_df <- compare_plot_data()
-
       if (nrow(datasets) < 2) {
         return(invisible(NULL))
       }
@@ -677,31 +948,52 @@ explorer_server <- function(id) {
           output_id <- paste0("compare_plot_", idx)
 
           output[[output_id]] <- renderPlotly({
-            req(nrow(compare_df) > 0)
-            current_key <- dataset_key(row)
-            plot_df <- compare_df[dataset_key(compare_df) == current_key, , drop = FALSE]
-
-            validate(
-              need(
-                nrow(plot_df) > 0,
-                "No expression rows are available for this dataset."
-              )
-            )
+            current_state <- selected_dataset()
+            req(current_state)
 
             switch(
               plot_type,
               Heatmap = render_compare_heatmap(
-                plot_df, row$dataset_name[1],
+                fetch_top_de(
+                  lab_source = row$lab_source[1],
+                  study_id = row$study_id[1],
+                  n = 50L,
+                  padj_thresh = sidebar_vals$padj_thresh(),
+                  lfc_thresh = sidebar_vals$lfc_thresh_min()
+                ),
+                row$dataset_name[1],
                 sidebar_vals$padj_thresh(),
                 sidebar_vals$lfc_thresh_min()
               ),
               Violin = render_compare_violin(
-                plot_df, row$dataset_name[1],
+                fetch_expression_table(
+                  lab_source = row$lab_source[1],
+                  study_id = row$study_id[1],
+                  limit = 3000L,
+                  offset = 0L,
+                  sort_by = "padj",
+                  sort_dir = "asc"
+                ),
+                row$dataset_name[1],
                 sidebar_vals$padj_thresh(),
                 sidebar_vals$lfc_thresh_min()
               ),
+              Histogram = render_compare_histogram(row),
+              "Dots Plot" = render_compare_dots(row, current_state),
+              "Top Features" = render_compare_top_features(row, current_state),
+              "Feature Scatter" = render_compare_feature_scatter(
+                row, current_state,
+                sidebar_vals$padj_thresh(),
+                sidebar_vals$lfc_thresh_min()
+              ),
+              UMAP = render_compare_umap(row, current_state),
               render_compare_volcano(
-                plot_df,
+                fetch_expression_volcano(
+                  lab_source = row$lab_source[1],
+                  study_id = row$study_id[1],
+                  limit = 20000L,
+                  offset = 0L
+                ),
                 row$dataset_name[1],
                 sidebar_vals$padj_thresh(),
                 sidebar_vals$lfc_thresh_min()
@@ -721,19 +1013,29 @@ explorer_server <- function(id) {
             class = "alert alert-info",
             role = "alert",
             tags$strong("NB: "),
-            "Once dataset table appears below, click on one or more datasets to drive the expression table, and plot tabs. Select two or more rows to activate the compare tab."
+            "Once the dataset table appears below, tick one or more rows to drive the explorer. Checked rows drive the Expression and Compare tabs, and the most recently checked row becomes the active dataset for the single-dataset Plot tab."
           )
         ))
       }
 
-      DTOutput(session$ns("dataset_listing"))
+      tagList(
+        tags$div(
+          class = "alert alert-info",
+          role = "alert",
+          style = "margin-bottom: 12px;",
+          tags$strong("NB: "),
+          "Tick rows to include datasets in the explorer. The most recently ticked row drives the single-dataset Plot tab, while two or more checked rows activate Compare."
+        ),
+        uiOutput(session$ns("dataset_listing_table"))
+      )
     })
 
-    output$dataset_listing <- renderDT({
+    output$dataset_listing_table <- renderUI({
       ds <- selected_dataset()
       req(ds, !is.null(ds$selected_datasets), nrow(ds$selected_datasets) > 0)
 
       rows <- ds$selected_datasets
+      checked_rows <- listing_selection()
       display <- rows[, intersect(
         c("lab_source", "dataset_name", "omic_type", "matched_terms",
           "total_features", "n_sig_features", "total_samples", "total_cells",
@@ -747,34 +1049,40 @@ explorer_server <- function(id) {
         "Cell types", "Conditions"
       )[seq_along(display)]
 
-      datatable(
-        display,
-        rownames = FALSE,
-        selection = "multiple",
-        callback = htmlwidgets::JS(
-          sprintf(
-            "table.on('click.dt', 'tbody tr', function() {
-               var idx = table.row(this).index();
-               if (idx !== undefined) {
-                 Shiny.setInputValue('%s', idx + 1, {priority: 'event'});
-               }
-             });",
-            session$ns("dataset_listing_last_clicked")
+      tags$div(
+        style = "overflow-x: auto;",
+        tags$table(
+          class = "table table-striped table-hover align-middle",
+          style = "margin-bottom: 0;",
+          tags$thead(
+            tags$tr(
+              tags$th("Select", style = "width: 72px;"),
+              lapply(names(display), tags$th)
+            )
+          ),
+          tags$tbody(
+            lapply(seq_len(nrow(display)), function(i) {
+              tags$tr(
+                tags$td(
+                  checkboxInput(
+                    session$ns(paste0("dataset_row_", i)),
+                    label = NULL,
+                    value = i %in% listing_selection(),
+                    width = NULL
+                  ),
+                  style = "min-width: 64px;"
+                ),
+                lapply(display[i, , drop = FALSE], function(value) {
+                  tags$td(as.character(value %||% ""))
+                })
+              )
+            })
           )
-        ),
-        options = list(
-          pageLength = min(8L, nrow(display)),
-          paging = nrow(display) > 8,
-          info = nrow(display) > 8,
-          dom = if (nrow(display) > 8) "ftip" else "t",
-          scrollX = TRUE,
-          autoWidth = TRUE
         )
       )
     })
 
-    # This observe initialises the DT row selection when a new modal-confirmed
-    # dataset set arrives, selecting all confirmed rows by default.
+    # Reset checkbox state whenever the modal confirms a fresh dataset list.
     observe({
       ds <- selected_dataset()
       req(ds, !is.null(ds$selected_datasets), nrow(ds$selected_datasets) > 0)
@@ -782,60 +1090,56 @@ explorer_server <- function(id) {
       dataset_keys <- dataset_key(ds$selected_datasets)
       if (!identical(dataset_keys, last_dataset_keys())) {
         last_dataset_keys(dataset_keys)
-        selected_rows <- seq_len(nrow(ds$selected_datasets))
-        listing_selection(selected_rows)
-        DT::selectRows(listing_proxy, selected_rows)
+        listing_selection(seq_len(nrow(ds$selected_datasets)))
       }
     })
 
-    # This observeEvent keeps the shared row-selection state aligned with the
-    # DT widget so Expression/Compare/value boxes all follow the same rows.
-    observeEvent(input$dataset_listing_rows_selected, {
-      row_idx <- sort(unique(input$dataset_listing_rows_selected %||% integer()))
-      listing_selection(row_idx)
+    # Simple Shiny checkbox inputs drive dataset inclusion. The newest checked
+    # row becomes active for the single-dataset Plot tab; checked rows as a
+    # whole drive Expression and Compare.
+    observe({
+      current <- selected_dataset()
+      req(current, !is.null(current$selected_datasets), nrow(current$selected_datasets) > 0)
 
-      if (length(row_idx) == 0) {
+      row_ids <- seq_len(nrow(current$selected_datasets))
+      if (!all(vapply(row_ids, function(i) !is.null(input[[paste0("dataset_row_", i)]]), logical(1)))) {
         return(invisible(NULL))
       }
 
-      current <- selected_dataset()
-      req(current, !is.null(current$selected_datasets), nrow(current$selected_datasets) >= row_idx[1])
+      row_idx <- which(vapply(row_ids, function(i) isTRUE(input[[paste0("dataset_row_", i)]]), logical(1)))
+      previous_idx <- isolate(listing_selection())
+      if (identical(row_idx, previous_idx)) {
+        return(invisible(NULL))
+      }
+
+      listing_selection(row_idx)
+      if (length(row_idx) == 0) {
+        return(invisible(NULL))
+      }
 
       active_idx <- which(
         current$selected_datasets$lab_source == current$lab_source &
         current$selected_datasets$study_id == current$study_id
       )[1]
 
-      if (length(active_idx) == 0 || is.na(active_idx) || !(active_idx %in% row_idx)) {
-        row <- current$selected_datasets[row_idx[1], , drop = FALSE]
+      newly_checked <- setdiff(row_idx, previous_idx)
+      target_idx <- if (length(newly_checked) > 0) {
+        utils::tail(newly_checked, 1)
+      } else if (length(active_idx) == 0 || is.na(active_idx) || !(active_idx %in% row_idx)) {
+        row_idx[1]
+      } else {
+        NA_integer_
+      }
+
+      if (!is.na(target_idx)) {
+        row <- current$selected_datasets[target_idx, , drop = FALSE]
         selected_dataset(set_active_dataset(current, row))
       }
-    }, ignoreInit = TRUE)
-
-    # This observeEvent promotes the most recently clicked DT row to the active
-    # dataset that drives the single-dataset Plots tab and cell-type filter UI.
-    observeEvent(input$dataset_listing_last_clicked, {
-      row_idx <- input$dataset_listing_last_clicked
-      req(length(row_idx) == 1)
-      req(row_idx %in% (input$dataset_listing_rows_selected %||% integer()))
-
-      current <- selected_dataset()
-      req(current, !is.null(current$selected_datasets), nrow(current$selected_datasets) >= row_idx)
-
-      row <- current$selected_datasets[row_idx, , drop = FALSE]
-      if (!is.null(current$lab_source) &&
-          !is.null(current$study_id) &&
-          current$lab_source == row$lab_source[1] &&
-          current$study_id == row$study_id[1]) {
-        return(invisible(NULL))
-      }
-
-      selected_dataset(set_active_dataset(current, row))
-    }, ignoreInit = TRUE)
+    })
     
     # ── Results table & plot servers ──────────────────────────────────────
     results_server("results", expression_data)
-    volcano_server("volcano",  de_data,
+    volcano_server("volcano",  volcano_data,
                    padj_thresh = sidebar_vals$padj_thresh,
                    lfc_thresh  = sidebar_vals$lfc_thresh_min,
                    gene        = reactive({
@@ -849,16 +1153,17 @@ explorer_server <- function(id) {
                    lfc_thresh  = sidebar_vals$lfc_thresh_min,
                    n_genes     = reactive(50L))
     umap_server("umap",       selected_dataset)
-    violin_server("violin",    de_data,
+    violin_server("violin",    violin_data,
                   padj_thresh = sidebar_vals$padj_thresh,
                   lfc_thresh  = sidebar_vals$lfc_thresh_min)
     
     # ── New plot modules ──────────────────────────────────────────────────
-    feature_scatter_server("feature_scatter", de_data)
-    histogram_server("histogram", de_data)
-    dots_server("dots", de_data)
-    highest_expr_server("highest_expr", de_data)
-    mds_server("mds", de_data)
+    feature_scatter_server("feature_scatter", selected_dataset,
+                           padj_thresh = sidebar_vals$padj_thresh,
+                           lfc_thresh = sidebar_vals$lfc_thresh_min)
+    histogram_server("histogram", selected_dataset)
+    dots_server("dots", selected_dataset)
+    highest_expr_server("highest_expr", selected_dataset)
     
     # ── Value boxes (tied to dataset_stats) ─────────────────────────────
     # stats_row <- reactive({

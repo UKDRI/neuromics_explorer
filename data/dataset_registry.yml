@@ -249,7 +249,8 @@ sources:
         data_path: "data/Williams/snrna/conversions/01_HCA_all_celltypes"
         omic_type: ["snrna"]
         tables:
-          expression: "logcounts.parquet"   # this file is used to heuristically map genes/features for indexing in registry
+          expression: "expression.parquet"   # this file is used to heuristically map genes/features for indexing in registry
+          logcounts: "logcounts.parquet"
           counts: "counts.parquet"
           obs_metadata: "obs_metadata.parquet"
           feature_annotations: "feature_annotations.parquet"
@@ -257,7 +258,7 @@ sources:
           pca: "PCA.parquet"
           tsne: "TSNE.parquet"
         feature_cols:
-          - feature_id
+          - gene_symbol   # column name in expression table to extract feature columns
         metric_cols:
           - counts
         annotations:
@@ -277,7 +278,8 @@ sources:
         data_path: "data/Williams/snrna/conversions/02_HCA_oligodendroglia"
         omic_type: ["snrna"]
         tables:
-          expression: "logcounts.parquet"
+          expression: "expression.parquet"
+          logcounts: "logcounts.parquet"
           counts: "counts.parquet"
           obs_metadata: "obs_metadata.parquet"
           feature_annotations: "feature_annotations.parquet"
@@ -285,7 +287,7 @@ sources:
           pca: "PCA.parquet"
           tsne: "TSNE.parquet"
         feature_cols:
-          - feature_id
+          - gene_symbol
         metric_cols:
           - counts
         annotations:
@@ -302,7 +304,8 @@ sources:
         data_path: "data/Williams/snrna/conversions/03_HCA_astrocytes"
         omic_type: ["snrna"]
         tables:
-          expression: "logcounts.parquet"
+          expression: "expression.parquet"
+          logcounts: "logcounts.parquet"
           counts: "counts.parquet"
           obs_metadata: "obs_metadata.parquet"
           feature_annotations: "feature_annotations.parquet"
@@ -310,7 +313,7 @@ sources:
           pca: "PCA.parquet"
           tsne: "TSNE.parquet"
         feature_cols:
-          - feature_id
+          - gene_symbol
         metric_cols:
           - counts
         annotations:
@@ -328,7 +331,8 @@ sources:
         data_path: "data/Williams/snrna/conversions/04_HCA_microglia"
         omic_type: ["snrna"]
         tables:
-          expression: "logcounts.parquet"
+          expression: "expression.parquet"
+          logcounts: "logcounts.parquet"
           counts: "counts.parquet"
           obs_metadata: "obs_metadata.parquet"
           feature_annotations: "feature_annotations.parquet"
@@ -336,7 +340,7 @@ sources:
           pca: "PCA.parquet"
           tsne: "TSNE.parquet"
         feature_cols:
-          - feature_id
+          - gene_symbol
         metric_cols:
           - counts
         annotations:
@@ -354,7 +358,8 @@ sources:
         data_path: "data/Williams/snrna/conversions/05_HCA_vascular_cells"
         omic_type: ["snrna"]
         tables:
-          expression: "logcounts.parquet"
+          expression: "expression.parquet"
+          logcounts: "logcounts.parquet"
           counts: "counts.parquet"
           obs_metadata: "obs_metadata.parquet"
           feature_annotations: "feature_annotations.parquet"
@@ -362,7 +367,7 @@ sources:
           pca: "PCA.parquet"
           tsne: "TSNE.parquet"
         feature_cols:
-          - feature_id
+          - gene_symbol
         metric_cols:
           - counts
         annotations:
@@ -380,7 +385,8 @@ sources:
         data_path: "data/Williams/snrna/conversions/06_HCA_neurons"
         omic_type: ["snrna"]
         tables:
-          expression: "logcounts.parquet"
+          expression: "expression.parquet"
+          logcounts: "logcounts.parquet"
           counts: "counts.parquet"
           obs_metadata: "obs_metadata.parquet"
           feature_annotations: "feature_annotations.parquet"
@@ -388,7 +394,7 @@ sources:
           pca: "PCA.parquet"
           tsne: "TSNE.parquet"
         feature_cols:
-          - feature_id
+          - gene_symbol
         metric_cols:
           - counts
         annotations:
@@ -406,7 +412,8 @@ sources:
         data_path: "data/Williams/snrna/conversions/07_HCA_oligos_opcs_LS"
         omic_type: ["snrna"]
         tables:
-          expression: "logcounts.parquet"
+          expression: "expression.parquet"
+          logcounts: "logcounts.parquet"
           counts: "counts.parquet"
           obs_metadata: "obs_metadata.parquet"
           feature_annotations: "feature_annotations.parquet"
@@ -414,7 +421,7 @@ sources:
           pca: "PCA.parquet"
           tsne: "TSNE.parquet"
         feature_cols:
-          - feature_id
+          - gene_symbol
         metric_cols:
           - counts
         annotations:

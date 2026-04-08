@@ -54,10 +54,11 @@ def get_sql_col(
     Used to safely embed original column names from column_mappings into SQL strings 
     without risk of injecting None or unquoted identifiers.
     """
-    original_name = name_mappings.get(canonical_name)       # TODO check canonical vs original
-    if original_name and original_name in col_names:
-        if col_names is None or original_name in col_names:     # skip check if no col_names given
-            return f'"{original_name}"'
+    original_name = name_mappings.get(canonical_name)
+    if original_name and (col_names is None or original_name in col_names):
+        return f'"{original_name}"'
+    if col_names is not None and canonical_name in col_names:
+        return f'"{canonical_name}"'
     return fallback # return f'"{col_name}"' if col_name else fallback
 
 

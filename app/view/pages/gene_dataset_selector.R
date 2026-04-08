@@ -125,18 +125,6 @@ gene_selector_server <- function(id, selected_dataset) {
             tags$div(
               style = "flex: 0 0 290px;",   #fixed-width
               div(class = "well well-sm", style = "margin-bottom: 0;",
-                tags$div(
-                  style = "display: flex; align-items: center; gap: 8px; margin-bottom: 10px;",
-                  tags$span("Search help", style = "font-weight: 600; color: #333;"),
-                  bslib::tooltip(
-                    tags$span(
-                      shiny::icon("circle-question"),
-                      style = "display: inline-flex; align-items: center; color: #667eea; cursor: help; font-size: 1.1rem;"
-                    ),
-                    "First type or select one or more genes or proteins, click Search, select the available dataset rows, review the metadata preview, then click Explore selected dataset(s).",
-                    placement = "right"
-                  )
-                ),
                 # tags$label("Gene symbol or protein ID", style = "font-weight:600"),
                 selectizeInput(ns("gene_query"), "Gene symbol(s)",
                     choices  = NULL,
