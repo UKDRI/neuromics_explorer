@@ -105,7 +105,7 @@ build_url <- function(base_url, path, query = list()) {
 #'
 #' @param base_url Base service URL.
 #' @param path Route path starting with `/`.
-#' @param query Named list of query params.
+#' @param query Named list of query params to modify request.
 #' @param accept_arrow Whether to request an Arrow IPC response.
 #'
 #' @return A configured `httr2_request`.
@@ -134,8 +134,10 @@ arrow_table_to_df <- function(tbl) {
 #' Perform an API request that returns Arrow IPC data.
 #'
 #' This helper first fails fast when the `arrow` package is unavailable, then
-#' iterates across candidate base URLs until one succeeds. The final `stop()`
-#' is therefore conditional on all attempts failing.
+#' iterates across candidate base URLs until one succeeds. Responses are first
+#' written to a temporary file so the Shiny process does not hold the HTTP body
+#' twice in memory before Arrow reads it. The final `stop()` is therefore
+#' conditional on all attempts failing.
 #'
 #' @param path Route path starting with `/`.
 #' @param query Named query list.
@@ -155,9 +157,20 @@ perform_arrow_request <- function(path, query = list(), collect = TRUE) {
   last_error <- NULL
   for (base_url in candidate_base_urls()) {
     req <- build_request(base_url, path, query = query, accept_arrow = TRUE)
+    tmp_path <- tempfile(fileext = ".arrow")
+    stream_con <- NULL
+
+    cleanup <- function() {
+      if (!is.null(stream_con)) {
+        try(close(stream_con), silent = TRUE)
+      }
+      if (file.exists(tmp_path)) {
+        unlink(tmp_path)
+      }
+    }
 
     resp <- tryCatch(
-      httr2::req_perform(req),
+      httr2::req_perform(req, path = tmp_path),
       error = function(e) {
         last_error <<- e
         NULL
@@ -165,10 +178,14 @@ perform_arrow_request <- function(path, query = list(), collect = TRUE) {
     )
 
     if (!is.null(resp)) {
-      tbl <- arrow::read_ipc_stream(httr2::resp_body_raw(resp))
+      on.exit(cleanup(), add = TRUE)
+      stream_con <- file(tmp_path, open = "rb")
+      tbl <- arrow::read_ipc_stream(stream_con)
       if (!collect) return(tbl)
       return(arrow_table_to_df(tbl))
     }
+
+    cleanup()
   }
 
   last_error_message <- if (is.null(last_error)) {
@@ -350,6 +367,151 @@ fetch_dataset_expression <- function(lab_source, study_id,
   )
 }
 
+#' Fetch a paginated expression-table slice for one dataset.
+#'
+#' UI connection: backs the Expression tab without loading the full dataset
+#' into R. Sorting and pagination happen in DuckDB first.
+#' @export
+fetch_expression_table <- function(lab_source, study_id,
+                                   limit = 500L, offset = 0L,
+                                   sort_by = "padj", sort_dir = "asc",
+                                   cell_type = NULL,
+                                   genes = NULL,
+                                   proteins = NULL) {
+  genes <- unique(trimws(genes %||% character(0)))
+  genes <- genes[nzchar(genes)]
+  proteins <- unique(trimws(proteins %||% character(0)))
+  proteins <- proteins[nzchar(proteins)]
+
+  perform_arrow_request(
+    sprintf("/datasets/%s/%s/expression/table", lab_source, study_id),
+    query = list(
+      limit = as.integer(limit),
+      offset = as.integer(offset),
+      sort_by = sort_by,
+      sort_dir = sort_dir,
+      cell_type = cell_type,
+      gene = genes,
+      protein = proteins
+    )
+  )
+}
+
+#' Fetch the lightweight volcano payload for one dataset.
+#'
+#' @export
+fetch_expression_volcano <- function(lab_source, study_id,
+                                     cell_type = NULL,
+                                     limit = 20000L,
+                                     offset = 0L) {
+  perform_arrow_request(
+    sprintf("/datasets/%s/%s/expression/volcano", lab_source, study_id),
+    query = list(
+      cell_type = cell_type,
+      limit = as.integer(limit),
+      offset = as.integer(offset)
+    )
+  )
+}
+
+#' Fetch one-row summary stats for the active dataset.
+#'
+#' UI connection: useful for fast cards and for plot modules that only need a
+#' compact overview rather than full row-level data.
+#' @export
+fetch_expression_summary <- function(lab_source, study_id,
+                                     cell_type = NULL,
+                                     padj_thresh = 0.05,
+                                     lfc_thresh = 0) {
+  perform_arrow_request(
+    sprintf("/datasets/%s/%s/expression/summary", lab_source, study_id),
+    query = list(
+      cell_type = cell_type,
+      padj = padj_thresh,
+      lfc = lfc_thresh
+    )
+  )
+}
+
+#' Fetch server-side histogram bins for one dataset.
+#'
+#' UI connection: histogram plots can draw directly from aggregated bins
+#' instead of collecting all raw rows into memory first.
+#' @export
+fetch_expression_histogram <- function(lab_source, study_id,
+                                       metric = "log2fc",
+                                       bins = 30L,
+                                       group_by = NULL,
+                                       cell_type = NULL) {
+  perform_arrow_request(
+    sprintf("/datasets/%s/%s/expression/histogram", lab_source, study_id),
+    query = list(
+      metric = metric,
+      bins = as.integer(bins),
+      group_by = group_by,
+      cell_type = cell_type
+    )
+  )
+}
+
+#' Fetch grouped feature summaries for dot- and top-feature plots.
+#'
+#' UI connection: this powers plots that need feature-by-group means without
+#' pulling the full long expression table into R.
+#' @export
+fetch_expression_groups <- function(lab_source, study_id,
+                                    group_by = "cell_type",
+                                    metric = "abundance_a",
+                                    top_n = 30L,
+                                    cell_type = NULL,
+                                    genes = NULL,
+                                    proteins = NULL) {
+  genes <- unique(trimws(genes %||% character(0)))
+  genes <- genes[nzchar(genes)]
+  proteins <- unique(trimws(proteins %||% character(0)))
+  proteins <- proteins[nzchar(proteins)]
+
+  perform_arrow_request(
+    sprintf("/datasets/%s/%s/expression/groups", lab_source, study_id),
+    query = list(
+      group_by = group_by,
+      metric = metric,
+      top_n = as.integer(top_n),
+      cell_type = cell_type,
+      gene = genes,
+      protein = proteins
+    )
+  )
+}
+
+#' Fetch rows for explicitly selected genes or proteins of interest.
+#'
+#' UI connection: targeted feature-inspection plots should use this instead of
+#' loading the entire dataset and filtering client-side.
+#' @export
+fetch_expression_goi <- function(lab_source, study_id,
+                                 genes = NULL,
+                                 proteins = NULL,
+                                 cell_type = NULL,
+                                 limit = 500L,
+                                 offset = 0L) {
+  genes <- unique(trimws(genes %||% character(0)))
+  genes <- genes[nzchar(genes)]
+  proteins <- unique(trimws(proteins %||% character(0)))
+  proteins <- proteins[nzchar(proteins)]
+
+  perform_arrow_request(
+    sprintf("/datasets/%s/%s/expression/goi", lab_source, study_id),
+    query = list(
+      gene = genes,
+      protein = proteins,
+      cell_type = cell_type,
+      limit = as.integer(limit),
+      offset = as.integer(offset)
+    )
+  )
+}
+
 #' Fetch embedding coordinates and optional selected-term expression overlays.
 #'
 #' UI connection: powers the single-cell UMAP/PCA/tSNE plot in the explorer
@@ -360,7 +522,7 @@ fetch_dataset_embeddings <- function(lab_source, study_id,
                                      assay = c("expression", "counts"),
                                      genes = NULL,
                                      proteins = NULL,
-                                     max_points = 75000L) {
+                                     max_points = 50000L) {
   reduction <- match.arg(reduction)
   assay <- match.arg(assay)
 

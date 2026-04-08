@@ -18,6 +18,49 @@ router = APIRouter(prefix="/api", tags=["query"])
 ARROW_MEDIA_TYPE = "application/vnd.apache.arrow.stream"
 SAFE_IDENTIFIER = re.compile(r"^[A-Za-z0-9_]+$")
 SEMANTIC_GENE_EXPR = "COALESCE(NULLIF(gene_symbol, ''), NULLIF(human_gene, ''))"
+DEFAULT_TABLE_LIMIT = 500
+MAX_TABLE_LIMIT = 5000
+DEFAULT_PLOT_LIMIT = 20000
+MAX_PLOT_LIMIT = 100000
+DEFAULT_EMBEDDING_MAX_POINTS = 50000
+MAX_EMBEDDING_POINTS = 200000
+TABLE_SORT_COLUMNS = {
+    "gene_symbol": SEMANTIC_GENE_EXPR,
+    "human_gene": "human_gene",
+    "protein_id": "protein_id",
+    "padj": "padj",
+    "pvalue": "pvalue",
+    "log2fc": "log2fc",
+    "abundance_a": "abundance_a",
+    "abundance_b": "abundance_b",
+    "cell_type": "cell_type",
+    "condition_a": "condition_a",
+    "condition_b": "condition_b",
+}
+GROUPABLE_COLUMNS = {
+    "cell_type": "cell_type",
+    "condition_a": "condition_a",
+    "condition_b": "condition_b",
+    "sample_a": "sample_a",
+    "sample_b": "sample_b",
+    "organism": "organism",
+}
+METRIC_COLUMNS = {
+    "log2fc": "log2fc",
+    "pvalue": "pvalue",
+    "padj": "padj",
+    "abundance_a": "abundance_a",
+    "abundance_b": "abundance_b",
+    "pct_expressed_a": "pct_expressed_a",
+    "pct_expressed_b": "pct_expressed_b",
+}
+GROUP_METRIC_COLUMNS = {
+    "log2fc": "log2fc",
+    "abundance_a": "abundance_a",
+    "abundance_b": "abundance_b",
+    "pct_expressed_a": "pct_expressed_a",
+    "pct_expressed_b": "pct_expressed_b",
+}
 
 
 def _require_pool(request: Request):
@@ -166,6 +209,63 @@ def _term_predicates(genes: list[str], proteins: list[str]) -> tuple[list[str], 
         params.extend(term.upper() for term in proteins)
 
     return predicates, params
+
+
+def _expression_filters(
+    genes: list[str],
+    proteins: list[str],
+    cell_type: str | None = None,
+) -> tuple[list[str], list]:
+    """Build reusable WHERE clauses for expression-style routes."""
+    clauses: list[str] = []
+    params: list = []
+
+    predicates, predicate_params = _term_predicates(genes, proteins)
+    if predicates:
+        clauses.append(f"({' OR '.join(predicates)})")
+        params.extend(predicate_params)
+
+    if cell_type:
+        clauses.append("cell_type = ?")
+        params.append(cell_type)
+
+    return clauses, params
+
+
+def _where_sql(clauses: list[str]) -> str:
+    if not clauses:
+        return ""
+    return "WHERE " + " AND ".join(clauses)
+
+
+def _validated_sort_sql(sort_by: str, sort_dir: str) -> str:
+    sort_expr = TABLE_SORT_COLUMNS.get(sort_by)
+    if sort_expr is None:
+        raise HTTPException(status_code=400, detail=f"Unsupported sort column: {sort_by!r}")
+
+    direction = sort_dir.upper()
+    if direction not in {"ASC", "DESC"}:
+        raise HTTPException(status_code=400, detail=f"Unsupported sort direction: {sort_dir!r}")
+
+    return f"ORDER BY {sort_expr} {direction} NULLS LAST"
+
+
+def _validated_group_expr(group_by: str | None) -> str:
+    if not group_by:
+        return "'All'"
+
+    group_expr = GROUPABLE_COLUMNS.get(group_by)
+    if group_expr is None:
+        raise HTTPException(status_code=400, detail=f"Unsupported grouping column: {group_by!r}")
+    return f"COALESCE(CAST({group_expr} AS VARCHAR), 'unlabelled')"
+
+
+def _validated_metric_expr(metric: str, *, group_metric: bool = False) -> str:
+    mapping = GROUP_METRIC_COLUMNS if group_metric else METRIC_COLUMNS
+    metric_expr = mapping.get(metric)
+    if metric_expr is None:
+        raise HTTPException(status_code=400, detail=f"Unsupported metric: {metric!r}")
+    return metric_expr
 
 
 def _terms_cte(terms: list[str]) -> tuple[str, list[str]]:
@@ -490,6 +590,337 @@ def expression(
     return _query_arrow(request, sql, params)
 
 
+@router.get("/datasets/{lab}/{study_id}/expression/table")
+def expression_table(
+    request: Request,
+    lab: str,
+    study_id: int,
+    gene: list[str] | None = Query(None),
+    protein: list[str] | None = Query(None),
+    cell_type: str | None = None,
+    limit: int = Query(DEFAULT_TABLE_LIMIT, ge=1, le=MAX_TABLE_LIMIT),
+    offset: int = Query(0, ge=0),
+    sort_by: str = Query("padj"),
+    sort_dir: str = Query("asc", pattern="^(?i:asc|desc)$"),
+):
+    """
+    Return a paginated expression-table slice for the explorer table.
+
+    UI connection:
+    this is the default Expression-tab endpoint because it trims the payload to
+    the columns the table actually renders and paginates at the API boundary.
+    """
+    view = _safe_view_name("v", lab, study_id)
+    genes = _clean_optional_terms(gene)
+    proteins = _clean_optional_terms(protein)
+    clauses, params = _expression_filters(genes, proteins, cell_type)
+    where_sql = _where_sql(clauses)
+    sort_sql = _validated_sort_sql(sort_by, sort_dir)
+
+    params.extend([limit, offset])
+    sql = f"""
+        SELECT
+          {SEMANTIC_GENE_EXPR} AS gene_symbol,
+          human_gene, protein_id, organism,
+          log2fc, pvalue, padj,
+          abundance_a, abundance_b,
+          pct_expressed_a, pct_expressed_b, expression_metric,
+          sample_a, sample_b, condition_a, condition_b, cell_type,
+          study_id,
+          COUNT(*) OVER() AS total_rows
+        FROM {view}
+        {where_sql}
+        {sort_sql}
+        LIMIT ?
+        OFFSET ?
+    """
+    return _query_arrow(request, sql, params)
+
+
+@router.get("/datasets/{lab}/{study_id}/expression/volcano")
+def expression_volcano(
+    request: Request,
+    lab: str,
+    study_id: int,
+    cell_type: str | None = None,
+    limit: int = Query(DEFAULT_PLOT_LIMIT, ge=100, le=MAX_PLOT_LIMIT),
+    offset: int = Query(0, ge=0),
+):
+    """
+    Return the lean volcano payload for one dataset.
+
+    UI connection:
+    the Plot-tab volcano only needs significance columns plus lightweight
+    labels, so this route avoids sending abundance / percentage columns.
+    """
+    view = _safe_view_name("v", lab, study_id)
+    clauses, params = _expression_filters([], [], cell_type)
+    clauses.append("log2fc IS NOT NULL")
+    clauses.append("pvalue IS NOT NULL")
+    where_sql = _where_sql(clauses)
+
+    params.extend([limit, offset])
+    sql = f"""
+        SELECT
+          {SEMANTIC_GENE_EXPR} AS gene_symbol,
+          human_gene, protein_id, organism,
+          log2fc, pvalue, padj,
+          cell_type, condition_a, condition_b,
+          study_id
+        FROM {view}
+        {where_sql}
+        ORDER BY padj ASC NULLS LAST, ABS(log2fc) DESC NULLS LAST
+        LIMIT ?
+        OFFSET ?
+    """
+    return _query_arrow(request, sql, params)
+
+
+@router.get("/datasets/{lab}/{study_id}/expression/summary")
+def expression_summary(
+    request: Request,
+    lab: str,
+    study_id: int,
+    cell_type: str | None = None,
+    padj: float = 0.05,
+    lfc: float = 0.0,
+):
+    """
+    Return one-row summary stats for the active dataset.
+
+    UI connection:
+    this supports quick badges, overview cards, and future histogram defaults
+    without paying for a full row-level expression fetch first.
+    """
+    view = _safe_view_name("v", lab, study_id)
+    clauses, params = _expression_filters([], [], cell_type)
+    where_sql = _where_sql(clauses)
+    params = [padj, lfc] + params
+
+    sql = f"""
+        SELECT
+          COUNT(*) AS total_rows,
+          COUNT(DISTINCT {SEMANTIC_GENE_EXPR}) AS unique_genes,
+          COUNT(DISTINCT protein_id) AS unique_proteins,
+          SUM(
+            CASE
+              WHEN padj IS NOT NULL AND padj < ? AND log2fc IS NOT NULL AND ABS(log2fc) >= ?
+              THEN 1 ELSE 0
+            END
+          ) AS significant_rows,
+          AVG(log2fc) AS mean_log2fc,
+          MIN(log2fc) AS min_log2fc,
+          MAX(log2fc) AS max_log2fc,
+          AVG(abundance_a) AS mean_abundance_a,
+          AVG(abundance_b) AS mean_abundance_b,
+          AVG(padj) AS mean_padj
+        FROM {view}
+        {where_sql}
+    """
+    return _query_arrow(request, sql, params)
+
+
+@router.get("/datasets/{lab}/{study_id}/expression/histogram")
+def expression_histogram(
+    request: Request,
+    lab: str,
+    study_id: int,
+    metric: str = Query("log2fc"),
+    bins: int = Query(30, ge=5, le=100),
+    group_by: str | None = Query(None),
+    cell_type: str | None = None,
+):
+    """
+    Return server-side binned counts for histogram-style plots.
+
+    UI connection:
+    the histogram plot can work from these binned counts directly instead of
+    materialising every row in R just to calculate the same buckets again.
+    """
+    view = _safe_view_name("v", lab, study_id)
+    metric_expr = _validated_metric_expr(metric)
+    group_expr = _validated_group_expr(group_by)
+    clauses, params = _expression_filters([], [], cell_type)
+    clauses.append(f"{metric_expr} IS NOT NULL")
+    where_sql = _where_sql(clauses)
+
+    params.extend([bins, bins])
+    sql = f"""
+        WITH filtered AS (
+          SELECT
+            CAST({metric_expr} AS DOUBLE) AS metric_value,
+            {group_expr} AS group_value
+          FROM {view}
+          {where_sql}
+        ),
+        bounds AS (
+          SELECT MIN(metric_value) AS min_value, MAX(metric_value) AS max_value
+          FROM filtered
+        ),
+        binned AS (
+          SELECT
+            group_value,
+            metric_value,
+            CASE
+              WHEN bounds.min_value IS NULL OR bounds.max_value IS NULL THEN 0
+              WHEN bounds.min_value = bounds.max_value THEN 0
+              ELSE LEAST(
+                ? - 1,
+                CAST(
+                  FLOOR(
+                    (metric_value - bounds.min_value) /
+                    NULLIF((bounds.max_value - bounds.min_value) / ?, 0)
+                  ) AS INTEGER
+                )
+              )
+            END AS bin_idx,
+            bounds.min_value,
+            bounds.max_value
+          FROM filtered
+          CROSS JOIN bounds
+        )
+        SELECT
+          group_value,
+          bin_idx,
+          MIN(metric_value) AS bin_start,
+          MAX(metric_value) AS bin_end,
+          COUNT(*) AS row_count,
+          AVG(metric_value) AS mean_value
+        FROM binned
+        GROUP BY group_value, bin_idx
+        ORDER BY group_value, bin_idx
+    """
+    return _query_arrow(request, sql, params)
+
+
+@router.get("/datasets/{lab}/{study_id}/expression/groups")
+def expression_groups(
+    request: Request,
+    lab: str,
+    study_id: int,
+    group_by: str = Query("cell_type"),
+    metric: str = Query("abundance_a"),
+    top_n: int = Query(30, ge=1, le=200),
+    gene: list[str] | None = Query(None),
+    protein: list[str] | None = Query(None),
+    cell_type: str | None = None,
+):
+    """
+    Return grouped feature summaries for dot- and top-expression-style plots.
+
+    UI connection:
+    this route computes group-wise means and percentages inside DuckDB so R only
+    receives the compact feature × group table it actually needs to render.
+    """
+    view = _safe_view_name("v", lab, study_id)
+    genes = _clean_optional_terms(gene)
+    proteins = _clean_optional_terms(protein)
+    clauses, params = _expression_filters(genes, proteins, cell_type)
+    group_expr = _validated_group_expr(group_by)
+    metric_expr = _validated_metric_expr(metric, group_metric=True)
+    feature_expr = f"COALESCE(NULLIF({SEMANTIC_GENE_EXPR}, ''), NULLIF(protein_id, ''))"
+    where_sql = _where_sql(clauses)
+    if genes or proteins:
+        feature_rank_sql = """
+        feature_rank AS (
+          SELECT DISTINCT feature_label
+          FROM base
+          WHERE feature_label IS NOT NULL
+        )
+        """
+        params_with_top = params
+    else:
+        feature_rank_sql = """
+        feature_rank AS (
+          SELECT feature_label
+          FROM base
+          WHERE feature_label IS NOT NULL AND metric_value IS NOT NULL
+          GROUP BY feature_label
+          ORDER BY AVG(metric_value) DESC NULLS LAST
+          LIMIT ?
+        )
+        """
+        params_with_top = params + [top_n]
+
+    sql = f"""
+        WITH base AS (
+          SELECT
+            {SEMANTIC_GENE_EXPR} AS gene_symbol,
+            human_gene,
+            protein_id,
+            {feature_expr} AS feature_label,
+            {group_expr} AS group_value,
+            CAST({metric_expr} AS DOUBLE) AS metric_value,
+            CAST(COALESCE(pct_expressed_a, pct_expressed_b) AS DOUBLE) AS pct_value,
+            padj
+          FROM {view}
+          {where_sql}
+        ),
+        {feature_rank_sql}
+        SELECT
+          base.feature_label,
+          MIN(base.gene_symbol) AS gene_symbol,
+          MIN(base.human_gene) AS human_gene,
+          MIN(base.protein_id) AS protein_id,
+          base.group_value,
+          AVG(base.metric_value) AS mean_value,
+          AVG(base.pct_value) AS mean_pct_expressed,
+          MIN(base.padj) AS min_padj,
+          COUNT(*) AS row_count
+        FROM base
+        INNER JOIN feature_rank
+          ON base.feature_label = feature_rank.feature_label
+        GROUP BY base.feature_label, base.group_value
+        ORDER BY mean_value DESC NULLS LAST, base.feature_label, base.group_value
+    """
+    return _query_arrow(request, sql, params_with_top)
+
+
+@router.get("/datasets/{lab}/{study_id}/expression/goi")
+def expression_goi(
+    request: Request,
+    lab: str,
+    study_id: int,
+    gene: list[str] | None = Query(None),
+    protein: list[str] | None = Query(None),
+    cell_type: str | None = None,
+    limit: int = Query(DEFAULT_TABLE_LIMIT, ge=1, le=MAX_TABLE_LIMIT),
+    offset: int = Query(0, ge=0),
+):
+    """
+    Return rows for explicitly selected genes/proteins of interest only.
+
+    UI connection:
+    feature-level scatter or inspection plots should use this route rather than
+    loading the entire dataset and filtering down to a few selected terms in R.
+    """
+    view = _safe_view_name("v", lab, study_id)
+    genes = _clean_optional_terms(gene)
+    proteins = _clean_optional_terms(protein)
+    if not genes and not proteins:
+        raise HTTPException(status_code=400, detail="At least one gene or protein is required for the GOI endpoint.")
+
+    clauses, params = _expression_filters(genes, proteins, cell_type)
+    where_sql = _where_sql(clauses)
+    params.extend([limit, offset])
+    sql = f"""
+        SELECT
+          {SEMANTIC_GENE_EXPR} AS gene_symbol,
+          human_gene, protein_id, organism,
+          log2fc, pvalue, padj,
+          abundance_a, abundance_b,
+          pct_expressed_a, pct_expressed_b, expression_metric,
+          sample_a, sample_b, condition_a, condition_b, cell_type,
+          study_id
+        FROM {view}
+        {where_sql}
+        ORDER BY gene_symbol, protein_id, padj ASC NULLS LAST
+        LIMIT ?
+        OFFSET ?
+    """
+    return _query_arrow(request, sql, params)
+
+
 @router.get("/datasets/{lab}/{study_id}/embeddings")
 def embeddings(
     request: Request,
@@ -499,7 +930,7 @@ def embeddings(
     assay: str = Query("expression", pattern="^(?i:expression|counts)$"),
     gene: list[str] | None = Query(None),
     protein: list[str] | None = Query(None),
-    max_points: int = Query(75000, ge=1000, le=250000),
+    max_points: int = Query(DEFAULT_EMBEDDING_MAX_POINTS, ge=1000, le=MAX_EMBEDDING_POINTS),
 ):
     """
     Return embedding coordinates plus optional expression overlays for selected terms.
