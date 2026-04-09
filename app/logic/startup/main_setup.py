@@ -87,7 +87,7 @@ app = FastAPI(
     lifespan=lifespan,
     debug=True,
     title="Neuromics Explorer",
-    version="1.2.0",
+    version="0.0.0",
     description="Neuromics Explorer visualisation dashboard for UK DRI datasets")
 app.include_router(api_router)
 
