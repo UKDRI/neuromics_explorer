@@ -212,6 +212,7 @@ def create_views(
                     {get_sql_col(name_mappings, 'sample_b',         expr_cols)}     AS sample_b,
                     {get_sql_col(name_mappings, 'condition_a',      expr_cols)}     AS condition_a,
                     {get_sql_col(name_mappings, 'condition_b',      expr_cols)}     AS condition_b,
+                    {get_sql_col(name_mappings, 'de_category',      expr_cols)}     AS de_category,
                     {get_sql_col(name_mappings, 'cell_type',        expr_cols)}     AS cell_type,
                     {get_sql_col(name_mappings, 'cell_id',          expr_cols)}          AS cell_id,
                     {get_sql_col(name_mappings, 'cluster_id',       expr_cols)}          AS cluster_id,

@@ -519,7 +519,7 @@ fetch_expression_goi <- function(lab_source, study_id,
 #' @export
 fetch_dataset_embeddings <- function(lab_source, study_id,
                                      reduction = c("umap", "pca", "tsne"),
-                                     assay = c("expression", "counts"),
+                                     assay = c("logcounts", "counts", "expression"),
                                      genes = NULL,
                                      proteins = NULL,
                                      max_points = 50000L) {
@@ -539,6 +539,36 @@ fetch_dataset_embeddings <- function(lab_source, study_id,
       gene = genes,
       protein = proteins,
       max_points = as.integer(max_points)
+    )
+  )
+}
+
+#' Fetch per-observation expression values for selected genes/proteins.
+#'
+#' UI connection: used by gene-specific violin plots for sc/snRNA datasets so
+#' expression values can be grouped by canonical metadata such as cluster,
+#' tissue, sex, or condition.
+#' @export
+fetch_expression_feature_values <- function(lab_source, study_id,
+                                            genes = NULL,
+                                            proteins = NULL,
+                                            assay = c("logcounts", "counts", "expression"),
+                                            limit = 100000L,
+                                            offset = 0L) {
+  assay <- match.arg(assay)
+  genes <- unique(trimws(genes %||% character(0)))
+  genes <- genes[nzchar(genes)]
+  proteins <- unique(trimws(proteins %||% character(0)))
+  proteins <- proteins[nzchar(proteins)]
+
+  perform_arrow_request(
+    sprintf("/datasets/%s/%s/expression/feature-values", lab_source, study_id),
+    query = list(
+      gene = genes,
+      protein = proteins,
+      assay = assay,
+      limit = as.integer(limit),
+      offset = as.integer(offset)
     )
   )
 }

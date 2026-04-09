@@ -22,6 +22,8 @@ DEFAULT_TABLE_LIMIT = 500
 MAX_TABLE_LIMIT = 5000
 DEFAULT_PLOT_LIMIT = 20000
 MAX_PLOT_LIMIT = 100000
+DEFAULT_FEATURE_VALUE_LIMIT = 100000
+MAX_FEATURE_VALUE_LIMIT = 300000
 DEFAULT_EMBEDDING_MAX_POINTS = 50000
 MAX_EMBEDDING_POINTS = 200000
 TABLE_SORT_COLUMNS = {
@@ -38,12 +40,18 @@ TABLE_SORT_COLUMNS = {
     "condition_b": "condition_b",
 }
 GROUPABLE_COLUMNS = {
+    "de_category": "de_category",
+    "cluster_id": "cluster_id",
     "cell_type": "cell_type",
     "condition_a": "condition_a",
     "condition_b": "condition_b",
     "sample_a": "sample_a",
     "sample_b": "sample_b",
     "organism": "organism",
+    "tissue": "tissue",
+    "sex": "sex",
+    "age": "age",
+    "cell_id": "cell_id",
 }
 METRIC_COLUMNS = {
     "log2fc": "log2fc",
@@ -193,6 +201,37 @@ def _table_columns(con, ctx: dict, actual_table: str) -> set[str]:
     }
 
 
+def _pick_assay_table(ctx: dict, assay: str) -> tuple[str, str]:
+    """
+    Resolve the requested assay to the best available table for sc/snRNA plots.
+
+    For single-cell datasets, modal- and embedding-level expression overlays
+    should come from logcounts/counts matrices rather than the DE-style
+    `expression.parquet` table. Accept `expression` for backwards compatibility
+    and route it to logcounts first.
+    """
+    requested = assay.lower()
+    candidates: list[str]
+
+    if ctx["omic_type"] in {"scrna", "snrna"}:
+        if requested in {"expression", "logcounts"}:
+            candidates = ["logcounts", "counts", "expression"]
+        else:
+            candidates = [requested, "logcounts", "counts", "expression"]
+    else:
+        candidates = [requested]
+
+    for candidate in candidates:
+        actual_table = ctx["table_map"].get(candidate)
+        if actual_table:
+            return candidate, actual_table
+
+    raise HTTPException(
+        status_code=404,
+        detail=f"No assay table registered for {requested!r} in {ctx['lab']}:{ctx['study_id']}."
+    )
+
+
 def _term_predicates(genes: list[str], proteins: list[str]) -> tuple[list[str], list]:
     """Build the feature-level WHERE predicates shared by single and multi-dataset routes."""
     predicates: list[str] = []
@@ -315,7 +354,7 @@ def _dataset_unions(
               log2fc, pvalue, padj,
               abundance_a, abundance_b,
               pct_expressed_a, pct_expressed_b, expression_metric,
-              sample_a, sample_b, condition_a, condition_b, cell_type
+              sample_a, sample_b, condition_a, condition_b, de_category, cell_type
             FROM {view}
             WHERE 1 = 1
               {term_clause}
@@ -579,7 +618,7 @@ def expression(
           log2fc, pvalue, padj,
           abundance_a, abundance_b,
           pct_expressed_a, pct_expressed_b, expression_metric,
-          sample_a, sample_b, condition_a, condition_b, cell_type,
+          sample_a, sample_b, condition_a, condition_b, de_category, cell_type,
           study_id
         FROM {view}
         WHERE 1 = 1
@@ -625,7 +664,8 @@ def expression_table(
           log2fc, pvalue, padj,
           abundance_a, abundance_b,
           pct_expressed_a, pct_expressed_b, expression_metric,
-          sample_a, sample_b, condition_a, condition_b, cell_type,
+          sample_a, sample_b, condition_a, condition_b, de_category, cell_type,
+          cluster_id, tissue, sex, age, cell_id,
           study_id,
           COUNT(*) OVER() AS total_rows
         FROM {view}
@@ -820,6 +860,7 @@ def expression_groups(
     metric_expr = _validated_metric_expr(metric, group_metric=True)
     feature_expr = f"COALESCE(NULLIF({SEMANTIC_GENE_EXPR}, ''), NULLIF(protein_id, ''))"
     where_sql = _where_sql(clauses)
+    rank_order_expr = "AVG(ABS(metric_value))" if metric == "log2fc" else "AVG(metric_value)"
     if genes or proteins:
         feature_rank_sql = """
         feature_rank AS (
@@ -836,10 +877,10 @@ def expression_groups(
           FROM base
           WHERE feature_label IS NOT NULL AND metric_value IS NOT NULL
           GROUP BY feature_label
-          ORDER BY AVG(metric_value) DESC NULLS LAST
+          ORDER BY {rank_order_expr} DESC NULLS LAST
           LIMIT ?
         )
-        """
+        """.format(rank_order_expr=rank_order_expr)
         params_with_top = params + [top_n]
 
     sql = f"""
@@ -910,7 +951,8 @@ def expression_goi(
           log2fc, pvalue, padj,
           abundance_a, abundance_b,
           pct_expressed_a, pct_expressed_b, expression_metric,
-          sample_a, sample_b, condition_a, condition_b, cell_type,
+          sample_a, sample_b, condition_a, condition_b, de_category, cell_type,
+          cluster_id, tissue, sex, age, cell_id,
           study_id
         FROM {view}
         {where_sql}
@@ -921,13 +963,162 @@ def expression_goi(
     return _query_arrow(request, sql, params)
 
 
+@router.get("/datasets/{lab}/{study_id}/expression/feature-values")
+def expression_feature_values(
+    request: Request,
+    lab: str,
+    study_id: int,
+    gene: list[str] | None = Query(None),
+    protein: list[str] | None = Query(None),
+    assay: str = Query("logcounts", pattern="^(?i:expression|logcounts|counts)$"),
+    limit: int = Query(DEFAULT_FEATURE_VALUE_LIMIT, ge=1, le=MAX_FEATURE_VALUE_LIMIT),
+    offset: int = Query(0, ge=0),
+):
+    """
+    Return per-observation expression values for selected genes/proteins.
+
+    UI connection:
+    the single-dataset violin plot uses this route when the user switches from
+    dataset-wide DE summaries to a specific searched gene. The API joins the
+    assay matrix to feature annotations and obs metadata so Shiny can plot
+    expression by cluster, tissue, age, or other canonical metadata fields.
+    """
+    genes = _clean_optional_terms(gene)
+    proteins = _clean_optional_terms(protein)
+    if not genes and not proteins:
+        raise HTTPException(status_code=400, detail="At least one gene or protein is required.")
+
+    pool = _require_pool(request)
+    with get_conn(pool) as con:
+        ctx = _dataset_context(con, lab, study_id)
+        if ctx["omic_type"] not in {"scrna", "snrna"}:
+            raise HTTPException(
+                status_code=400,
+                detail="Feature-level expression values are only available for sc/snRNA datasets."
+            )
+
+        _, assay_table = _pick_assay_table(ctx, assay)
+        feature_table = ctx["table_map"].get("feature_annotations") or ctx["table_map"].get("gene_annotations")
+        if not feature_table:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No feature annotation table is registered for {lab}:{study_id}."
+            )
+
+        assay_cols = _table_columns(con, ctx, assay_table)
+        feature_cols = _table_columns(con, ctx, feature_table)
+        obs_meta_table = ctx["table_map"].get("obs_metadata") or ctx["table_map"].get("extra_metadata")
+
+        assay_obs_col = _first_existing(assay_cols, "obs", "cell_id", "Cell_ID", "barcode")
+        assay_feature_col = _first_existing(assay_cols, "feature_id", "ID", "gene_id")
+        assay_value_col = next((col for col in assay_cols if col not in {assay_obs_col, assay_feature_col}), None)
+        feature_id_col = _first_existing(feature_cols, "feature_id", "ID", "gene_id")
+
+        if not assay_obs_col or not assay_feature_col or not assay_value_col or not feature_id_col:
+            raise HTTPException(
+                status_code=500,
+                detail="Assay or feature annotation table is missing obs/feature/value columns."
+            )
+
+        gene_label_col = _first_existing(
+            feature_cols,
+            ctx["name_map"].get("gene_symbol"),
+            ctx["name_map"].get("human_gene"),
+            "feature_id",
+            "ID",
+            "gene_symbol",
+            "feature_name",
+            "gene_name",
+            "Human_Gene",
+            "Mouse_Gene",
+            "symbol",
+        )
+        human_label_col = _first_existing(
+            feature_cols,
+            ctx["name_map"].get("human_gene"),
+            "human_gene",
+            "Human_Gene",
+        )
+        protein_label_col = _first_existing(
+            feature_cols,
+            ctx["name_map"].get("protein_id"),
+            "protein_id",
+            "Uniprot_id",
+            "Uniprot_ID",
+        )
+
+        term_predicates = []
+        params: list[str | int] = []
+
+        if genes and gene_label_col:
+            placeholders = ",".join(["?"] * len(genes))
+            term_predicates.append(
+                f"UPPER(CAST(ann.{_quote_identifier(gene_label_col)} AS VARCHAR)) IN ({placeholders})"
+            )
+            params.extend(term.upper() for term in genes)
+
+        if proteins and protein_label_col:
+            placeholders = ",".join(["?"] * len(proteins))
+            term_predicates.append(
+                f"UPPER(CAST(ann.{_quote_identifier(protein_label_col)} AS VARCHAR)) IN ({placeholders})"
+            )
+            params.extend(term.upper() for term in proteins)
+
+        if not term_predicates:
+            raise HTTPException(
+                status_code=400,
+                detail="Selected terms cannot be resolved against the available feature annotation columns."
+            )
+
+        meta_select = []
+        meta_join = ""
+        if obs_meta_table:
+            meta_cols = _table_columns(con, ctx, obs_meta_table)
+            meta_obs_col = _first_existing(meta_cols, "obs", "cell_id", "Cell_ID", "barcode", assay_obs_col)
+            if meta_obs_col:
+                for canonical_name in (
+                    "cell_type", "cluster_id", "condition_a", "condition_b",
+                    "sample_a", "sample_b", "tissue", "sex", "age", "cell_id"
+                ):
+                    meta_col = _first_existing(meta_cols, ctx["name_map"].get(canonical_name), canonical_name)
+                    if meta_col:
+                        meta_select.append(f"meta.{_quote_identifier(meta_col)} AS {canonical_name}")
+                meta_join = (
+                    f"LEFT JOIN {_table_ref(ctx, obs_meta_table, 'meta')} "
+                    f"ON CAST(expr.{_quote_identifier(assay_obs_col)} AS VARCHAR) = "
+                    f"CAST(meta.{_quote_identifier(meta_obs_col)} AS VARCHAR)"
+                )
+
+        params.extend([limit, offset])
+        sql = f"""
+            SELECT
+              CAST(expr.{_quote_identifier(assay_obs_col)} AS VARCHAR) AS obs,
+              {f"CAST(ann.{_quote_identifier(gene_label_col)} AS VARCHAR)" if gene_label_col else "NULL::VARCHAR"} AS gene_symbol,
+              {f"CAST(ann.{_quote_identifier(human_label_col)} AS VARCHAR)" if human_label_col else "NULL::VARCHAR"} AS human_gene,
+              {f"CAST(ann.{_quote_identifier(protein_label_col)} AS VARCHAR)" if protein_label_col else "NULL::VARCHAR"} AS protein_id,
+              CAST(expr.{_quote_identifier(assay_value_col)} AS DOUBLE) AS expression_value
+              {"," if meta_select else ""}
+              {", ".join(meta_select)}
+            FROM {_table_ref(ctx, assay_table, 'expr')}
+            LEFT JOIN {_table_ref(ctx, feature_table, 'ann')}
+              ON CAST(expr.{_quote_identifier(assay_feature_col)} AS VARCHAR) =
+                 CAST(ann.{_quote_identifier(feature_id_col)} AS VARCHAR)
+            {meta_join}
+            WHERE {" OR ".join(term_predicates)}
+            ORDER BY gene_symbol, obs
+            LIMIT ?
+            OFFSET ?
+        """
+        return _query_arrow(request, sql, params)
+
+
 @router.get("/datasets/{lab}/{study_id}/embeddings")
 def embeddings(
     request: Request,
     lab: str,
     study_id: int,
     reduction: str = Query("umap", pattern="^(?i:umap|pca|tsne)$"),
-    assay: str = Query("expression", pattern="^(?i:expression|counts)$"),
+    assay: str = Query("logcounts", pattern="^(?i:expression|logcounts|counts)$"),
     gene: list[str] | None = Query(None),
     protein: list[str] | None = Query(None),
     max_points: int = Query(DEFAULT_EMBEDDING_MAX_POINTS, ge=1000, le=MAX_EMBEDDING_POINTS),
@@ -979,9 +1170,9 @@ def embeddings(
             meta_obs_col = _first_existing(meta_cols, "obs", "cell_id", "Cell_ID", "barcode", obs_col)
             if meta_obs_col:
                 for canonical_name in ("cell_type", "cluster_id", "condition_a", "condition_b", "tissue", "sex", "age", "cell_id"):
-                    original_name = ctx["name_map"].get(canonical_name)
-                    if original_name and original_name in meta_cols:
-                        meta_select.append(f"meta.{_quote_identifier(original_name)} AS {canonical_name}")
+                    meta_col = _first_existing(meta_cols, ctx["name_map"].get(canonical_name), canonical_name)
+                    if meta_col:
+                        meta_select.append(f"meta.{_quote_identifier(meta_col)} AS {canonical_name}")
                 meta_join = (
                     f"LEFT JOIN {_table_ref(ctx, obs_meta_table, 'meta')} "
                     f"ON emb.obs = CAST(meta.{_quote_identifier(meta_obs_col)} AS VARCHAR)"
@@ -1013,13 +1204,7 @@ def embeddings(
             """
             return _query_arrow(request, sql)
 
-        assay_key = assay.lower()
-        assay_table = ctx["table_map"].get(assay_key)
-        if not assay_table:
-            raise HTTPException(
-                status_code=404,
-                detail=f"No assay table registered for {assay_key!r} in {lab}:{study_id}."
-            )
+        assay_key, assay_table = _pick_assay_table(ctx, assay)
 
         feature_table = ctx["table_map"].get("feature_annotations") or ctx["table_map"].get("gene_annotations")
         if not feature_table:
@@ -1046,6 +1231,8 @@ def embeddings(
             feature_cols,
             ctx["name_map"].get("gene_symbol"),
             ctx["name_map"].get("human_gene"),
+            "feature_id",
+            "ID",
             "feature_name",
             "gene_name",
             "gene_symbol",
@@ -1157,7 +1344,8 @@ def top_de(
         SELECT
           {SEMANTIC_GENE_EXPR} AS gene_symbol, human_gene, log2fc, padj, pvalue,
           abundance_a, abundance_b,
-          cell_type, condition_a, condition_b
+          sample_a, sample_b, condition_a, condition_b, de_category,
+          cell_type, cluster_id, tissue, sex, age, cell_id
         FROM {view}
         WHERE padj < ?
           AND (log2fc IS NULL OR ABS(log2fc) >= ?)

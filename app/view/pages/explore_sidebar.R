@@ -23,13 +23,12 @@ sidebar_ui <- function(id) {
     tags$hr(),
     
     # ── Plot type and query-side filters ─────────────────────────────────────
-    # Reminder: add back the wider plot catalogue when the supporting modules
-    # are implemented and wired through the explorer/compare flow:
-    # Dot, Histogram, Volcano, Heatmap, Violin, Bar, Box, PCA, UMAP, Scater,
-    # Feature Scatter, Correlation, HighestExpr, Feature Expression Heatmap
     tags$label("Plot type", style = "font-weight: 600; color: #333;"),
     selectInput(ns("plot_type"), NULL,
-                choices  = c("Volcano", "Heatmap", "Violin"),
+                choices  = c("Volcano", "Heatmap", "Violin", "Feature Scatter",
+                             "Histogram", "Dots Plot"
+                             #, "Top Features"
+                            ),
                 selected = "Volcano"
     ),
     
@@ -141,7 +140,10 @@ sidebar_server <- function(id, selected_dataset) {
 
     observeEvent(selected_dataset(), {
       ds <- selected_dataset()
-      choices <- c("Volcano", "Heatmap", "Violin")
+      choices <- c("Volcano", "Heatmap", "Violin", "Feature Scatter",
+                   "Histogram", "Dots Plot"
+                   #, "Top Features"
+                   )
       if (!is.null(ds) && ds$omic_type %in% c("scrna", "snrna")) {
         choices <- c(choices, "UMAP")
       }

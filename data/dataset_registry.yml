@@ -261,7 +261,17 @@ sources:
           - gene_symbol   # column name in expression table to extract feature columns
         metric_cols:
           - counts
+          - pvalue
+          - padj
+          - pct_expressed_a
+          - pct_expressed_b
         annotations:
+          - cluster_id
+          - cell_type
+          - sample_a
+          - sample_b
+          - condition_a
+          - condition_b
           - obs
           - Tissue
           - seurat_clusters
@@ -290,7 +300,17 @@ sources:
           - gene_symbol
         metric_cols:
           - counts
+          - pvalue
+          - padj
+          - pct_expressed_a
+          - pct_expressed_b
         annotations:
+          - cluster_id
+          - cell_type
+          - sample_a
+          - sample_b
+          - condition_a
+          - condition_b
           - obs
           - Tissue
           - seurat_clusters
@@ -316,7 +336,17 @@ sources:
           - gene_symbol
         metric_cols:
           - counts
+          - pvalue
+          - padj
+          - pct_expressed_a
+          - pct_expressed_b
         annotations:
+          - cluster_id
+          - cell_type
+          - sample_a
+          - sample_b
+          - condition_a
+          - condition_b
           - obs
           - Tissue
           - cluster_id
@@ -343,7 +373,17 @@ sources:
           - gene_symbol
         metric_cols:
           - counts
+          - pvalue
+          - padj
+          - pct_expressed_a
+          - pct_expressed_b
         annotations:
+          - cluster_id
+          - cell_type
+          - sample_a
+          - sample_b
+          - condition_a
+          - condition_b
           - obs
           - seurat_clusters
           - microglia_clu
@@ -370,7 +410,17 @@ sources:
           - gene_symbol
         metric_cols:
           - counts
+          - pvalue
+          - padj
+          - pct_expressed_a
+          - pct_expressed_b
         annotations:
+          - cluster_id
+          - cell_type
+          - sample_a
+          - sample_b
+          - condition_a
+          - condition_b
           - obs
           - seurat_clusters
           - vascular_cells_clu
@@ -397,7 +447,17 @@ sources:
           - gene_symbol
         metric_cols:
           - counts
+          - pvalue
+          - padj
+          - pct_expressed_a
+          - pct_expressed_b
         annotations:
+          - cluster_id
+          - cell_type
+          - sample_a
+          - sample_b
+          - condition_a
+          - condition_b
           - obs
           - seurat_clusters
           - neurons_clu
@@ -424,7 +484,17 @@ sources:
           - gene_symbol
         metric_cols:
           - counts
+          - pvalue
+          - padj
+          - pct_expressed_a
+          - pct_expressed_b
         annotations:
+          - cluster_id
+          - cell_type
+          - sample_a
+          - sample_b
+          - condition_a
+          - condition_b
           - obs
           - seurat_clusters
           - ol_clusters_named

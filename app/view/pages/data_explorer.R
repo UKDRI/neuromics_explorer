@@ -260,6 +260,32 @@ explorer_server <- function(id) {
         any(!is.na(df[[col]]) & nzchar(trimws(as.character(df[[col]]))))
     }
 
+    has_multiple_values <- function(df, col) {
+      if (!has_values(df, col)) return(FALSE)
+      values <- as.character(df[[col]])
+      values <- values[!is.na(values) & nzchar(trimws(values))]
+      length(unique(values)) > 1
+    }
+
+    group_label <- function(col_name) {
+      labels <- c(
+        de_category = "DE category",
+        cluster_id = "Cluster",
+        cell_type = "Cell type",
+        condition_a = "Condition A",
+        condition_b = "Condition B",
+        sample_a = "Sample A",
+        sample_b = "Sample B",
+        tissue = "Tissue",
+        sex = "Sex",
+        age = "Age",
+        cell_id = "Cell ID",
+        gene_symbol = "Gene symbol",
+        obs = "Observation"
+      )
+      labels[[col_name]] %||% col_name
+    }
+
     feature_labels <- function(df) {
       label <- rep("feature", nrow(df))
       for (candidate in c("gene_symbol", "human_gene", "protein_id")) {
@@ -272,19 +298,23 @@ explorer_server <- function(id) {
     }
 
     build_de_category <- function(df, padj_thresh, lfc_thresh) {
-      direction_ref <- rep("", nrow(df))
-      if ("condition_b" %in% names(df)) {
-        direction_ref <- as.character(df$condition_b)
+      if (has_values(df, "de_category")) {
+        values <- as.character(df$de_category)
+        values[is.na(values) | !nzchar(values)] <- "unlabelled"
+        return(values)
       }
-      if ("condition_a" %in% names(df)) {
-        empty_idx <- is.na(direction_ref) | !nzchar(direction_ref)
-        direction_ref[empty_idx] <- as.character(df$condition_a[empty_idx])
+
+      for (candidate in c("comparison", "DE", "category", "variable")) {
+        if (has_values(df, candidate)) {
+          values <- as.character(df[[candidate]])
+          values[is.na(values) | !nzchar(values)] <- "unlabelled"
+          return(values)
+        }
       }
-      direction_ref[is.na(direction_ref) | !nzchar(direction_ref)] <- "reference"
 
       dplyr::case_when(
-        !is.na(df$padj) & df$padj < padj_thresh & !is.na(df$log2fc) & df$log2fc > lfc_thresh ~ paste("Up with", direction_ref),
-        !is.na(df$padj) & df$padj < padj_thresh & !is.na(df$log2fc) & df$log2fc < -lfc_thresh ~ paste("Down with", direction_ref),
+        !is.na(df$padj) & df$padj < padj_thresh & !is.na(df$log2fc) & df$log2fc > lfc_thresh ~ "Up",
+        !is.na(df$padj) & df$padj < padj_thresh & !is.na(df$log2fc) & df$log2fc < -lfc_thresh ~ "Down",
         TRUE ~ "No"
       )
     }
@@ -312,8 +342,14 @@ explorer_server <- function(id) {
     }
 
     compare_group_col <- function(df) {
-      for (candidate in c("cluster_id", "cell_type", "condition_a", "condition_b",
-                          "sample_a", "sample_b", "tissue", "sex")) {
+      for (candidate in c("de_category", "cell_type", "cluster_id", "condition_a", "condition_b",
+                          "sample_a", "sample_b", "tissue", "sex", "age", "cell_id")) {
+        if (has_multiple_values(df, candidate)) {
+          return(candidate)
+        }
+      }
+      for (candidate in c("de_category", "cell_type", "cluster_id", "condition_a", "condition_b",
+                          "sample_a", "sample_b", "tissue", "sex", "age", "cell_id")) {
         if (has_values(df, candidate)) {
           return(candidate)
         }
@@ -488,7 +524,19 @@ explorer_server <- function(id) {
         FUN = mean
       )
       names(agg)[3] <- "log2fc"
-      mat <- stats::xtabs(log2fc ~ gene_symbol + group, data = agg)
+      agg <- agg[!is.na(agg$gene_symbol) & !is.na(agg$group), , drop = FALSE]
+      validate(need(nrow(agg) > 0, "No grouped heatmap rows remain after aggregation."))
+      gene_levels <- unique(agg$gene_symbol)
+      group_levels <- unique(agg$group)
+      mat <- matrix(
+        0,
+        nrow = length(gene_levels),
+        ncol = length(group_levels),
+        dimnames = list(gene_levels, group_levels)
+      )
+      row_idx <- match(agg$gene_symbol, gene_levels)
+      col_idx <- match(agg$group, group_levels)
+      mat[cbind(row_idx, col_idx)] <- agg$log2fc
       mat[is.na(mat)] <- 0
 
       plotly::plot_ly(
@@ -506,7 +554,7 @@ explorer_server <- function(id) {
       ) |>
         plotly::layout(
           title = list(text = dataset_name, x = 0.02),
-          xaxis = list(title = "", tickangle = -35),
+          xaxis = list(title = group_label(group_col), tickangle = -35),
           yaxis = list(title = "", automargin = TRUE),
           margin = list(t = 50)
         )
@@ -677,7 +725,7 @@ explorer_server <- function(id) {
         lab_source = row$lab_source[1],
         study_id = row$study_id[1],
         reduction = "umap",
-        assay = "expression",
+        assay = "logcounts",
         genes = current_state$genes %||% character(0),
         proteins = current_state$proteins %||% character(0),
         max_points = 50000L
@@ -1154,6 +1202,7 @@ explorer_server <- function(id) {
                    n_genes     = reactive(50L))
     umap_server("umap",       selected_dataset)
     violin_server("violin",    violin_data,
+                  selected_dataset = selected_dataset,
                   padj_thresh = sidebar_vals$padj_thresh,
                   lfc_thresh  = sidebar_vals$lfc_thresh_min)
     

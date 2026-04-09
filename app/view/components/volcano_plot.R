@@ -85,8 +85,13 @@ volcano_server <- function(id, de_data, padj_thresh, lfc_thresh, gene = reactive
       df   <- plot_df()
       pt   <- padj_thresh()
       lfc  <- lfc_thresh()
-      ymax <- max(df$neg_log10p, na.rm=TRUE) * 1.05
-      xpad <- max(abs(df$log2fc), na.rm=TRUE) * 1.1
+      finite_y <- df$neg_log10p[is.finite(df$neg_log10p)]
+      finite_x <- df$log2fc[is.finite(df$log2fc)]
+      ymax <- if (length(finite_y) > 0) max(finite_y, na.rm = TRUE) * 1.05 else 1
+      xpad <- if (length(finite_x) > 0) max(abs(finite_x), na.rm = TRUE) * 1.1 else 1
+      # ymax <- max(df$neg_log10p, na.rm=TRUE) * 1.05
+      # xpad <- max(abs(df$log2fc), na.rm=TRUE) * 1.1
+
 
       p <- plotly::plot_ly(
           df,
