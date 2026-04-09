@@ -2,5 +2,6 @@
 .Rhistory
 .RData
 .Ruserdata
+data/neuromics_registry.duckdb
 
 /.quarto/
