@@ -26,4 +26,4 @@ done
 echo "FastAPI is ready! Starting Shiny..."
 
 # Start Shiny app
-Rscript -e "shiny::runApp('app/main.R', port = 3838, host = '0.0.0.0')"
+Rscript -e "shiny::runApp('app/main.R', port = 4848, host = '0.0.0.0')"
