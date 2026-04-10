@@ -59,22 +59,22 @@ sidebar_ui <- function(id) {
       ),
       
       # ── Additional filters (collapsible) - populated reactively from selected dataset's metadata
-      accordion_panel(
-        title = "Cell Type Filter",
-        icon  = shiny::icon("dna"),   # TODO select different icon
-        uiOutput(ns("cell_type_ui"))
-      ),
-      
-      accordion_panel(
-        title = "Additional Filters",
-        icon  = shiny::icon("sliders-h"),
+      # accordion_panel(
+      #   title = "Cell Type Filter",
+      #   icon  = shiny::icon("dna"),   # TODO select different icon
+      #   uiOutput(ns("cell_type_ui"))
+      # ),
+
+      # accordion_panel(
+      #   title = "Additional Filters",
+      #   icon  = shiny::icon("sliders-h"),
         
-        tags$label("Organism", style = "font-weight: 600; font-size: 13px;"),
-        selectInput(ns("organism"), NULL,
-                    choices  = c("All", "human", "mouse"),
-                    selected = "All"
-        )
-      )
+      #   tags$label("Organism", style = "font-weight: 600; font-size: 13px;"),
+      #   selectInput(ns("organism"), NULL,
+      #               choices  = c("All", "human", "mouse"),
+      #               selected = "All"
+      #   )
+      # )
     ),
     
     tags$hr(),

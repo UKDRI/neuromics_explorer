@@ -78,9 +78,9 @@ explorer_ui <- function(id) {
       # conditionalPanel(
       #   condition = paste0("output['", ns("has_selection"), "']"),
 
-      # ── Main content: Two-column layout (75% left, 25% right) ─────────
+      # ── Main content:  ─────────
       layout_columns(
-        col_widths = c(9, 3),
+        # col_widths = c(9, 3), #Originally for 'Two-column layout (75% left, 25% right)' to host project info from Nexus
         gap = "1rem",
         
         # ── LEFT INNER COLUMN: Main content ────────────────────────────
@@ -169,63 +169,63 @@ explorer_ui <- function(id) {
           )
         ),
 
-        # ── RIGHT INNER COLUMN: Project info accordion ──────────────
-        card(
-          max_height = "90vh",
-          style = "overflow-y: auto;",
-          card_header("Project Information"),
-          card_body(
-            style = "padding: 0;",
-            accordion(
-              id = ns("project_accordion"),
-              multiple = TRUE,
-              open = "Project Details",
+        # # ── RIGHT INNER COLUMN: Project info accordion ──────────────
+        # card(
+        #   max_height = "90vh",
+        #   style = "overflow-y: auto;",
+        #   card_header("Project Information"),
+        #   card_body(
+        #     style = "padding: 0;",
+        #     accordion(
+        #       id = ns("project_accordion"),
+        #       multiple = TRUE,
+        #       open = "Project Details",
 
-              accordion_panel(
-                title = "Project Details", icon = icon("info-circle"),
-                div(
-                  tags$h6("Description", class = "fw-bold mt-2"),
-                  uiOutput(ns("project_desc")),
+        #       accordion_panel(
+        #         title = "Project Details", icon = icon("info-circle"),
+        #         div(
+        #           tags$h6("Description", class = "fw-bold mt-2"),
+        #           uiOutput(ns("project_desc")),
 
-                  tags$h6("Authorship", class = "fw-bold mt-3"),
-                  uiOutput(ns("project_citation")),
+        #           tags$h6("Authorship", class = "fw-bold mt-3"),
+        #           uiOutput(ns("project_citation")),
 
-                  tags$h6("Contact", class = "fw-bold mt-3"),
-                  uiOutput(ns("project_contact"))
-                )
-              ),
+        #           tags$h6("Contact", class = "fw-bold mt-3"),
+        #           uiOutput(ns("project_contact"))
+        #         )
+        #       ),
 
-              accordion_panel(
-                title = "Metadata", icon = icon("table"),
-                uiOutput(ns("metadata_table"))
-              ),
+        #       accordion_panel(
+        #         title = "Metadata", icon = icon("table"),
+        #         uiOutput(ns("metadata_table"))
+        #       ),
 
-              accordion_panel(
-                title = "Data Quality", icon = icon("chart-bar"),
-                uiOutput(ns("qc_metrics"))
-              ),
+        #       accordion_panel(
+        #         title = "Data Quality", icon = icon("chart-bar"),
+        #         uiOutput(ns("qc_metrics"))
+        #       ),
 
-              accordion_panel(
-                title = "Quick Actions", icon = icon("bolt"),
-                div(
-                  class = "d-grid gap-2",
-                  tags$button(
-                    class = "btn btn-outline-primary",
-                    icon("external-link-alt"),
-                    "View in Data Nexus",
-                    onclick = sprintf("Shiny.setInputValue('%s', Math.random())", ns("datanexus_link"))
-                  ),
-                  tags$button(
-                    class = "btn btn-outline-success mt-2",
-                    icon("download"),
-                    "Export Data",
-                    onclick = sprintf("Shiny.setInputValue('%s', Math.random())", ns("export_data"))
-                  )
-                )
-              )
-            )
-          )
-        )
+        #       accordion_panel(
+        #         title = "Quick Actions", icon = icon("bolt"),
+        #         div(
+        #           class = "d-grid gap-2",
+        #           tags$button(
+        #             class = "btn btn-outline-primary",
+        #             icon("external-link-alt"),
+        #             "View in Data Nexus",
+        #             onclick = sprintf("Shiny.setInputValue('%s', Math.random())", ns("datanexus_link"))
+        #           ),
+        #           tags$button(
+        #             class = "btn btn-outline-success mt-2",
+        #             icon("download"),
+        #             "Export Data",
+        #             onclick = sprintf("Shiny.setInputValue('%s', Math.random())", ns("export_data"))
+        #           )
+        #         )
+        #       )
+        #     )
+        #   )
+        # )
       )
     )
   )
