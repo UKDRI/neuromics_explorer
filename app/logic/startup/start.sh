@@ -6,7 +6,7 @@ export PYTHONPATH="${PYTHONPATH}:$(pwd)"
 
 # Start FastAPI backend in background
 echo "Starting FastAPI backend..."
-python3 /app/logic/startup/main_setup.py &
+python3 app/logic/startup/main_setup.py &
 API_PID=$!
 
 # Wait for FastAPI to be ready (start polling health checks to prevent race condition)
