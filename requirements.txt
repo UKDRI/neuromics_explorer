@@ -1,23 +1,23 @@
 # This file includes necessary packages for FastAPI application and database interaction
-fastapi==0.133.1
-uvicorn>=0.41.0
-pyarrow==23.0.1
-pyyaml==6.0.2
+annotated-doc==0.0.4
+annotated-types==0.7.0
+anyio==4.12.1
+click==8.3.1
 duckdb==1.4.4
-SingleCellExperiment>=0.5.9
+fastapi==0.133.1
+h11==0.16.0
+idna==3.11
+iniconfig==2.3.0
+packaging==26.0
+pluggy==1.6.0
+pyarrow==23.0.1
+pydantic==2.12.5
+pydantic_core==2.41.5
+Pygments==2.19.2
 pytest==9.0.2
-datetime
-
-
-import os
-import re
-from  import datetime, timezone
-
-from datetime import datetime, timezone
-from app.logic.startup.db_views import attach_source_dbs, create_views, get_sql_col
-import yaml
-from contextlib import asynccontextmanager
-from fastapi import FastAPI
-from pathlib import Path
-import sys
-import uvicorn
+pytz==2025.2
+PyYAML==6.0.3
+starlette==0.52.1
+typing-inspection==0.4.2
+typing_extensions==4.15.0
+uvicorn==0.41.0
