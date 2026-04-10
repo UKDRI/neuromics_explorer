@@ -1,7 +1,7 @@
 # ── Install dependencies (for system, Shiny, DuckDB, Arrow, R etc) ────────────────────
-FROM rocker/shiny:4.5 AS builder
+FROM rocker/shiny:4.5
 
-LABEL maintainer="UK DRI Core Informatics" 
+LABEL maintainer="UK DRI Core Informatics"
 LABEL description="NeurOmicsExplorer — Multi-omic dashboard" version="0.0.0"
 
 RUN apt-get update && apt-get install -y \
@@ -28,11 +28,8 @@ RUN R -e "install.packages('renv', repos='https://cloud.r-project.org')" && \
 
 # Set working directory
 WORKDIR /app
-# # Copy all project files
-# COPY . .
 
-
-# Copy application code, any databases and additional files
+# Copy application code and project files, any databases and additional files
 COPY . .
 COPY data/ data/
 # COPY app/   app/
@@ -46,5 +43,4 @@ RUN chmod +x app/logic/startup/start.sh
 EXPOSE 4848
 
 # Run Shiny app (activate venv to use Python packages)
-CMD ["bash", "-c", "source .venv/bin/activate && bash app/logic/startup/start.sh"]
-# CMD ["bash", "/app/logic/startup/start.sh"]
+CMD ["bash", "app/logic/startup/start.sh"]
