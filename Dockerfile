@@ -1,5 +1,5 @@
 # ── Install dependencies (for system, Shiny, DuckDB, Arrow, R etc) ────────────────────
-FROM rocker/shiny:4.4.0 AS builder
+FROM rocker/shiny:4.5 AS builder
 
 LABEL maintainer="UK DRI Core Informatics" 
 LABEL description="NeurOmicsExplorer — Multi-omic dashboard" version="0.0.0"
@@ -31,17 +31,11 @@ WORKDIR /app
 # # Copy all project files
 # COPY . .
 
-# Copy R library from builder (avoids reinstalling)
-COPY --from=builder /usr/local/lib/R/library /usr/local/lib/R/library
-COPY --from=builder /app/.venv                .venv
-COPY --from=builder /app/renv                 renv
-
 
 # Copy application code, any databases and additional files
-# COPY app/   app/
 COPY . .
 COPY data/ data/
-COPY requirements.txt requirements.txt
+# COPY app/   app/
 # NB: .duckdb and Parquet source files can later be mounted at runtime, 
 # instead of being baked into image to allow flexibility and dataset updates
 
@@ -51,5 +45,6 @@ RUN chmod +x /app/logic/startup/start.sh
 # Expose port
 EXPOSE 3838
 
-# Run Quarto app
-CMD ["bash", "/app/logic/startup/start.sh"]
+# Run Shiny app (activate venv to use Python packages)
+CMD ["bash", "-c", "source /app/.venv/bin/activate && bash /app/logic/startup/start.sh"]
+# CMD ["bash", "/app/logic/startup/start.sh"]

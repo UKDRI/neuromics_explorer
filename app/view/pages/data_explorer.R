@@ -74,6 +74,7 @@ explorer_ui <- function(id) {
                 style = "margin-bottom: 8px;"),
         gene_selector_ui(ns("gene_selector"))
       ),
+      tags$br(),
       # # Everything below is hidden until a dataset is selected
       # conditionalPanel(
       #   condition = paste0("output['", ns("has_selection"), "']"),
@@ -861,11 +862,11 @@ explorer_server <- function(id) {
       tags$div(
         class = "alert alert-secondary",
         role = "alert",
-        # style = "margin-bottom: 12px;",
+        style = "margin-bottom: 12px;",
         tags$strong("Expression data is showing: "),
-        paste(ds$dataset_name, "·", ds$lab_source, "·", ds$omic_type),
+        paste(ds$dataset_name, "·", ds$omic_type),
         tags$br(),
-        tags$small("Preview is served from `/expression/table` and loads the first 1,000 rows sorted by padj.")
+        tags$small("Preview loads the first 1,000 rows sorted by padj.")
       )
     })
 
@@ -875,11 +876,9 @@ explorer_server <- function(id) {
       tags$div(
         class = "alert alert-secondary",
         role = "alert",
-        # style = "margin-bottom: 12px;",
+        style = "margin-bottom: 12px;",
         tags$strong("Plot is showing: "),
-        paste(ds$dataset_name, "·", ds$lab_source, "·", ds$omic_type),
-        tags$br(),
-        tags$small("Each plot uses a task-specific endpoint so the API can filter, paginate, or aggregate before the data reaches Shiny.")
+        paste(ds$dataset_name, "·", ds$omic_type)
       )
     })
 

@@ -9,14 +9,15 @@ box::use(
 submit_ui <- function(id) {
   ns <- NS(id)
   tagList(
+    h2("COMING SOON"),
     h2("Submit Data"),
     p("Instructions for submitting data."),
 
-    fileInput(ns("upload_data"), "Upload dataset (shinycell2, .rds, .h5ad)"),
-    textInput(ns("upload_description"), "Dataset description"),
-    fileInput(ns("upload_geneset"), "Pre-load gene sets"),
-    # cellxgene Requirements: A gene set must have a unique name. A given gene may be included in multiple gene sets. A gene set may optionally include a description for the entire gene set, and descriptions for each gene included the gene set.
-    actionButton(ns("submit_data"), "Submit")
+    # fileInput(ns("upload_data"), "Upload dataset (shinycell2, .rds, .h5ad)"),
+    # textInput(ns("upload_description"), "Dataset description"),
+    # fileInput(ns("upload_geneset"), "Pre-load gene sets"),
+    # # cellxgene Requirements: A gene set must have a unique name. A given gene may be included in multiple gene sets. A gene set may optionally include a description for the entire gene set, and descriptions for each gene included the gene set.
+    # actionButton(ns("submit_data"), "Submit")
   )
 }
 

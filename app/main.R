@@ -104,14 +104,13 @@ ui <- page_navbar(
         class = "container mt-4",
         style = "border: 1px solid #ddd; padding: 15px; border-radius: 8px; background: white; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin: 10px 0;",
         h2("Getting Started"),
-        p("Welcome to the NeurOmicsExplorer platform."),
+        p("Welcome to the NeurOmics Explorer platform."),
         p("This guide will help you navigate and make the most out of the platform."),
         tags$ol(
-          tags$li(tags$b("Select laboratory"), " → Choose your selected lab as data source"),
-          tags$li(tags$b("Pick datasets"), "     → Select one or more studies"),
-          tags$li(tags$b("Search genes"), "      → Search for your genes/ proteins of interest"),
-          tags$li(tags$b("Explore results"), "   → Navigate to lab-specific, then omic-specific tab"),
-          tags$li(tags$b("Visualise & export"), "→ View and manipulate plots and download relevant data")
+          tags$li(tags$b("Search genes or proteins"), " → Search for your genes or proteins of interest across all available datasets"),
+          tags$li(tags$b("Pick datasets"), "     → Select one or more datasets to explore - note only 1 sc/snRNAseq dataset can be viewed at a time"),
+          tags$li(tags$b("Explore results"), "   → Visualise and interact with the datasets through visualisation plots, expression tables, and filtering controls"),
+          tags$li(tags$b("Export"), "        → View and manipulate plots and download relevant data")
         )
       )
     ),
@@ -121,6 +120,7 @@ ui <- page_navbar(
       icon = icon("file-alt"),
       div(
         class = "container mt-4",
+        h2("COMING SOON"),
         tags$h2("Documentation"),
         tags$p("Comprehensive documentation for the platform...")
       )
@@ -133,6 +133,7 @@ ui <- page_navbar(
       icon = icon("graduation-cap"),
       div(
         class = "container mt-4",
+        h2("COMING SOON"),
         h2("Tutorials"),
         p("Step-by-step guides on what is good data, and what is bad...")
       )
@@ -160,7 +161,7 @@ ui <- page_navbar(
           tags$li("Training sessions")
         ),
         tags$p("For more information, please visit the"), 
-        tags$a(href="https://coreinformatics.uk/ukdri", "UK DRI Core Informatics Team website or documentation link.")
+        tags$a(href="https://coreinformatics.uk/ukdri", "LINK COMING SOON! - UK DRI Core Informatics")
       )
     ),
     
@@ -169,6 +170,7 @@ ui <- page_navbar(
       icon = icon("envelope"),
       div(
         class = "container mt-4",
+        h2("COMING SOON"),
         h2("Contact Us"),
         p("Get in touch with our team...")
       )
@@ -179,6 +181,7 @@ ui <- page_navbar(
       icon = icon("question-circle"),
       div(
         class = "container mt-4",
+        h2("COMING SOON"),
         h2("Frequently Asked Questions"),
         p("Common questions and answers...")
       )
@@ -194,6 +197,7 @@ ui <- page_navbar(
     # value = "feedback",
     div(
       class = "container mt-4",
+      h2("COMING SOON"),
       h2("Send Feedback"),
       p("We'd love to hear from you...")
     )

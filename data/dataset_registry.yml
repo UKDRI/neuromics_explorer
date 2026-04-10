@@ -29,7 +29,7 @@ sources:
         display_name: "Astrocyte - TurboID vs tdT"
         source_type: "duckdb"    #overrides source-level defaults
         db_path: "data/diaz_castro.duckdb"
-        omic_type: ["proteomics"] # as vector, not list
+        omic_type: ["proteomics"]
         tables:
           expression: "proteomics_exp"
           study_info: "study_info"
@@ -133,7 +133,7 @@ sources:
         display_name: "BEC bulk RNAseq "
         source_type: "duckdb"    #overrides source-level defaults
         db_path: "data/diaz_castro.duckdb"
-        omic_type: ["bulk"] # as vector, not list
+        omic_type: ["bulk"]
         tables:
           expression: "bulk_exp"
           study_info: "study_info"
@@ -185,8 +185,6 @@ sources:
           - Gene_Symbol
           - Protein_Name
           - Protein_Description
-          # - cell_type # - Cell_Type
-          # - Cell_ID
         metric_cols:
           - pct_1
           - pct_2
@@ -195,7 +193,7 @@ sources:
           - padj
         annotations:
           - cluster
-          - cell_type   # `- cell_type` OR `cell_label: "cell_type"`
+          - cell_type
           - Condition
           - Sample_ID
           - Cell_ID
@@ -225,11 +223,9 @@ sources:
           - logFC
           - pvalue
         annotations:
-          - DE
+          - Comparison
+          # - DE
           - Subcellular_Location
-          # `- cell_type` OR `cell_label: "cell_type"`
-          # comparison_status: "DE" 
-          # feature_description: "Subcellular_Location"
         
   # --- WILLIAMS LAB ---
   williams:  
