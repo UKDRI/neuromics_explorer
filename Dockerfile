@@ -19,12 +19,6 @@ RUN R -e "install.packages('devtools', repos = 'https://cloud.r-project.org')"
 COPY renv.lock renv.lock
 RUN R -e "install.packages('renv', repos='https://cloud.r-project.org')" && \
     R -e "renv::restore(prompt=FALSE)"
-# # Install required CRAN and Bioconductor packages
-# RUN R -e "install.packages(c('shiny', 'plotly', 'purrr', 'tidyverse', 'dplyr', 'shinypanel', 'shinycssloaders', 'ggplot2', 'DT', 'readr', 'bsicons', 'bslib', 'shinyWidgets', 'shinydashboard', 'stringr', 'data.table', 'tidyr', 'RSQLite', 'DBI', 'glue', 'fastDummies', 'htmltools', '', 'jsonlite'), repos = 'https://cloud.r-project.org')"
-# RUN R -e "if (!requireNamespace('BiocManager', quietly = TRUE)) install.packages('BiocManager'); BiocManager::install(c('Biostrings', 'bluster', 'dittoSeq', 'SingleCellExperiment', 'scuttle', 'scater', 'scran', 'ComplexHeatmap', 'InteractiveComplexHeatmap'))"
-# RUN R -e "install.packages('remotes')"
-# RUN R -e "require(devtools)"
-# RUN R -e "remotes::install_version(\"httr2\", version = \"1.1.2\", repos = \"http://cran.us.r-project.org/\")"
 
 # Set working directory
 WORKDIR /app
@@ -32,9 +26,14 @@ WORKDIR /app
 # Copy application code and project files, any databases and additional files
 COPY . .
 COPY data/ data/
+COPY requirements.txt requirements.txt
 # COPY app/   app/
 # NB: .duckdb and Parquet source files can later be mounted at runtime, 
 # instead of being baked into image to allow flexibility and dataset updates
+
+# Install Python deps
+RUN python3 -m pip install --upgrade pip setuptools wheel && \
+    python3 -m pip install -r requirements.txt
 
 # Make entrypoint executable
 RUN chmod +x app/logic/startup/start.sh
