@@ -40,7 +40,7 @@ COPY data/ data/
 # instead of being baked into image to allow flexibility and dataset updates
 
 # Make entrypoint executable
-RUN chmod +x /app/logic/startup/start.sh
+RUN chmod +x app/logic/startup/start.sh
 
 # Expose port
 EXPOSE 3838
