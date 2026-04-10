@@ -46,5 +46,5 @@ RUN chmod +x app/logic/startup/start.sh
 EXPOSE 4848
 
 # Run Shiny app (activate venv to use Python packages)
-CMD ["bash", "-c", "source app/.venv/bin/activate && bash app/logic/startup/start.sh"]
+CMD ["bash", "-c", "source .venv/bin/activate && bash app/logic/startup/start.sh"]
 # CMD ["bash", "/app/logic/startup/start.sh"]
