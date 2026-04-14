@@ -353,7 +353,7 @@ def _dataset_unions(
               human_gene, protein_id, organism,
               log2fc, pvalue, padj,
               abundance_a, abundance_b,
-              pct_expressed_a, pct_expressed_b, expression_metric,
+              pct_expressed_a, pct_expressed_b,
               sample_a, sample_b, condition_a, condition_b, de_category, cell_type
             FROM {view}
             WHERE 1 = 1
@@ -617,7 +617,7 @@ def expression(
           human_gene, protein_id, organism,
           log2fc, pvalue, padj,
           abundance_a, abundance_b,
-          pct_expressed_a, pct_expressed_b, expression_metric,
+          pct_expressed_a, pct_expressed_b,
           sample_a, sample_b, condition_a, condition_b, de_category, cell_type,
           study_id
         FROM {view}
@@ -663,7 +663,7 @@ def expression_table(
           human_gene, protein_id, organism,
           log2fc, pvalue, padj,
           abundance_a, abundance_b,
-          pct_expressed_a, pct_expressed_b, expression_metric,
+          pct_expressed_a, pct_expressed_b,
           sample_a, sample_b, condition_a, condition_b, de_category, cell_type,
           cluster_id, tissue, sex, age, cell_id,
           study_id,
@@ -950,7 +950,7 @@ def expression_goi(
           human_gene, protein_id, organism,
           log2fc, pvalue, padj,
           abundance_a, abundance_b,
-          pct_expressed_a, pct_expressed_b, expression_metric,
+          pct_expressed_a, pct_expressed_b,
           sample_a, sample_b, condition_a, condition_b, de_category, cell_type,
           cluster_id, tissue, sex, age, cell_id,
           study_id

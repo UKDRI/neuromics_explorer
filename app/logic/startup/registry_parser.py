@@ -31,7 +31,6 @@ CANONICAL_NAMES = {
     "abundance_b":          {"required": False, "category": "metric"},
     "pct_expressed_a":      {"required": False, "category": "metric"},
     "pct_expressed_b":      {"required": False, "category": "metric"},
-    "expression_metric":    {"required": False, "category": "metric"},
     "normalisation_method": {"required": False, "category": "metric"},
 
     # Sample / cell metadata 
@@ -74,7 +73,6 @@ HEURISTIC_MAPPINGS = {
     "abundance_b":          ["abundance_B", "mean_B", "avg_expr_B"],
     "pct_expressed_a":      ["pct_1", "pct.1", "pct_expressed_a", "pct_expressed_A"],
     "pct_expressed_b":      ["pct_2", "pct.2", "pct_expressed_b", "pct_expressed_B"],
-    "expression_metric":    ["expression_metric", "avg_log2FC", "mean_expr"],
     "normalisation_method": ["normalisation_method", "normalization_method", "norm_method", 
                                 "normalisation", "normalization", "normalisation_type", "normalization_type"],
     # obs (sample/ cell) metadata

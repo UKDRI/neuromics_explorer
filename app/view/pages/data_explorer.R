@@ -866,7 +866,7 @@ explorer_server <- function(id) {
         tags$strong("Expression data is showing: "),
         paste(ds$dataset_name, "·", ds$omic_type),
         tags$br(),
-        tags$small("Preview loads the first 1,000 rows sorted by padj.")
+        tags$small("Preview loads the searched terms sorted by padj.")
       )
     })
 
@@ -897,7 +897,9 @@ explorer_server <- function(id) {
           limit = 1000L,
           offset = 0L,
           sort_by = "padj",
-          sort_dir = "asc"
+          sort_dir = "asc",
+          genes = ds$genes,
+          proteins = ds$proteins
         )
 
         if (nrow(single_df) == 0) {

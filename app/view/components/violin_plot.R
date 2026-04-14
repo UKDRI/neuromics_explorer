@@ -142,8 +142,7 @@ violin_server <- function(id, de_data, selected_dataset, padj_thresh, lfc_thresh
         abundance_a = "abundance_a",
         abundance_b = "abundance_b",
         pct_expressed_a = "pct_expressed_a",
-        pct_expressed_b = "pct_expressed_b",
-        expression_metric = "expression_metric"
+        pct_expressed_b = "pct_expressed_b"
       )
 
       for (candidate in names(labels)) {

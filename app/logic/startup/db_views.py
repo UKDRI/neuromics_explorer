@@ -1,5 +1,6 @@
 """
-Shared helpers for DuckDB ATTACH and semantic view management.
+Shared helpers for DuckDB ATTACH and semantic view management. Creates views (virtual tables) 
+to collate dataset-level metadata and gene-level expression across datasets for fast querying by API.
 
 Used by registry_parser.build_registry_index() and data_summaries.build_dataset_stats()
 to avoid duplicating attach/view logic across modules.
@@ -205,7 +206,6 @@ def create_views(
                     {get_sql_col(name_mappings, 'abundance_b',       expr_cols)}    AS abundance_b,
                     {get_sql_col(name_mappings, 'pct_expressed_a',   expr_cols)}    AS pct_expressed_a,
                     {get_sql_col(name_mappings, 'pct_expressed_b',   expr_cols)}    AS pct_expressed_b,
-                    {get_sql_col(name_mappings, 'expression_metric', expr_cols)}    AS expression_metric,
 
                     -- Sample / cell metadata (when present in expression table)
                     {get_sql_col(name_mappings, 'sample_a',         expr_cols)}     AS sample_a,

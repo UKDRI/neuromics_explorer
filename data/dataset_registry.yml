@@ -146,7 +146,6 @@ sources:
         metric_cols:
           - abundance_A
           - abundance_B
-          - expression_metric
           - logFC
           - padj
           - pvalue
@@ -172,17 +171,21 @@ sources:
         study_name: "3KL_vs_WT_ME-Macs"
         study_id: 1
         display_name: "3KL vs WT - ME-Macs"
-        source_type: "duckdb"    #overrides source-level defaults
-        db_path: "data/hong.duckdb"
+        source_type: "parquet"    #overrides source-level defaults
+        data_path: "data/Hong/scrna/conversions"
         omic_type: ["scrna"]
         tables:
-          expression: "sc_deg_results"
-          counts: "sc_normalised_expr"
-          study_info: "study_info"
-          metadata: "sc_metadata"
-          features_metadata: "sc_gene_info"
+          expression: "expression.parquet"
+          logcounts: "logcounts.parquet"
+          counts: "counts.parquet"
+          obs_metadata: "obs_metadata.parquet"
+          feature_annotations: "feature_annotations.parquet"
+          umap: "UMAP.parquet"
+          pca: "PCA.parquet"
+          tsne: "TSNE.parquet"
         feature_cols:
           - Gene_Symbol
+          - feature_id
           - Protein_Name
           - Protein_Description
         metric_cols:
@@ -194,16 +197,10 @@ sources:
         annotations:
           - cluster
           - cell_type
-          - Condition
-          - Sample_ID
-          - Cell_ID
-        reductions:
-          - name: "UMAP"
-            dim_name: "UMAP"
-          - name: "tSNE"
-            dim_name: "tSNE"
-          - name: "PCA"
-            dim_name: "PCA"
+          - condition
+          - sample_id
+          - cell_id
+          - obs
 
       3KL_vs_WT_ME-Macs_2:
         study_name: "3KL_vs_WT_ME-Macs"
