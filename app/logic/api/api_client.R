@@ -588,12 +588,14 @@ fetch_de_for_gene <- function(gene, lab_source, study_id,
   )
 }
 
-#' Fetch the full semantic DE / expression rows for multiple selected datasets.
+#' Fetch semantic DE / expression rows for multiple selected datasets.
 #' This is the combined table / Compare tab path after modal selection.
 #' @export
 fetch_expression_multi_dataset <- function(dataset_list,
                                            padj_thresh = 0.05, lfc_thresh = 0,
-                                           cell_type = NULL) {
+                                           cell_type = NULL,
+                                           genes = NULL,
+                                           proteins = NULL) {
   if (is.null(dataset_list)) return(data.frame())
 
   if (is.data.frame(dataset_list)) {
@@ -615,7 +617,9 @@ fetch_expression_multi_dataset <- function(dataset_list,
       dataset = dataset_keys,
       padj = padj_thresh,
       lfc = lfc_thresh,
-      cell_type = cell_type
+      cell_type = cell_type,
+      gene = genes,
+      protein = proteins
     )
   )
 

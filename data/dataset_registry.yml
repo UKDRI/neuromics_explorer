@@ -270,7 +270,6 @@ sources:
           - seurat_clusters
           - gender
           - Age
-          - scDblFinder_score
           - total_percent_mito
 
       02_HCA_oligodendroglia_Seeker2023:

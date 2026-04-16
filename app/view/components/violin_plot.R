@@ -2,7 +2,7 @@
 
 box::use(
   shiny[NS, moduleServer, reactive, req, tagList, selectInput, updateSelectInput,
-        fluidRow, column, checkboxInput, validate, need, observe, uiOutput, renderUI],
+        fluidRow, column, checkboxInput, validate, need, observe, observeEvent, uiOutput, renderUI],
   plotly[plotlyOutput, renderPlotly, plot_ly, layout, add_trace],
   dplyr[mutate, case_when],
   app/logic/api/api_client[fetch_expression_feature_values],
@@ -183,6 +183,14 @@ violin_server <- function(id, de_data, selected_dataset, padj_thresh, lfc_thresh
              any(!is.na(df$padj)) &&
              any(!is.na(df$log2fc)))) {
           choices[["DE category"]] <- "de_category"
+        } else if (
+          has_values(df, "de_category") ||
+          has_values(df, "comparison") ||
+          (all(c("padj", "log2fc") %in% names(df)) &&
+          any(!is.na(df$padj)) &&
+          any(!is.na(df$log2fc)))
+        ) {
+          choices[["DE category"]] <- "de_category"
         }
 
         for (candidate in names(metadata_label_map)[names(metadata_label_map) != "de_category"]) {
@@ -231,6 +239,7 @@ violin_server <- function(id, de_data, selected_dataset, padj_thresh, lfc_thresh
     observe({
       choices <- x_axis_choices()
       if (length(choices) == 0) return()
+      # if (is_gene_mode()) req(feature_expression_data()) # freezeReactiveValue(input, "x_axis")
       selected <- input$x_axis %||% ""
       preferred <- if (is_gene_mode()) {
         c("cluster_id", "cell_type", "condition_a", "condition_b", "tissue", "sex", "age", "sample_a")
@@ -243,8 +252,10 @@ violin_server <- function(id, de_data, selected_dataset, padj_thresh, lfc_thresh
       updateSelectInput(session, "x_axis", choices = choices, selected = selected)
     })
 
-    observe({
+    observeEvent(list(feature_expression_data(), is_gene_mode()), {   # blocks update until data is available to stop flickering between None and Tissue
       if (!is_gene_mode()) return(invisible(NULL))
+      df <- feature_expression_data()
+      if (is.null(df) || nrow(df) == 0) return(invisible(NULL))
       choices <- group_by_choices()
       selected <- input$group_by %||% "none"
       preferred <- c("tissue", "sex", "condition_a", "condition_b", "sample_a", "sample_b")
@@ -252,7 +263,7 @@ violin_server <- function(id, de_data, selected_dataset, padj_thresh, lfc_thresh
         selected <- default_choice(choices, preferred = preferred, fallback = "none")
       }
       updateSelectInput(session, "group_by", choices = choices, selected = selected)
-    })
+    }, ignoreNULL = FALSE)
 
     output$plot <- renderPlotly({
       if (!is_gene_mode()) {
@@ -287,7 +298,8 @@ violin_server <- function(id, de_data, selected_dataset, padj_thresh, lfc_thresh
 
         x_levels <- unique(plot_df$x_value)
         x_title <- names(x_axis_choices())[match(x_axis, unname(x_axis_choices()))]
-        if (is.na(x_title) || !nzchar(x_title)) x_title <- "X-axis"
+        # if (is.na(x_title) || !nzchar(x_title)) x_title <- "X-axis"
+        x_title <- if (length(x_title) == 0 || is.na(x_title) || !nzchar(x_title)) "X-axis" else x_title
 
         p <- plotly::plot_ly()
         for (x_name in x_levels) {
@@ -322,7 +334,7 @@ violin_server <- function(id, de_data, selected_dataset, padj_thresh, lfc_thresh
               x = plot_df$x_value,
               y = plot_df[[y_col]],
               type = "scatter",
-              mode = "markers",
+              mode = "markers",   #mode = "markers+text"
               color = plot_df$sig,
               colors = c(Up = "#C0392B", Down = "#2980B9", NS = "#BDC3C7"),
               marker = list(size = 6, opacity = 0.65),
@@ -345,6 +357,7 @@ violin_server <- function(id, de_data, selected_dataset, padj_thresh, lfc_thresh
       x_axis <- input$x_axis %||% "none"
       group_by <- input$group_by %||% "none"
       x_choices <- x_axis_choices()
+
       group_choices <- group_by_choices()
 
       x_value <- if (identical(x_axis, "none") || !x_axis %in% names(df)) {
@@ -375,7 +388,8 @@ violin_server <- function(id, de_data, selected_dataset, padj_thresh, lfc_thresh
       x_title <- names(x_choices)[match(x_axis, unname(x_choices))]
       if (is.na(x_title) || !nzchar(x_title)) x_title <- "Selected gene"
       group_title <- names(group_choices)[match(group_by, unname(group_choices))]
-      if (is.na(group_title) || !nzchar(group_title)) group_title <- "Group by"
+      group_title <- if (length(group_title) == 0 || is.na(group_title) || !nzchar(group_title)) "Group by" else group_title
+      # if (is.na(group_title) || !nzchar(group_title)) group_title <- "Group by"
 
       palette <- c("#5B8FF9", "#61DDAA", "#F6BD16", "#E8684A", "#6DC8EC", "#9270CA")
       colour_levels <- unique(plot_df$colour_value)
@@ -405,7 +419,7 @@ violin_server <- function(id, de_data, selected_dataset, padj_thresh, lfc_thresh
             x = group_df$x_value,
             y = group_df$expression_value,
             type = "scatter",
-            mode = "markers",
+            mode = "markers",   #mode = "markers+text"
             name = colour_name,
             legendgroup = colour_name,
             showlegend = FALSE,

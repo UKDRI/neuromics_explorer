@@ -364,7 +364,7 @@ explorer_server <- function(id) {
       names(df)[1]
     }
 
-    render_compare_volcano <- function(df, dataset_name, padj_thresh, lfc_thresh) {
+    render_compare_volcano <- function(df, dataset_name, padj_thresh, lfc_thresh, gene = NULL) {
       validate(need(nrow(df) > 0, "No volcano rows are available for this dataset."))
       plot_df <- df |>
         dplyr::mutate(
@@ -388,7 +388,7 @@ explorer_server <- function(id) {
         "padj: ", signif(plot_df$padj, 3)
       )
 
-      plotly::plot_ly(
+      p <- plotly::plot_ly(
         x = x_values,
         y = y_values,
         type = "scatter",
@@ -429,6 +429,21 @@ explorer_server <- function(id) {
           showlegend = FALSE,
           margin = list(t = 50)
         )
+      
+      # Annotate searched gene if present
+      if (!is.null(gene) && nzchar(gene) && "gene_symbol" %in% names(plot_df)) {
+        match_idx <- which(toupper(plot_df$gene_symbol) == toupper(gene))[1]
+        if (!is.na(match_idx)) {
+          gp <- plot_df[match_idx, , drop = FALSE]
+          p  <- p |> plotly::add_annotations(
+            x = gp$log2fc, y = gp$neg_log10p,
+            text = paste0("<b>", gp$gene_symbol, "</b>"),
+            showarrow = TRUE, arrowhead = 2, arrowsize = 0.8,
+            font = list(size = 12, color = "#2C3E50")
+          )
+        }
+      }
+      p
     }
 
     render_compare_violin <- function(df, dataset_name, padj_thresh, lfc_thresh) {
@@ -916,7 +931,9 @@ explorer_server <- function(id) {
       fetch_expression_multi_dataset(
         dataset_list = datasets,
         padj_thresh = sidebar_vals$padj_thresh(),
-        lfc_thresh = sidebar_vals$lfc_thresh_min()
+        lfc_thresh = sidebar_vals$lfc_thresh_min(),
+        genes = ds$genes,
+        proteins = ds$proteins
       )
     })
 
@@ -1045,7 +1062,8 @@ explorer_server <- function(id) {
                 ),
                 row$dataset_name[1],
                 sidebar_vals$padj_thresh(),
-                sidebar_vals$lfc_thresh_min()
+                sidebar_vals$lfc_thresh_min(),
+                gene = selected_dataset()$genes[1]
               )
             )
           })

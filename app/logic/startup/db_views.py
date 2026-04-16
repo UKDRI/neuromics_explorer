@@ -141,8 +141,7 @@ def create_views(
 
     expr_table      = table_map.get("expression")
     obs_meta_table  = table_map.get("obs_metadata") or table_map.get("extra_metadata")
-    # extra_meta_table  = table_map.get("extra_metadata")   #TODO: append into a single metadata_table?
-    # metadata_table    = table_map.get("obs_metadata") or/and table_map.get("extra_metadata")
+    extra_meta_table  = table_map.get("extra_metadata")   #TODO: append into a single metadata_table?
     gene_col        = name_mappings.get("gene_symbol")
     protein_col     = name_mappings.get("protein_id")
     human_col       = name_mappings.get("human_gene")      # Identify human gene column if available for cross-species mapping
@@ -180,7 +179,7 @@ def create_views(
         expr_where = f"WHERE study_id = {study_id} AND {feature_presence_col} IS NOT NULL"
 
     print(f" [DEBUG] {lab_source} study_id={study_id} | alias={db_alias} | "
-        f"expr_table={expr_table} | obs_table={obs_meta_table} | gene_col={gene_col} \n | primary_gene_col={primary_gene_col} \n | gene_candidates: {gene_candidates} \n | protein_col={protein_col} | human_col={human_col} | organism_col={organism_col} | expr_view={expr_view} | obs_meta_view={obs_meta_view}")
+        f"expr_table={expr_table} | obs_table={obs_meta_table} | extra_meta_table={extra_meta_table} | gene_col={gene_col} \n | primary_gene_col={primary_gene_col} \n | gene_candidates: {gene_candidates} \n | protein_col={protein_col} | human_col={human_col} | organism_col={organism_col} | expr_view={expr_view} | obs_meta_view={obs_meta_view}")
     # protein_col=Uniprot_id | protein_expr="Uniprot_id" 
     # primary_gene_col: COALESCE("Gene_Symbol", "Uniprot_ID")    gene_candidates: ['"Gene_Symbol"', '"Uniprot_ID"'] 
 
@@ -214,11 +213,11 @@ def create_views(
                     {get_sql_col(name_mappings, 'condition_b',      expr_cols)}     AS condition_b,
                     {get_sql_col(name_mappings, 'de_category',      expr_cols)}     AS de_category,
                     {get_sql_col(name_mappings, 'cell_type',        expr_cols)}     AS cell_type,
-                    {get_sql_col(name_mappings, 'cell_id',          expr_cols)}          AS cell_id,
-                    {get_sql_col(name_mappings, 'cluster_id',       expr_cols)}          AS cluster_id,
-                    {get_sql_col(name_mappings, 'tissue',           expr_cols)}          AS tissue,
+                    {get_sql_col(name_mappings, 'cell_id',          expr_cols)}     AS cell_id,
+                    {get_sql_col(name_mappings, 'cluster_id',       expr_cols)}     AS cluster_id,
+                    {get_sql_col(name_mappings, 'tissue',           expr_cols)}     AS tissue,
                     {get_sql_col(name_mappings, 'age',              expr_cols, 'NULL::INTEGER')} AS age,
-                    {get_sql_col(name_mappings, 'sex',              expr_cols)}          AS sex
+                    {get_sql_col(name_mappings, 'sex',              expr_cols)}     AS sex
                 FROM {expr_table_ref}
                 {expr_where}
             """)        # '{source_id}'.main.{expression_table} OR '{data_path}'.{actual_table} OR attach_alias.main.actual_table
@@ -232,7 +231,7 @@ def create_views(
 
     # --- Metadata view (sample/cell metadata from separate obs_metadata table) ---
     if obs_meta_table:
-        try:
+        try: 
             meta_cols = get_db_table_columns(con, db_alias, obs_meta_table, source_type, data_path)
             print(f"     [DEBUG] meta_cols {meta_cols}")
             if source_type == "parquet":
@@ -240,23 +239,61 @@ def create_views(
                 meta_where = ""
             else:
                 meta_table_ref = f"{db_alias}.main.{obs_meta_table}"
-                meta_where = f"WHERE study_id = {study_id}"
+                meta_where = f"WHERE meta.study_id = {study_id}"
+           
+            # -- Optional extra metadata --
+            # Build JOIN clause if extra_metadata exists (for additional annotations)
+            join_clause = ""
+            extra_meta_cols = []
+            extra_meta_sql = ""
+            if extra_meta_table:
+                extra_meta_cols = get_db_table_columns(con, db_alias, extra_meta_table, source_type, data_path)
+                print(f"     [DEBUG] extra_meta_cols {extra_meta_cols}")
+                if source_type == "parquet":
+                    extra_table_ref = f"read_parquet('{os.path.join(data_path, extra_meta_table)}')"
+                else:
+                    extra_table_ref = f"{db_alias}.main.{extra_meta_table}"
+                join_clause = f"LEFT JOIN {extra_table_ref} AS extra ON meta.study_id = extra.study_id"  
+
+            # --- Only append fields NOT already defined in core metadata ---
+            annotation_keys = [
+                "sample_a", "sample_b", "condition_a", "condition_b", "de_category",
+                "cell_type", "cell_id", "cluster_id", "tissue", "age", "sex"
+            ]
+            extra_fields = []
+            source_cols_for_extras = extra_meta_cols if extra_meta_table else meta_cols
+            for key, original_col in name_mappings.items():
+                if key in annotation_keys:
+                    continue
+                if original_col in source_cols_for_extras:
+                    col_sql = simple_sql_col(original_col)
+                    print(f"     [DEBUG] col_sql {col_sql} \n")
+                    extra_fields.append(f"extra.{col_sql} AS {key}")
+            if extra_fields:
+                extra_meta_sql = ",\n    " + ",\n    ".join(extra_fields)
+            else:
+                extra_meta_sql = "" 
+                            
             con.execute(f"""
                 CREATE OR REPLACE VIEW {obs_meta_view} AS
                 SELECT
                     {study_id}                                                AS study_id,
-                    -- Sample / cell metadata
+                    -- Core metadata (obs table) --
                     {get_sql_col(name_mappings, 'sample_a',    meta_cols)}    AS sample_a,
                     {get_sql_col(name_mappings, 'sample_b',    meta_cols)}    AS sample_b,
                     {get_sql_col(name_mappings, 'condition_a', meta_cols)}    AS condition_a,
                     {get_sql_col(name_mappings, 'condition_b', meta_cols)}    AS condition_b,
+                    {get_sql_col(name_mappings, 'de_category', meta_cols)}     AS de_category,
                     {get_sql_col(name_mappings, 'cell_type',   meta_cols)}    AS cell_type,
                     {get_sql_col(name_mappings, 'cell_id',     meta_cols)}    AS cell_id,
                     {get_sql_col(name_mappings, 'cluster_id',  meta_cols)}    AS cluster_id,
                     {get_sql_col(name_mappings, 'tissue',      meta_cols)}    AS tissue,
                     {get_sql_col(name_mappings, 'age',         meta_cols, 'NULL::INTEGER')} AS age,
                     {get_sql_col(name_mappings, 'sex',         meta_cols)}    AS sex
-                FROM {meta_table_ref}
+                    -- Extra metadata --
+                    {extra_meta_sql}
+                FROM {meta_table_ref} AS meta
+                {join_clause}
                 {meta_where}
             """)
             created.append(obs_meta_view)
