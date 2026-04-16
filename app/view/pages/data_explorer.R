@@ -17,7 +17,6 @@
 box::use(
   shiny[...],
   shinydashboard[valueBoxOutput, renderValueBox, valueBox],
-  # shinydashboardPlus[flipBox],
   shinyjs[runjs],
   bslib[...],
   plotly[plotlyOutput, renderPlotly, plot_ly, layout, add_trace],
@@ -431,16 +430,18 @@ explorer_server <- function(id) {
         )
       
       # Annotate searched gene if present
-      if (!is.null(gene) && nzchar(gene) && "gene_symbol" %in% names(plot_df)) {
-        match_idx <- which(toupper(plot_df$gene_symbol) == toupper(gene))[1]
-        if (!is.na(match_idx)) {
-          gp <- plot_df[match_idx, , drop = FALSE]
-          p  <- p |> plotly::add_annotations(
-            x = gp$log2fc, y = gp$neg_log10p,
-            text = paste0("<b>", gp$gene_symbol, "</b>"),
-            showarrow = TRUE, arrowhead = 2, arrowsize = 0.8,
-            font = list(size = 12, color = "#2C3E50")
-          )
+      if (length(gene) > 0 && "gene_symbol" %in% names(plot_df)) {
+        for (g in gene) {
+          match_idxs <- which(toupper(plot_df$gene_symbol) == toupper(g))[1]
+          for (idx in match_idxs) {          # one annotation per row (each cell_type etc.)
+            gp <- plot_df[idx, , drop = FALSE]
+            p  <- p |> plotly::add_annotations(
+              x = gp$log2fc, y = gp$neg_log10p,
+              text = paste0("<b>", gp$gene_symbol, "</b>"),
+              showarrow = TRUE, arrowhead = 2, arrowsize = 0.8,
+              font = list(size = 12, color = "#2C3E50")
+            )
+          }
         }
       }
       p
@@ -1063,7 +1064,7 @@ explorer_server <- function(id) {
                 row$dataset_name[1],
                 sidebar_vals$padj_thresh(),
                 sidebar_vals$lfc_thresh_min(),
-                gene = selected_dataset()$genes[1]
+                gene = selected_dataset()$genes
               )
             )
           })
@@ -1213,7 +1214,7 @@ explorer_server <- function(id) {
                      ds <- selected_dataset()
                      terms <- c(ds$genes, ds$proteins)
                      if (is.null(ds) || length(terms) == 0) return(NULL)
-                     terms[1]
+                     terms[nzchar(trimws(terms))]
                    }))
     heatmap_server("heatmap",  selected_dataset,
                    padj_thresh = sidebar_vals$padj_thresh,
@@ -1234,47 +1235,6 @@ explorer_server <- function(id) {
     highest_expr_server("highest_expr", selected_dataset)
     
     # ── Value boxes (tied to dataset_stats) ─────────────────────────────
-    # stats_row <- reactive({
-    #   ds <- selected_dataset()
-    #   req(ds)
-    #   fetch_dataset_stats(registry_con(), lab_source = ds$lab_source,
-    #                       study_id = ds$study_id)
-    # })
-    
-    # output$box_datasets   <- renderValueBox(valueBox(
-    #   length(selected_dataset()$genes %||% 0), "Gene(s) selected",
-    #   # icon = icon("dna"),
-    #   color = "purple"))
-    # 
-    # output$box_genes      <- renderValueBox(valueBox(
-    #   stats_row()$total_features %||% "—", "Total features",
-    #   # icon = icon("list"),
-    #   color = "blue"))
-    # 
-    # output$box_sig_genes  <- renderValueBox(valueBox(
-    #   stats_row()$n_sig_features %||% "—", "Significant",
-    #   # icon = icon("star"),
-    #   color = "red"))
-    # 
-    # output$box_cells      <- renderValueBox(valueBox(
-    #   stats_row()$total_cells %||% "—", "Total cells",
-    #   icon = icon("circle-nodes"),
-    #   color = "teal"))
-    # 
-    # output$box_cell_types <- renderValueBox(valueBox(
-    #   stats_row()$n_cell_types %||% "—", "Cell types",
-    #   icon = icon("tags"),
-    #   color = "olive"))
-    # 
-    # output$box_samples    <- renderValueBox(valueBox(
-    #   stats_row()$total_samples %||% "—", "Samples",
-    #   icon = icon("vials"),
-    #   color = "navy"))
-    # 
-    # output$box_conditions <- renderValueBox(valueBox(
-    #   stats_row()$n_conditions %||% "—", "Conditions",
-    #   # icon = icon("flask"),
-    #   color = "maroon"))
     stats_row <- reactive({
       rows <- compare_source_rows()
       if (nrow(rows) == 0) return(list())
