@@ -516,8 +516,47 @@ explorer_server <- function(id) {
         )
     }
 
-    render_compare_heatmap <- function(df, dataset_name, padj_thresh, lfc_thresh) {
+    render_compare_heatmap <- function(df, dataset_row, dataset_name, padj_thresh, lfc_thresh) {
+      
+      # Append selected terms on heatmap where available
+      ds <- selected_dataset()
+      goi_terms <- unique(trimws(ds$genes %||% character(0)))
+      goi_terms <- goi_terms[nzchar(goi_terms)]
+
       validate(need(nrow(df) > 0, "No heatmap rows are available for this dataset."))
+
+      if (length(goi_terms) > 0) {
+        goi_df <- fetch_expression_goi(
+          lab_source = dataset_row$lab_source[1],
+          study_id   = dataset_row$study_id[1],
+          genes      = goi_terms,
+          limit      = 5000L
+        )
+
+        all_groups <- unique(c(
+          df[[group_col]],
+          goi_df[[group_col]]
+        ))
+
+        if (nrow(goi_df) > 0) {
+          # Ensure grouping column exists
+          group_col <- compare_group_col(df)
+          if (!group_col %in% names(goi_df)) {
+            # goi_df[[group_col]] <- df[[group_col]][1] #"GOI"  - check not forcing goi in wrong ccategory
+            goi_df[[group_col]] <- goi_df[[group_col]] %||% goi_df$de_category %||% NA
+          }
+
+          # Align columns
+          common_cols <- union(names(df), names(goi_df))
+          for (col in setdiff(common_cols, names(df))) df[[col]] <- NA
+          for (col in setdiff(common_cols, names(goi_df))) goi_df[[col]] <- NA
+
+          df <- rbind(df[, common_cols, drop = FALSE],
+                      goi_df[, common_cols, drop = FALSE])
+        }
+      }
+
+      # Top genes ranking
       group_col <- compare_group_col(df)
       ranked_genes <- df |>
         dplyr::mutate(
@@ -531,22 +570,32 @@ explorer_server <- function(id) {
         ) |>
         dplyr::arrange(rank_bucket, dplyr::desc(abs_lfc), padj)
       ranked_genes <- unique(ranked_genes$gene_symbol)
+
+      goi_terms_present <- intersect(goi_terms, unique(df$gene_symbol)) # add goi to ranking
+      ranked_genes <- unique(c(goi_terms_present, ranked_genes))
+
       ranked_genes <- ranked_genes[seq_len(min(50L, length(ranked_genes)))]
 
       df <- df[df$gene_symbol %in% ranked_genes, , drop = FALSE]
       validate(need(nrow(df) > 0, "No heatmap rows remain after ranking/filtering."))
+      
+      # Reshape by collapsing duplicates per (gene, group)
       agg <- stats::aggregate(
         df$log2fc,
         by = list(gene_symbol = df$gene_symbol, group = df[[group_col]]),
-        FUN = mean
+        FUN = function(x) x[which.max(abs(x))]  #OR `FUN = mean)` - decided max due to some groups/categories empty, while mean() can't handle NA and is baised towards 0
       )
       names(agg)[3] <- "log2fc"
       agg <- agg[!is.na(agg$gene_symbol) & !is.na(agg$group), , drop = FALSE]
       validate(need(nrow(agg) > 0, "No grouped heatmap rows remain after aggregation."))
-      gene_levels <- unique(agg$gene_symbol)
-      group_levels <- unique(agg$group)
+      
+      gene_levels <- unique(c(
+        goi_terms,
+        agg$gene_symbol
+      ))  # ensure goi included at top of heatmap
+      group_levels <- all_groups  # group_levels <- unique(agg$group)
       mat <- matrix(
-        0,
+        NA_real_,
         nrow = length(gene_levels),
         ncol = length(group_levels),
         dimnames = list(gene_levels, group_levels)
@@ -554,12 +603,14 @@ explorer_server <- function(id) {
       row_idx <- match(agg$gene_symbol, gene_levels)
       col_idx <- match(agg$group, group_levels)
       mat[cbind(row_idx, col_idx)] <- agg$log2fc
-      mat[is.na(mat)] <- 0
+      # mat[is.na(mat)] <- 0
 
       plotly::plot_ly(
         z = unclass(mat),
         x = colnames(mat),
         y = rownames(mat),
+        zmin = -max(abs(mat), na.rm = TRUE),  # colour scale
+        zmax =  max(abs(mat), na.rm = TRUE),
         type = "heatmap",
         colorscale = list(
           c(0, "#2980B9"),
@@ -668,7 +719,7 @@ explorer_server <- function(id) {
         proteins = current_state$proteins %||% character(0)
       )
       validate(need(nrow(df) > 0, "No ranked features are available for this dataset."))
-      ranked <- stats::aggregate(mean_value ~ feature_label, data = df, FUN = mean)
+      ranked <- stats::aggregate(mean_value ~ feature_label, data = df, FUN = function(x) x[which.max(abs(x))])  #OR `FUN = mean)`
       ranked <- ranked[order(ranked$mean_value, decreasing = TRUE), , drop = FALSE]
 
       plotly::plot_ly(
@@ -1028,6 +1079,7 @@ explorer_server <- function(id) {
                   padj_thresh = sidebar_vals$padj_thresh(),
                   lfc_thresh = sidebar_vals$lfc_thresh_min()
                 ),
+                row,
                 row$dataset_name[1],
                 sidebar_vals$padj_thresh(),
                 sidebar_vals$lfc_thresh_min()

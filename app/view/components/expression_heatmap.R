@@ -27,11 +27,26 @@ heatmap_ui <- function(id) {
 heatmap_server <- function(id, selected_dataset,
                            padj_thresh, lfc_thresh, n_genes) {
   moduleServer(id, function(input, output, session) {
+    
+    has_values <- function(df, col) {
+      col %in% names(df) &&
+        any(!is.na(df[[col]]) & nzchar(trimws(as.character(df[[col]]))))
+    }
+
     has_multiple_values <- function(df, col) {
       if (!col %in% names(df)) return(FALSE)
       values <- as.character(df[[col]])
       values <- values[!is.na(values) & nzchar(trimws(values))]
       length(unique(values)) > 1
+    }
+
+    build_de_category <- function(df) {
+      if (has_values(df, "de_category")) {
+        values <- as.character(df$de_category)
+        values[is.na(values) | !nzchar(values)] <- "unlabelled"
+        return(values)
+      }
+      rep("All", nrow(df))
     }
 
     group_label_map <- c(
@@ -82,7 +97,7 @@ heatmap_server <- function(id, selected_dataset,
           session$ns("heatmap_terms"),
           label = NULL,
           choices = terms,
-          selected = character(0)
+          selected = terms
         )
       )
     })
@@ -109,6 +124,15 @@ heatmap_server <- function(id, selected_dataset,
         return(df)
       }
 
+      # Ensure GOI rows have de_category if top_genes rows do to append without issue
+      group_col <- input$x_axis %||% "de_category"
+      if (!group_col %in% names(selected_df)) {
+        selected_df[[group_col]] <- selected_df[[group_col]][1] #"GOI"
+      }
+      if (!"de_category" %in% names(selected_df)) { #"de_category" %in% names(df) && !"de_category" %in% names(selected_df)
+        selected_df$de_category <- "GOI"
+      }
+
       common_cols <- union(names(df), names(selected_df))
       for (col in setdiff(common_cols, names(df))) df[[col]] <- NA
       for (col in setdiff(common_cols, names(selected_df))) selected_df[[col]] <- NA
@@ -119,12 +143,32 @@ heatmap_server <- function(id, selected_dataset,
 
     x_axis_choices <- reactive({
       df <- heatmap_data()
+      df$de_category <- build_de_category(df)
       choices <- c()
       for (candidate in names(group_label_map)) {
         if (has_multiple_values(df, candidate)) {
           choices[[group_label_map[[candidate]]]] <- candidate
+        } else if (
+          has_values(df, "de_category") ||
+          (all(c("padj", "log2fc") %in% names(df)) &&
+          any(!is.na(df$padj)) &&
+          any(!is.na(df$log2fc)))
+        ) {
+          choices[["DE category"]] <- "de_category"
         }
       }
+      # or
+      # for (candidate in names(group_label_map)) {
+      #   if (candidate == "de_category") {
+      #     if (has_values(df, "de_category")) {
+      #       choices[[group_label_map[[candidate]]]] <- candidate
+      #     }
+      #     next
+      #   }
+      #   if (has_multiple_values(df, candidate)) {
+      #     choices[[group_label_map[[candidate]]]] <- candidate  #choices[["DE category"]] <- "de_category"
+      #   }
+      # }
       choices
     })
 
@@ -149,6 +193,8 @@ heatmap_server <- function(id, selected_dataset,
       df <- heatmap_data()
       req(nrow(df) > 0)
 
+      df$de_category <- build_de_category(df)
+
       group_col <- input$x_axis
       if (!group_col %in% names(df)) {
         choices <- x_axis_choices()
@@ -157,8 +203,9 @@ heatmap_server <- function(id, selected_dataset,
       }
 
       plot_source <- df[, intersect(c("gene_symbol", group_col, "log2fc"), names(df)), drop = FALSE]
+      # plot_source <- df[, c("gene_symbol", group_col, "log2fc"), drop = FALSE]
       names(plot_source)[names(plot_source) == group_col] <- "group"
-      plot_source <- plot_source[!is.na(plot_source$gene_symbol) & !is.na(plot_source$group), , drop = FALSE]
+      plot_source <- plot_source[!is.na(plot_source$gene_symbol) & (!is.na(plot_source$group) | plot_source$group == "GOI"), , drop = FALSE]
       req(nrow(plot_source) > 0)
 
       selected_terms <- input$heatmap_terms %||% character(0)
@@ -170,7 +217,7 @@ heatmap_server <- function(id, selected_dataset,
           id_cols = gene_symbol,
           names_from = group,
           values_from = log2fc,
-          values_fn = mean,
+          values_fn = mean, #value
           values_fill = 0
         ) |>
         tibble::column_to_rownames("gene_symbol")
