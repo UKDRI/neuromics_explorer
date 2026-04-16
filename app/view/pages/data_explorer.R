@@ -1105,14 +1105,14 @@ explorer_server <- function(id) {
       rows <- ds$selected_datasets
       checked_rows <- listing_selection()
       display <- rows[, intersect(
-        c("lab_source", "dataset_name", "omic_type", "matched_terms",
+        c("lab_source", "dataset_name", "omic_type", "matched_genes", "matched_proteins",
           "total_features", "n_sig_features", "total_samples", "total_cells",
           "n_cell_types", "n_conditions"),
         names(rows)
       ), drop = FALSE]
 
       names(display) <- c(
-        "Lab", "Dataset", "Modality", "Matched terms",
+        "Lab", "Dataset", "Modality", "Matched genes", "Matched proteins",
         "Total features", "Total significant", "Samples", "Cells",
         "Cell types", "Conditions"
       )[seq_along(display)]

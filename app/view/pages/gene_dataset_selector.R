@@ -14,7 +14,7 @@ box::use(
   app/logic/api/api_client[fetch_all_datasets, fetch_datasets_for_terms, fetch_gene_index_genes,
                            fetch_metadata_filter_options, fetch_protein_index_ids],
   bslib[tooltip],
-  dplyr[arrange, bind_rows, group_by, select, summarise],
+  dplyr[arrange, bind_rows, group_by, select, summarise, semi_join],
   DT[ datatable, DTOutput, renderDT],
   jsonlite[fromJSON],
   shiny[...],
@@ -81,9 +81,14 @@ gene_selector_server <- function(id, selected_dataset) {
           n_cell_types, n_conditions, cell_types_json, conditions_json
         ) |>
         dplyr::summarise(
-          matched_terms = paste(
+          matched_genes = paste(
             sort(unique(c(
-              gene_symbol,
+              gene_symbol
+            ))),
+            collapse = ", "
+          ),
+          matched_proteins = paste(
+            sort(unique(c(
               unlist(lapply(protein_id, parse_json_text), use.names = FALSE)
             ))),
             collapse = ", "
@@ -290,18 +295,38 @@ gene_selector_server <- function(id, selected_dataset) {
 
     # ── Hits table ────────────────────────────────────────────────────────────
     # This render block presents the current search result for row selection.
-    output$hits_tbl <- renderDT({
+    hits_display <- reactive({
       df <- hits_data()
-      req(nrow(df) > 0)
+      if (nrow(df) == 0) return(data.frame()) #req(nrow(df) > 0)
 
       # Friendly display columns (hides JSON blobs)
-      display <- df |>
+      df |>
+        dplyr::group_by(lab_source, study_id, dataset_name, omic_type,
+                        total_features, n_sig_features, total_samples,
+                        total_cells, n_cell_types, n_conditions, cell_types_json, conditions_json) |>
+        dplyr::summarise(
+          Gene    = paste(sort(unique(gene_symbol[!is.na(gene_symbol) & nzchar(gene_symbol)])), collapse = ", "),
+          Protein = {
+            vals <- unique(unlist(lapply(protein_id, parse_json_text), use.names = FALSE))
+            vals <- vals[nzchar(vals)]
+            if (length(vals) == 0) "—" else paste(sort(vals), collapse = ", ")
+          },
+          .groups = "drop"
+        ) |>
+        dplyr::arrange(lab_source, dataset_name)
+    })
+
+    output$hits_tbl <- renderDT({
+      display <- hits_display()
+      req(nrow(display) > 0)
+
+      display <- display |>
         dplyr::select(
           Lab          = lab_source,
           `Dataset`    = dataset_name,
           `Modality`   = omic_type,
-          `Gene`       = gene_symbol,
-          `Protein`    = protein_label,
+          `Gene`       = Gene,
+          `Protein`    = Protein,
           `Total Features` = total_features,
           `Total Significant (padj<0.05)` = n_sig_features,
           `Total Samples`  = total_samples,
@@ -328,7 +353,7 @@ gene_selector_server <- function(id, selected_dataset) {
     # compact side-by-side metadata cards for those candidate datasets.
     output$meta_preview <- renderUI({
       row_idx <- input$hits_tbl_rows_selected
-      rows <- hits_data()[row_idx, , drop = FALSE]
+      rows <- hits_display()[row_idx, , drop = FALSE]
 
       # Parse JSON arrays for display
       tags$div(
@@ -378,7 +403,11 @@ gene_selector_server <- function(id, selected_dataset) {
     observeEvent(input$confirm_btn, {
       row_idxs <- input$hits_tbl_rows_selected
       req(length(row_idxs) > 0)
-      selected_rows <- hits_data()[row_idxs, , drop = FALSE]
+      # selected_rows <- hits_display()[row_idxs, , drop = FALSE]
+      selected_keys <- hits_display()[row_idxs, c("lab_source", "study_id", "dataset_name")]
+      selected_rows <- hits_data() |>
+        dplyr::semi_join(selected_keys,
+                        by = c("lab_source", "study_id", "dataset_name"))
       genes <- unique(trimws(input$gene_query %||% character(0)))
       genes <- genes[nzchar(genes)]
       proteins <- unique(trimws(input$protein_query %||% character(0)))
