@@ -17,19 +17,18 @@ WORKDIR /app
 
 # Copy application code, envs, any databases and additional files
 COPY renv.lock renv.lock
+COPY renv/ renv/
+COPY .Rprofile .Rprofile
+
+ENV RENV_PATHS_LIBRARY=renv/library
+ENV RENV_CONFIG_CACHE_SYMLINKS=FALSE
+
 RUN R -e "install.packages('renv', repos='https://cloud.r-project.org')" && \
-    R -e "renv::restore(prompt=FALSE)"
-# RUN R -e "update.packages(ask = FALSE, repos = 'https://cloud.r-project.org')"
-# RUN R -e "install.packages('devtools', repos = 'https://cloud.r-project.org')"
-# RUN R -e "install.packages('shiny', repos = 'https://cloud.r-project.org')"
-# RUN R -e "install.packages('remotes')"
-# RUN R -e "require(devtools)"
-# RUN R -e "remotes::install_version(\"httr2\", version = \"1.1.2\", repos = \"http://cran.us.r-project.org/\")"
+    R -e "renv::restore(prompt=FALSE, library='renv/library')"
 
 COPY . .
 COPY data/ data/
 COPY requirements.txt requirements.txt
-# COPY app/   app/
 # NB: .duckdb and Parquet source files can later be mounted at runtime, 
 # instead of being baked into image to allow flexibility and dataset updates
 
@@ -47,5 +46,5 @@ RUN chmod +x app/logic/startup/start.sh
 # Expose port
 EXPOSE 4848
 
-# Run Shiny app (activate venv to use Python packages)
+# Run Shiny app (activates venv to use Python packages)
 CMD ["bash", "app/logic/startup/start.sh"]

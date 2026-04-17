@@ -1,5 +1,5 @@
 # Interactive DE results table.
-# The CSV export control is rendered by the parent explorer header.
+# The CSV export control is rendered by the parent explorer header and datatables.
 
 box::use(
   shiny[NS, moduleServer, reactive, req, tagList],
@@ -45,7 +45,7 @@ results_server <- function(id, de_data) {
           scrollY    = "420px",
           scroller   = TRUE,
           dom        = "Bfrtip",    # controls which DT widgets appear: B=Buttons, f=filter/search, r=processing, t=table, i=info, p=pagination
-          # buttons    = c("csv", "excel"),
+          buttons    = c("csv", "excel"),
           #autoWidth = TRUE,
           columnDefs = list(
             list(className = "dt-right", targets = which(sapply(df, is.numeric)) - 1)   # right-align numbers (DT default is left-align)
