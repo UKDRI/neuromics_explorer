@@ -237,15 +237,32 @@ def _term_predicates(genes: list[str], proteins: list[str]) -> tuple[list[str], 
     predicates: list[str] = []
     params: list = []
 
+    # if genes:
+    #     gene_placeholders = ",".join(["?"] * len(genes))
+    #     predicates.append(f"UPPER({SEMANTIC_GENE_EXPR}) IN ({gene_placeholders})")
+    #     params.extend(term.upper() for term in genes)
+
+    # if proteins:
+    #     protein_placeholders = ",".join(["?"] * len(proteins))
+    #     predicates.append(f"UPPER(protein_id) IN ({protein_placeholders})")
+    #     params.extend(term.upper() for term in proteins)
     if genes:
-        gene_placeholders = ",".join(["?"] * len(genes))
-        predicates.append(f"UPPER({SEMANTIC_GENE_EXPR}) IN ({gene_placeholders})")
-        params.extend(term.upper() for term in genes)
+        gene_clauses = []
+        for _ in genes:
+            gene_clauses.append(
+                f"list_contains(string_split(lower({SEMANTIC_GENE_EXPR}), ';'), lower(?))"
+            )
+        predicates.append("(" + " OR ".join(gene_clauses) + ")")
+        params.extend(genes)
 
     if proteins:
-        protein_placeholders = ",".join(["?"] * len(proteins))
-        predicates.append(f"UPPER(protein_id) IN ({protein_placeholders})")
-        params.extend(term.upper() for term in proteins)
+        protein_clauses = []
+        for _ in proteins:
+            protein_clauses.append(
+                "list_contains(string_split(lower(protein_id), ';'), lower(?))"
+            )
+        predicates.append("(" + " OR ".join(protein_clauses) + ")")
+        params.extend(proteins)
 
     return predicates, params
 
@@ -409,8 +426,10 @@ def gene_index(
     params: list = []
 
     if q:
-        clauses.append("gene_symbol ILIKE ?")
-        params.append(f"{q.strip()}%")
+        clauses.append(
+            "list_contains(string_split(lower(gene_symbol), ';'), x -> trim(x)), lower(?))"
+        )
+        params.append(q.strip().lower())
 
     params.append(limit)
     sql = f"""
@@ -434,8 +453,10 @@ def protein_index(
     params: list = []
 
     if q:
-        clauses.append("protein_id ILIKE ?")
-        params.append(f"{q.strip()}%")
+        clauses.append(
+            "list_contains(string_split(lower(protein_id), ';'), x -> trim(x)), lower(?))"
+        )
+        params.append(q.strip().lower())
 
     params.append(limit)
     sql = f"""
@@ -503,14 +524,24 @@ def search_datasets(
     term_clauses: list[str] = []
 
     if genes:
-        gene_predicates = " OR ".join(["gi.gene_symbol ILIKE ?"] * len(genes))
+        gene_predicates = " OR ".join([
+            """list_contains(
+                list_transform(string_split(lower(gi.gene_symbol), ';'), x -> trim(x)),
+                lower(?)
+            )"""
+        ] * len(genes))
         term_clauses.append(f"({gene_predicates})")
-        params.extend(f"%{term}%" for term in genes)
+        params.extend(term.strip() for term in genes)
 
     if proteins:
-        protein_predicates = " OR ".join(["gi.protein_id ILIKE ?"] * len(proteins))
+        protein_predicates = " OR ".join([
+            """list_contains(
+                list_transform(string_split(lower(gi.protein_id), ';'), x -> trim(x)),
+                lower(?)
+            )"""
+        ] * len(proteins))
         term_clauses.append(f"({protein_predicates})")
-        params.extend(f"%{term}%" for term in proteins)
+        params.extend(term.strip() for term in proteins)
 
     clauses = [f"({' OR '.join(term_clauses)})"]
 
