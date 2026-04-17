@@ -523,14 +523,18 @@ explorer_server <- function(id) {
       goi_terms <- unique(trimws(ds$genes %||% character(0)))
       goi_terms <- goi_terms[nzchar(goi_terms)]
 
-      validate(need(nrow(df) > 0, "No heatmap rows are available for this dataset."))
-
+      df_is_empty <- nrow(df) == 0
+      
       if (length(goi_terms) > 0) {
         goi_df <- fetch_expression_goi(
           lab_source = dataset_row$lab_source[1],
           study_id   = dataset_row$study_id[1],
           genes      = goi_terms,
           limit      = 5000L
+        )
+
+        group_col <- compare_group_col(
+          if (df_is_empty) goi_df else df
         )
 
         all_groups <- unique(c(
@@ -540,7 +544,7 @@ explorer_server <- function(id) {
 
         if (nrow(goi_df) > 0) {
           # Ensure grouping column exists
-          group_col <- compare_group_col(df)
+
           if (!group_col %in% names(goi_df)) {
             # goi_df[[group_col]] <- df[[group_col]][1] #"GOI"  - check not forcing goi in wrong ccategory
             goi_df[[group_col]] <- goi_df[[group_col]] %||% goi_df$de_category %||% NA
@@ -551,10 +555,17 @@ explorer_server <- function(id) {
           for (col in setdiff(common_cols, names(df))) df[[col]] <- NA
           for (col in setdiff(common_cols, names(goi_df))) goi_df[[col]] <- NA
 
-          df <- rbind(df[, common_cols, drop = FALSE],
-                      goi_df[, common_cols, drop = FALSE])
+          if (df_is_empty) {
+            df <- goi_df
+          } else {
+            df <- rbind(df[, common_cols, drop = FALSE],
+                        goi_df[, common_cols, drop = FALSE])
+            # df$gene_symbol <- trimws(df$gene_symbol)
+          }
         }
       }
+
+      validate(need(nrow(df) > 0, "No heatmap rows are available for this dataset."))
 
       # Top genes ranking
       group_col <- compare_group_col(df)
@@ -571,7 +582,10 @@ explorer_server <- function(id) {
         dplyr::arrange(rank_bucket, dplyr::desc(abs_lfc), padj)
       ranked_genes <- unique(ranked_genes$gene_symbol)
 
-      goi_terms_present <- intersect(goi_terms, unique(df$gene_symbol)) # add goi to ranking
+      # add goi to ranking
+      goi_terms_present <- unique(df$gene_symbol[
+        tolower(df$gene_symbol) %in% tolower(goi_terms)
+      ]) #preserves original casing from df, while allowing for case-insensitivity
       ranked_genes <- unique(c(goi_terms_present, ranked_genes))
 
       ranked_genes <- ranked_genes[seq_len(min(50L, length(ranked_genes)))]
@@ -590,9 +604,9 @@ explorer_server <- function(id) {
       validate(need(nrow(agg) > 0, "No grouped heatmap rows remain after aggregation."))
       
       gene_levels <- unique(c(
-        goi_terms,
+        goi_terms_present,
         agg$gene_symbol
-      ))  # ensure goi included at top of heatmap
+      ))  # ensure goi included in heatmap and prevents duplicate rows collapsing into one label
       group_levels <- all_groups  # group_levels <- unique(agg$group)
       mat <- matrix(
         NA_real_,
