@@ -197,9 +197,9 @@ gene_selector_server <- function(id, selected_dataset) {
                   style = "font-size: 14px; padding-left: 18px; margin: 8px 0 0;",
                   tags$li("Type or select one or more genes and/or proteins."),
                   tags$li("Click 'Search' button to list datasets containing those terms."),
-                  tags$li("Click to select one or more dataset rows from the results table below."),
+                  tags$li("Click to select up to 4 datasets from the results table below."),
                   tags$li("Review the metadata preview shown below the table."),
-                  tags$li("Click 'Explore selected dataset(s)' to open them in the main explorer page.")
+                  tags$li("Click the green 'Explore selected dataset(s)' to open them in the main explorer page.")
                 )
               ),
               h5("Datasets containing searched gene and protein terms:"),

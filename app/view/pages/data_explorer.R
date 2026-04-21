@@ -588,7 +588,7 @@ explorer_server <- function(id) {
       ]) #preserves original casing from df, while allowing for case-insensitivity
       ranked_genes <- unique(c(goi_terms_present, ranked_genes))
 
-      ranked_genes <- ranked_genes[seq_len(min(50L, length(ranked_genes)))]
+      ranked_genes <- ranked_genes[seq_len(min(30L, length(ranked_genes)))]
 
       df <- df[df$gene_symbol %in% ranked_genes, , drop = FALSE]
       validate(need(nrow(df) > 0, "No heatmap rows remain after ranking/filtering."))
@@ -637,7 +637,13 @@ explorer_server <- function(id) {
         plotly::layout(
           title = list(text = dataset_name, x = 0.02),
           xaxis = list(title = group_label(group_col), tickangle = -35),
-          yaxis = list(title = "", automargin = TRUE),
+          yaxis = list(title = "", 
+                       automargin = TRUE,
+                       tickmode   = "array",
+                       tickvals   = seq_along(rownames(mat)) - 1,
+                       ticktext   = rownames(mat),
+                       tickfont   = list(size = 10)
+                      ),
           margin = list(t = 50)
         )
     }
@@ -1089,7 +1095,7 @@ explorer_server <- function(id) {
                 fetch_top_de(
                   lab_source = row$lab_source[1],
                   study_id = row$study_id[1],
-                  n = 50L,
+                  n = 20L,
                   padj_thresh = sidebar_vals$padj_thresh(),
                   lfc_thresh = sidebar_vals$lfc_thresh_min()
                 ),
@@ -1285,7 +1291,7 @@ explorer_server <- function(id) {
     heatmap_server("heatmap",  selected_dataset,
                    padj_thresh = sidebar_vals$padj_thresh,
                    lfc_thresh  = sidebar_vals$lfc_thresh_min,
-                   n_genes     = reactive(50L))
+                   n_genes     = reactive(20L))
     umap_server("umap",       selected_dataset)
     violin_server("violin",    violin_data,
                   selected_dataset = selected_dataset,

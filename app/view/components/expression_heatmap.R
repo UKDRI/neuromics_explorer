@@ -242,7 +242,12 @@ heatmap_server <- function(id, selected_dataset,
       ) |>
         plotly::layout(
           xaxis = list(title = group_title %||% "X-axis", tickangle = -45),
-          yaxis = list(title = "", automargin = TRUE)
+          yaxis = list(title = "",
+                       automargin = TRUE,
+                       tickmode   = "array",
+                       tickvals   = seq_along(rownames(mat)) - 1,
+                       ticktext   = rownames(mat),
+                       tickfont   = list(size = 10))
         )
     })
   })
