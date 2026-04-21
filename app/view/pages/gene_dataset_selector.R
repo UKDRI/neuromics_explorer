@@ -245,7 +245,7 @@ gene_selector_server <- function(id, selected_dataset) {
         session,
         "gene_query",
         choices  = genes_sql,
-        selected = character(0),
+        selected = cached_genes(),
         server   = TRUE
       )
 
@@ -253,7 +253,7 @@ gene_selector_server <- function(id, selected_dataset) {
         session,
         "protein_query",
         choices  = proteins_sql,
-        selected = character(0),
+        selected = cached_proteins(),
         server   = TRUE
       )
     })
@@ -264,6 +264,10 @@ gene_selector_server <- function(id, selected_dataset) {
     # metadata preview, and confirm action all read from the same search result.
     hits_data <- reactiveVal(data.frame())
 
+    # Reactive vals cache last search to persist across modal sessions
+    cached_genes    <- reactiveVal(character(0))
+    cached_proteins <- reactiveVal(character(0))
+
     # This observeEvent runs only when the user clicks Search. It translates the
     # current modal inputs into one API query and updates the shared results.
     observeEvent(input$search_btn, {
@@ -272,6 +276,9 @@ gene_selector_server <- function(id, selected_dataset) {
       search_proteins <- unique(trimws(input$protein_query %||% character(0)))
       search_proteins <- search_proteins[nzchar(search_proteins)]
       req(length(search_genes) > 0 || length(search_proteins) > 0)
+
+      cached_genes(search_genes)
+      cached_proteins(search_proteins)
 
       results <- tryCatch({
         fetch_datasets_for_terms(
