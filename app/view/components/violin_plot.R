@@ -157,13 +157,13 @@ violin_server <- function(id, de_data, selected_dataset, padj_thresh, lfc_thresh
     feature_expression_data <- reactive({
       if (!is_gene_mode()) return(NULL)
       ds <- selected_dataset()
-      req(ds)
+      req(ds, input$feature_term)
 
       fetch_expression_feature_values(
         lab_source = ds$lab_source,
         study_id = ds$study_id,
         genes = input$feature_term,
-        assay = "logcounts",
+        assay = "counts", #"logcounts",
         limit = 100000L
       )
     })

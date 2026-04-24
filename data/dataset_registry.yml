@@ -221,7 +221,6 @@ sources:
           - pvalue
         annotations:
           - Comparison
-          # - DE
           - Subcellular_Location
         
   # --- WILLIAMS LAB ---
