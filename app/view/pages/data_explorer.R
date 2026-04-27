@@ -34,11 +34,12 @@ box::use(
   app/view/components/highest_expr_plot[highest_expr_ui, highest_expr_server],
   app/view/pages/gene_dataset_selector[gene_selector_ui, gene_selector_server],
   app/view/pages/explore_sidebar[sidebar_ui, sidebar_server],
-  app/logic/api/api_client[fetch_expression_table, fetch_expression_volcano,
+  app/logic/api/api_client[fetch_all_datasets, fetch_expression_table, fetch_expression_volcano,
                            fetch_expression_multi_dataset, fetch_expression_histogram,
                            fetch_expression_groups, fetch_expression_goi,
                            fetch_dataset_embeddings, fetch_top_de,
                            fetch_metadata_filter_options],
+  utils[head],
 )
 
 
@@ -72,6 +73,8 @@ explorer_ui <- function(id) {
         tags$h5("Find and explore all available datasets by clicking the button below to get started.",
                 style = "margin-bottom: 8px;"),
         gene_selector_ui(ns("gene_selector"))
+        # ,
+        # uiOutput(ns("shareable_link_ui"))
       ),
       tags$br(),
       # # Everything below is hidden until a dataset is selected
@@ -155,17 +158,17 @@ explorer_ui <- function(id) {
           # ──  Bottom row of cards: Quick Stats ──────────────────
           tags$div(
             style = "margin-top: 20px;",
-            layout_columns(
-              fill = FALSE,
-              style = "text-align:center; font-size:1.2rem; background-color: #f9f9f9; padding: 10px; border-radius: 8px;",
-              card(valueBoxOutput(ns("box_datasets"))),
-              card(valueBoxOutput(ns("box_genes"))),
-              card(valueBoxOutput(ns("box_sig_genes"))),
-              card(valueBoxOutput(ns("box_cells"))),
-              card(valueBoxOutput(ns("box_cell_types"))),
-              card(valueBoxOutput(ns("box_samples"))),
-              card(valueBoxOutput(ns("box_conditions")))
-            )
+            # layout_columns(
+            #   fill = FALSE,
+            #   style = "text-align:center; font-size:1.2rem; background-color: #f9f9f9; padding: 10px; border-radius: 8px;",
+            #   card(valueBoxOutput(ns("box_datasets"))),
+            #   card(valueBoxOutput(ns("box_genes"))),
+            #   card(valueBoxOutput(ns("box_sig_genes"))),
+            #   card(valueBoxOutput(ns("box_cells"))),
+            #   card(valueBoxOutput(ns("box_cell_types"))),
+            #   card(valueBoxOutput(ns("box_samples"))),
+            #   card(valueBoxOutput(ns("box_conditions")))
+            # )
           )
         ),
 
@@ -233,7 +236,7 @@ explorer_ui <- function(id) {
 
 
 #' @export
-explorer_server <- function(id) {
+explorer_server <- function(id, initial_link = reactive(NULL)) {
   moduleServer(id, function(input, output, session) {
     dataset_key <- function(df) {
       paste(df$lab_source, df$study_id, sep = "::")
@@ -253,6 +256,85 @@ explorer_server <- function(id) {
         parsed <- as.character(parsed)
         parsed[!is.na(parsed) & nzchar(parsed) & parsed != "null"]
       }), use.names = FALSE))
+    }
+
+    clean_terms <- function(values, max_terms = 15L) {
+      if (is.null(values) || length(values) == 0) return(character(0))
+      values <- unique(trimws(as.character(values)))
+      values <- values[!is.na(values) & nzchar(values)]
+      utils::head(values, max_terms)
+    }
+
+    build_share_query <- function(ds) {
+      if (is.null(ds)) return("?page=explore")
+
+      gene_terms <- clean_terms(ds$genes %||% character(0))
+      protein_terms <- clean_terms(ds$proteins %||% character(0))
+
+      query_parts <- c(
+        "page=explore",
+        paste0("lab=", utils::URLencode(ds$lab_source, reserved = TRUE)),
+        paste0("study=", utils::URLencode(as.character(ds$study_id), reserved = TRUE)),
+        vapply(
+          gene_terms,
+          function(term) paste0("gene=", utils::URLencode(term, reserved = TRUE)),
+          character(1)
+        ),
+        vapply(
+          protein_terms,
+          function(term) paste0("protein=", utils::URLencode(term, reserved = TRUE)),
+          character(1)
+        )
+      )
+
+      paste0("?", paste(query_parts, collapse = "&"))
+    }
+
+    build_link_selected_payload <- function(params) {
+      all_rows <- tryCatch(
+        fetch_all_datasets(),
+        error = function(e) data.frame()
+      )
+      if (nrow(all_rows) == 0) return(NULL)
+
+      rows <- all_rows
+      if (!is.null(params$lab_source) && nzchar(params$lab_source)) {
+        rows <- rows[tolower(rows$lab_source) == tolower(params$lab_source), , drop = FALSE]
+      }
+      if (!is.null(params$study_id) && !is.na(params$study_id)) {
+        rows <- rows[rows$study_id == params$study_id, , drop = FALSE]
+      } else {
+        return(NULL)
+      }
+
+      if (nrow(rows) == 0) return(NULL)
+
+      rows <- rows[order(rows$lab_source, rows$study_id), , drop = FALSE]
+      rows$matched_genes <- if (length(params$genes) > 0) {
+        paste(params$genes, collapse = ", ")
+      } else {
+        ""
+      }
+      rows$matched_proteins <- if (length(params$proteins) > 0) {
+        paste(params$proteins, collapse = ", ")
+      } else {
+        ""
+      }
+
+      active_row <- rows[1, , drop = FALSE]
+      list(
+        genes = params$genes,
+        proteins = params$proteins,
+        lab_source = active_row$lab_source[1],
+        study_id = active_row$study_id[1],
+        dataset_name = active_row$dataset_name[1],
+        omic_type = active_row$omic_type[1],
+        selected_datasets = rows,
+        cell_types = load_active_cell_types(
+          active_row$lab_source[1],
+          active_row$study_id[1]
+        )
+      )
     }
 
     has_values <- function(df, col) {
@@ -910,6 +992,41 @@ explorer_server <- function(id) {
     gene_selector_server("gene_selector", selected_dataset)
     sidebar_vals <- sidebar_server("filters", selected_dataset)
 
+    observe({
+      ds <- selected_dataset()
+      req(!is.null(ds))
+
+      query_string <- build_share_query(ds)
+      current_search <- isolate(session$clientData$url_search %||% "")
+
+      if (!identical(current_search, query_string)) {
+        updateQueryString(query_string, mode = "replace", session = session)
+      }
+    })
+
+    observeEvent(initial_link(), {
+      link <- initial_link()
+      req(!is.null(link))
+      if (!is.null(selected_dataset())) return()
+
+      payload <- build_link_selected_payload(list(
+        lab_source = link$lab_source %||% NULL,
+        study_id = link$study_id %||% NULL,
+        genes = clean_terms(link$genes %||% character(0)),
+        proteins = clean_terms(link$proteins %||% character(0))
+      ))
+
+      if (!is.null(payload)) {
+        selected_dataset(payload)
+      } else {
+        showNotification(
+          "Could not preload the linked dataset. Check the shared lab/study or dataset name.",
+          type = "warning",
+          duration = 8
+        )
+      }
+    }, ignoreNULL = TRUE)
+
     # ── Plot area UI follows the sidebar plot selector while the active dataset
     # row in Dataset Listings controls which dataset is rendered. ────────────
     # This render block swaps the single-dataset plot module based on the
@@ -968,6 +1085,61 @@ explorer_server <- function(id) {
         paste(ds$dataset_name, "·", ds$omic_type)
       )
     })
+
+    # output$shareable_link_ui <- renderUI({
+    #   ds <- selected_dataset()
+    #   if (is.null(ds)) return(NULL)
+
+    #   gene_terms <- clean_terms(ds$genes %||% character(0))
+    #   protein_terms <- clean_terms(ds$proteins %||% character(0))
+
+    #   base_url <- paste0(
+    #     session$clientData$url_protocol,
+    #     "//",
+    #     session$clientData$url_hostname,
+    #     if (nzchar(session$clientData$url_port)) paste0(":", session$clientData$url_port) else "",
+    #     session$clientData$url_pathname
+    #   )
+
+    #   query_parts <- c(
+    #     "page=explore",
+    #     paste0("lab=", utils::URLencode(ds$lab_source, reserved = TRUE)),
+    #     paste0("study=", utils::URLencode(as.character(ds$study_id), reserved = TRUE)),
+    #     vapply(
+    #       gene_terms,
+    #       function(term) paste0("gene=", utils::URLencode(term, reserved = TRUE)),
+    #       character(1)
+    #     ),
+    #     vapply(
+    #       protein_terms,
+    #       function(term) paste0("protein=", utils::URLencode(term, reserved = TRUE)),
+    #       character(1)
+    #     )
+    #   )
+
+    #   share_url <- paste0(base_url, "?", paste(query_parts, collapse = "&"))
+
+    #   tags$div(
+    #     style = "margin-top: 12px;",
+    #     tags$label(
+    #       `for` = ns("shareable_link"),
+    #       style = "font-weight: 600; display: block; margin-bottom: 4px;",
+    #       "Shareable link for current dataset"
+    #     ),
+    #     tags$input(
+    #       id = ns("shareable_link"),
+    #       type = "text",
+    #       class = "form-control",
+    #       readonly = "readonly",
+    #       value = share_url,
+    #       onclick = "this.select();"
+    #     ),
+    #     tags$small(
+    #       class = "text-muted",
+    #       "This link includes the active dataset and any currently selected genes/proteins."
+    #     )
+    #   )
+    # })
 
     # This reactive fetches the combined DE / expression rows for every dataset
     # currently selected in Dataset Listings. It powers the Expression data tab.

@@ -23,9 +23,9 @@ umap_ui <- function(id) {
         4,
         selectInput(
           ns("assay"),
-          "Expression source",
-          choices = c("Logcounts" = "logcounts", "Counts" = "counts"),
-          selected = "logcounts"
+          "Expression assay",
+          choices = c("Counts" = "counts"), #"Logcounts" = "logcounts", 
+          selected = "counts"
         )
       ),
       column(

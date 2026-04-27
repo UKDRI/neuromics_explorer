@@ -73,21 +73,21 @@ ui <- page_navbar(
   nav_panel(
     title = "Homepage",
     icon = icon("home"),
-    # value = "home",
+    value = "home",
     homepage_ui("home")
   ),
   
   nav_panel(
     title = "Explore Data",
     icon = icon("chart-line"),
-    # value = "explore_data",
+    value = "explore_data",
     explorer_ui("explore")
   ),
   
   nav_panel(
     title = "Submit Data",
     icon = icon("upload"),
-    # value = "submit_data",
+    value = "submit_data",
     submit_ui("submit")
   ),
   
@@ -210,8 +210,21 @@ ui <- page_navbar(
 server <- function(input, output, session) {
   # Production mode: Shiny is the HTTP client, Python owns DuckDB and Arrow IPC.
   set_api_base_url(API_BASE_URL)
+  shared_link <- reactiveVal(NULL)
+  deep_link_applied <- reactiveVal(FALSE)
 
-  
+  # Store in a convenience variable
+  cdata <- session$clientData
+
+  # Values from cdata returned as text
+  output$clientdataText <- renderText({
+    cnames <- names(cdata)
+
+    allvalues <- lapply(cnames, function(name) {
+      paste(name, cdata[[name]], sep = " = ")
+    })
+    paste(allvalues, collapse = "\n")
+  })
   
   # Hide navbar items when on homepage
   observe({
@@ -223,11 +236,42 @@ server <- function(input, output, session) {
     #   runjs("$('nav.navbar').removeClass('hide-nav');")
     # }
   })
+
+  observe({
+    if (isTRUE(deep_link_applied())) return()
+
+    search <- cdata$url_search
+    if (is.null(search) || !nzchar(search)) return()
+
+    query <- shiny::parseQueryString(search)
+    genes <- unname(query[grepl("^gene($|\\.)", names(query))])
+    proteins <- unname(query[grepl("^protein($|\\.)", names(query))])
+    target <- query[["page"]] %||% query[["target"]] %||% ""
+
+    has_dataset_ref <- nzchar(query[["lab"]] %||% "") ||
+      nzchar(query[["lab_source"]] %||% "") ||
+      nzchar(query[["study"]] %||% "") ||
+      nzchar(query[["study_id"]] %||% "")
+
+    if (!(tolower(target) %in% c("explore", "explore_data")) && !has_dataset_ref) {
+      return()
+    }
+
+    shared_link(list(
+      lab_source = query[["lab_source"]] %||% query[["lab"]] %||% NULL,
+      study_id = suppressWarnings(as.integer(query[["study_id"]] %||% query[["study"]] %||% NA)),
+      genes = genes,
+      proteins = proteins
+    ))
+
+    deep_link_applied(TRUE)
+    shiny::updateNavbarPage(session, "main_nav", selected = "explore_data")
+  })
   
   # ── Page servers ────────────────────────────────────────────────
   homepage_server("home")
   # sidebar_server("filters")
-  explorer_server("explore")
+  explorer_server("explore", initial_link = reactive(shared_link()))
   submit_server("submit")
   
   # ── About page — rendered from Rmd ───────────────────────────────
@@ -250,6 +294,11 @@ server <- function(input, output, session) {
       # )
     })
   })
+}
+
+`%||%` <- function(a, b) {
+  if (is.null(a) || length(a) == 0) return(b)
+  a
 }
 
 shinyApp(ui, server)
