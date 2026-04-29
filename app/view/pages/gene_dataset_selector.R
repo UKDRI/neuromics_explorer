@@ -441,6 +441,7 @@ coalesce_na <- function(...) {
   NA
 }
 
+#' @export
 parse_json_text <- function(value) {
   if (is.null(value) || length(value) == 0 || is.na(value) || identical(value, "")) {
     return(character(0))
