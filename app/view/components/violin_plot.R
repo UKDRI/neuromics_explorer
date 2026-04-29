@@ -5,7 +5,7 @@ box::use(
         fluidRow, column, checkboxInput, validate, need, observe, observeEvent, uiOutput, renderUI],
   plotly[plotlyOutput, renderPlotly, plot_ly, layout, add_trace],
   dplyr[mutate, case_when],
-  app/logic/api/api_client[fetch_expression_feature_values],
+  app/logic/api/api_client[fetch_expression_feature_values, fetch_expression_goi],
 )
 
 #' @export
@@ -115,21 +115,24 @@ violin_server <- function(id, de_data, selected_dataset, padj_thresh, lfc_thresh
       )
     }
 
-    searched_genes <- reactive({
+    searched_terms <- reactive({
       ds <- selected_dataset()
-      if (is.null(ds) || !isTRUE(ds$omic_type %in% c("scrna", "snrna"))) return(character(0))
-      genes <- unique(trimws(as.character(ds$genes %||% character(0))))
-      genes[nzchar(genes)]
+      if (is.null(ds)) return(character(0))
+      terms <- unique(trimws(c(
+        as.character(ds$genes %||% character(0)),
+        as.character(ds$proteins %||% character(0))
+      )))
+      terms[nzchar(terms)]
     })
 
     view_choices <- reactive({
-      genes <- searched_genes()
-      c("Dataset-wide" = "__dataset__", stats::setNames(genes, genes))
+      terms <- searched_terms()
+      c("Dataset-wide" = "dataset", stats::setNames(terms, terms))
     })
 
     is_gene_mode <- reactive({
-      selected <- input$feature_term %||% "__dataset__"
-      nzchar(selected) && !identical(selected, "__dataset__")
+      selected <- input$feature_term %||% "dataset"
+      nzchar(selected) && !identical(selected, "dataset")
     })
 
     dataset_metric_choices <- reactive({
@@ -139,10 +142,12 @@ violin_server <- function(id, de_data, selected_dataset, padj_thresh, lfc_thresh
       available <- character(0)
       labels <- c(
         log2fc = "log2fc",
+        pvalue = "pvalue",
+        padj = "padj",
         abundance_a = "abundance_a",
         abundance_b = "abundance_b",
-        pct_expressed_a = "pct_expressed_a",
-        pct_expressed_b = "pct_expressed_b"
+        pct_expressed_a = "% expressed A",
+        pct_expressed_b = "% expressed B"
       )
 
       for (candidate in names(labels)) {
@@ -159,17 +164,36 @@ violin_server <- function(id, de_data, selected_dataset, padj_thresh, lfc_thresh
       ds <- selected_dataset()
       req(ds, input$feature_term)
 
-      fetch_expression_feature_values(
-        lab_source = ds$lab_source,
-        study_id = ds$study_id,
-        genes = input$feature_term,
-        assay = "counts", #"logcounts",
-        limit = 100000L
-      )
+      # scrna/snrna datasets have per observation (cell) expression, therefore multiple rows to be fetched for single goi
+      # TODO: not always the case as with webber's bulk data has 10000+ drugs therfore multiple data points per drug-gene
+      if (isTRUE(ds$omic_type %in% c("scrna", "snrna"))) {
+        fetch_expression_feature_values(
+          lab_source = ds$lab_source,
+          study_id = ds$study_id,
+          genes = if (input$feature_term %in% (ds$genes %||% character(0))) input$feature_term else character(0),
+          proteins = if (input$feature_term %in% (ds$proteins %||% character(0))) input$feature_term else character(0),
+          assay = "counts",
+          limit = 100000L
+        )
+      } else {
+        fetch_expression_goi(
+          lab_source = ds$lab_source,
+          study_id = ds$study_id,
+          genes = if (input$feature_term %in% (ds$genes %||% character(0))) input$feature_term else character(0),
+          proteins = if (input$feature_term %in% (ds$proteins %||% character(0))) input$feature_term else character(0),
+          limit = 5000L
+        )
+      }
+    })
+
+    # Helpers for datasets that don't have exact same metadata columns (e.g. mixed modality scrna vs bulk) for the x-axis grouping
+    is_single_cell_gene_mode <- reactive({
+      ds <- selected_dataset()
+      is_gene_mode() && !is.null(ds) && isTRUE(ds$omic_type %in% c("scrna", "snrna"))
     })
 
     x_axis_choices <- reactive({
-      if (is_gene_mode()) {
+      if (is_single_cell_gene_mode()) {
         df <- feature_expression_data()
         if (is.null(df) || nrow(df) == 0) return(c("All cells" = "none"))
         metadata_choices(df, include_none = TRUE)
@@ -204,14 +228,14 @@ violin_server <- function(id, de_data, selected_dataset, padj_thresh, lfc_thresh
     })
 
     group_by_choices <- reactive({
-      if (!is_gene_mode()) return(character(0))
+      if (!is_single_cell_gene_mode()) return(character(0))
       df <- feature_expression_data()
       if (is.null(df) || nrow(df) == 0) return(c("None" = "none"))
       metadata_choices(df, include_none = TRUE)
     })
 
     output$group_by_ui <- renderUI({
-      if (!is_gene_mode()) return(NULL)
+      if (!is_single_cell_gene_mode()) return(NULL)
       fluidRow(
         column(4, selectInput(session$ns("group_by"), "Group by", choices = character(0)))
       )
@@ -219,15 +243,15 @@ violin_server <- function(id, de_data, selected_dataset, padj_thresh, lfc_thresh
 
     observe({
       choices <- view_choices()
-      selected <- input$feature_term %||% "__dataset__"
+      selected <- input$feature_term %||% "dataset"
       if (!selected %in% unname(choices)) {
-        selected <- "__dataset__"
+        selected <- "dataset"
       }
       updateSelectInput(session, "feature_term", choices = choices, selected = selected)
     })
 
     observe({
-      choices <- if (is_gene_mode()) c("Expression level" = "expression_value") else dataset_metric_choices()
+      choices <- if (is_single_cell_gene_mode()) c("Expression level" = "expression_value") else dataset_metric_choices()
       if (length(choices) == 0) return()
       selected <- input$y_var %||% ""
       if (!selected %in% unname(choices)) {
@@ -253,7 +277,7 @@ violin_server <- function(id, de_data, selected_dataset, padj_thresh, lfc_thresh
     })
 
     observeEvent(list(feature_expression_data(), is_gene_mode()), {   # blocks update until data is available to stop flickering between None and Tissue
-      if (!is_gene_mode()) return(invisible(NULL))
+      if (!is_single_cell_gene_mode()) return(invisible(NULL))
       df <- feature_expression_data()
       if (is.null(df) || nrow(df) == 0) return(invisible(NULL))
       choices <- group_by_choices()
@@ -352,7 +376,87 @@ violin_server <- function(id, de_data, selected_dataset, padj_thresh, lfc_thresh
       }
 
       df <- feature_expression_data()
-      validate(need(nrow(df) > 0, "No feature-level expression values are available for the selected gene."))
+      validate(need(nrow(df) > 0, "No feature-level rows are available for the selected feature."))
+
+      if (!is_single_cell_gene_mode()) {
+        y_col <- input$y_var
+        x_axis <- input$x_axis
+        req(y_col %in% names(df))
+
+        x_value <- if (identical(x_axis, "de_category")) {
+          build_de_category(df)
+        } else if (x_axis %in% names(df)) {
+          as.character(df[[x_axis]])
+        } else {
+          rep(input$feature_term, nrow(df))
+        }
+        x_value[is.na(x_value) | !nzchar(x_value)] <- "unlabelled"
+
+        plot_df <- df |>
+          dplyr::mutate(
+            x_value = x_value,
+            feature_label = feature_labels(df),
+            sig = dplyr::case_when(
+              !is.na(padj) & padj < padj_thresh() & log2fc > lfc_thresh() ~ "Up",
+              !is.na(padj) & padj < padj_thresh() & log2fc < -lfc_thresh() ~ "Down",
+              TRUE ~ "NS"
+            )
+          )
+        plot_df <- plot_df[!is.na(plot_df[[y_col]]), , drop = FALSE]
+        validate(need(nrow(plot_df) > 0, paste("No", y_col, "values are available for this feature.")))
+
+        x_title <- names(x_axis_choices())[match(x_axis, unname(x_axis_choices()))]
+        x_title <- if (length(x_title) == 0 || is.na(x_title) || !nzchar(x_title)) "X-axis" else x_title
+
+        p <- plotly::plot_ly()
+        for (x_name in unique(plot_df$x_value)) {
+          group_df <- plot_df[plot_df$x_value == x_name, , drop = FALSE]
+          p <- p |>
+            plotly::add_trace(
+              x = rep(x_name, nrow(group_df)),
+              y = group_df[[y_col]],
+              type = "violin",
+              name = x_name,
+              box = list(visible = isTRUE(input$show_box)),
+              meanline = list(visible = TRUE),
+              points = FALSE,
+              line = list(color = "#D7DEE5"),
+              fillcolor = "rgba(215, 222, 229, 0.45)",
+              hovertemplate = paste0("<b>", x_name, "</b><br>", y_col, ": %{y:.3f}<extra></extra>"),
+              showlegend = FALSE
+            )
+        }
+
+        point_text <- paste0(
+          "<b>", plot_df$feature_label, "</b><br>",
+          y_col, ": ", signif(plot_df[[y_col]], 3), "<br>",
+          "feature: ", plot_df$feature_label, "<br>",
+          "padj: ", signif(plot_df$padj, 3), "<br>",
+          "class: ", plot_df$sig
+        )
+
+        return(
+          p |>
+            plotly::add_trace(
+              x = plot_df$x_value,
+              y = plot_df[[y_col]],
+              type = "scatter",
+              mode = "markers",
+              color = plot_df$sig,
+              colors = c(Up = "#C0392B", Down = "#2980B9", NS = "#BDC3C7"),
+              marker = list(size = 6, opacity = 0.65),
+              text = point_text,
+              hoverinfo = "text",
+              showlegend = TRUE
+            ) |>
+            plotly::layout(
+              legend = list(title = list(text = "Significance"), orientation = "h", y = -0.15),
+              xaxis = list(title = x_title, tickangle = -30),
+              yaxis = list(title = y_col),
+              showlegend = TRUE
+            )
+        )
+      }
 
       x_axis <- input$x_axis %||% "none"
       group_by <- input$group_by %||% "none"
