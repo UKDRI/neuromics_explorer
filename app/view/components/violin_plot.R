@@ -89,6 +89,82 @@ violin_server <- function(id, de_data, selected_dataset, padj_thresh, lfc_thresh
       values[[1]]
     }
 
+    build_distribution_plot <- function(df, y_col, x_axis, empty_message, all_label = "all") {
+      req(y_col %in% names(df))
+
+      x_value <- if (identical(x_axis, "de_category")) {
+        build_de_category(df)
+      } else if (x_axis %in% names(df)) {
+        as.character(df[[x_axis]])
+      } else {
+        rep(all_label, nrow(df))
+      }
+      x_value[is.na(x_value) | !nzchar(x_value)] <- "unlabelled"
+
+      plot_df <- df |>
+        dplyr::mutate(
+          x_value = x_value,
+          feature_label = feature_labels(df),
+          sig = dplyr::case_when(
+            !is.na(padj) & padj < padj_thresh() & log2fc > lfc_thresh() ~ "Up",
+            !is.na(padj) & padj < padj_thresh() & log2fc < -lfc_thresh() ~ "Down",
+            TRUE ~ "NS"
+          )
+        )
+      plot_df <- plot_df[!is.na(plot_df[[y_col]]), , drop = FALSE]
+      validate(need(nrow(plot_df) > 0, paste("No", y_col, "values are available for", empty_message, ".")))
+
+      x_title <- names(x_axis_choices())[match(x_axis, unname(x_axis_choices()))]
+      x_title <- if (length(x_title) == 0 || is.na(x_title) || !nzchar(x_title)) "X-axis" else x_title
+
+      p <- plotly::plot_ly()
+      for (x_name in unique(plot_df$x_value)) {
+        group_df <- plot_df[plot_df$x_value == x_name, , drop = FALSE]
+        p <- p |>
+          plotly::add_trace(
+            x = rep(x_name, nrow(group_df)),
+            y = group_df[[y_col]],
+            type = "violin",
+            name = x_name,
+            box = list(visible = isTRUE(input$show_box)),
+            meanline = list(visible = TRUE),
+            points = FALSE,
+            line = list(color = "#D7DEE5"),
+            fillcolor = "rgba(215, 222, 229, 0.45)",
+            hovertemplate = paste0("<b>", x_name, "</b><br>", y_col, ": %{y:.3f}<extra></extra>"),
+            showlegend = FALSE
+          )
+      }
+
+      point_text <- paste0(
+        "<b>", plot_df$feature_label, "</b><br>",
+        y_col, ": ", signif(plot_df[[y_col]], 3), "<br>",
+        "feature: ", plot_df$feature_label, "<br>",
+        "padj: ", signif(plot_df$padj, 3), "<br>",
+        "significance class: ", plot_df$sig
+      )
+
+      p |>
+        plotly::add_trace(
+          x = plot_df$x_value,
+          y = plot_df[[y_col]],
+          type = "scatter",
+          mode = "markers",
+          color = plot_df$sig,
+          colors = c(Up = "#C0392B", Down = "#2980B9", NS = "#BDC3C7"),
+          marker = list(size = 6, opacity = 0.65),
+          text = point_text,
+          hoverinfo = "text",
+          showlegend = TRUE
+        ) |>
+        plotly::layout(
+          legend = list(title = list(text = "Significance"), orientation = "h", y = -0.15),
+          xaxis = list(title = x_title, tickangle = -30),
+          yaxis = list(title = y_col),
+          showlegend = TRUE
+        )
+    }
+
     build_de_category <- function(df) {
       if (has_values(df, "de_category")) {
         values <- as.character(df$de_category)
@@ -293,169 +369,14 @@ violin_server <- function(id, de_data, selected_dataset, padj_thresh, lfc_thresh
       if (!is_gene_mode()) {
         df <- de_data()
         validate(need(nrow(df) > 0, "No expression rows are available for the active dataset."))
-
-        y_col <- input$y_var
-        x_axis <- input$x_axis
-        req(y_col %in% names(df))
-
-        x_value <- if (identical(x_axis, "de_category")) {
-          build_de_category(df)
-        } else if (x_axis %in% names(df)) {
-          as.character(df[[x_axis]])
-        } else {
-          rep("all", nrow(df))
-        }
-        x_value[is.na(x_value) | !nzchar(x_value)] <- "unlabelled"
-
-        plot_df <- df |>
-          dplyr::mutate(
-            x_value = x_value,
-            feature_label = feature_labels(df),
-            sig = dplyr::case_when(
-              !is.na(padj) & padj < padj_thresh() & log2fc > lfc_thresh() ~ "Up",
-              !is.na(padj) & padj < padj_thresh() & log2fc < -lfc_thresh() ~ "Down",
-              TRUE ~ "NS"
-            )
-          )
-        plot_df <- plot_df[!is.na(plot_df[[y_col]]), , drop = FALSE]
-        validate(need(nrow(plot_df) > 0, paste("No", y_col, "values are available for this dataset.")))
-
-        x_levels <- unique(plot_df$x_value)
-        x_title <- names(x_axis_choices())[match(x_axis, unname(x_axis_choices()))]
-        # if (is.na(x_title) || !nzchar(x_title)) x_title <- "X-axis"
-        x_title <- if (length(x_title) == 0 || is.na(x_title) || !nzchar(x_title)) "X-axis" else x_title
-
-        p <- plotly::plot_ly()
-        for (x_name in x_levels) {
-          group_df <- plot_df[plot_df$x_value == x_name, , drop = FALSE]
-          p <- p |>
-            plotly::add_trace(
-              x = rep(x_name, nrow(group_df)),
-              y = group_df[[y_col]],
-              type = "violin",
-              name = x_name,
-              box = list(visible = isTRUE(input$show_box)),
-              meanline = list(visible = TRUE),
-              points = FALSE, #"outliers"
-              line = list(color = "#D7DEE5"),
-              fillcolor = "rgba(215, 222, 229, 0.45)",
-              hovertemplate = paste0("<b>", x_name, "</b><br>", y_col, ": %{y:.3f}<extra></extra>"),
-              showlegend = FALSE
-            )
-        }
-
-        point_text <- paste0(
-          "<b>", plot_df$x_value, "</b><br>",
-          y_col, ": ", signif(plot_df[[y_col]], 3), "<br>",
-          "feature: ", plot_df$feature_label, "<br>",
-          "padj: ", signif(plot_df$padj, 3), "<br>",
-          "class: ", plot_df$sig
-        )
-
-        return(
-          p |>
-            plotly::add_trace(
-              x = plot_df$x_value,
-              y = plot_df[[y_col]],
-              type = "scatter",
-              mode = "markers",   #mode = "markers+text"
-              color = plot_df$sig,
-              colors = c(Up = "#C0392B", Down = "#2980B9", NS = "#BDC3C7"),
-              marker = list(size = 6, opacity = 0.65),
-              text = point_text,
-              hoverinfo = "text",
-              showlegend = TRUE
-            ) |>
-            plotly::layout(
-              legend = list(title = list(text = "Significance"), orientation = "h", y = -0.15),
-              xaxis = list(title = x_title, tickangle = -30),
-              yaxis = list(title = y_col),
-              showlegend = TRUE
-            )
-        )
+        return(build_distribution_plot(df, input$y_var, input$x_axis, "this dataset", "all"))
       }
 
       df <- feature_expression_data()
       validate(need(nrow(df) > 0, "No feature-level rows are available for the selected feature."))
 
       if (!is_single_cell_gene_mode()) {
-        y_col <- input$y_var
-        x_axis <- input$x_axis
-        req(y_col %in% names(df))
-
-        x_value <- if (identical(x_axis, "de_category")) {
-          build_de_category(df)
-        } else if (x_axis %in% names(df)) {
-          as.character(df[[x_axis]])
-        } else {
-          rep(input$feature_term, nrow(df))
-        }
-        x_value[is.na(x_value) | !nzchar(x_value)] <- "unlabelled"
-
-        plot_df <- df |>
-          dplyr::mutate(
-            x_value = x_value,
-            feature_label = feature_labels(df),
-            sig = dplyr::case_when(
-              !is.na(padj) & padj < padj_thresh() & log2fc > lfc_thresh() ~ "Up",
-              !is.na(padj) & padj < padj_thresh() & log2fc < -lfc_thresh() ~ "Down",
-              TRUE ~ "NS"
-            )
-          )
-        plot_df <- plot_df[!is.na(plot_df[[y_col]]), , drop = FALSE]
-        validate(need(nrow(plot_df) > 0, paste("No", y_col, "values are available for this feature.")))
-
-        x_title <- names(x_axis_choices())[match(x_axis, unname(x_axis_choices()))]
-        x_title <- if (length(x_title) == 0 || is.na(x_title) || !nzchar(x_title)) "X-axis" else x_title
-
-        p <- plotly::plot_ly()
-        for (x_name in unique(plot_df$x_value)) {
-          group_df <- plot_df[plot_df$x_value == x_name, , drop = FALSE]
-          p <- p |>
-            plotly::add_trace(
-              x = rep(x_name, nrow(group_df)),
-              y = group_df[[y_col]],
-              type = "violin",
-              name = x_name,
-              box = list(visible = isTRUE(input$show_box)),
-              meanline = list(visible = TRUE),
-              points = FALSE,
-              line = list(color = "#D7DEE5"),
-              fillcolor = "rgba(215, 222, 229, 0.45)",
-              hovertemplate = paste0("<b>", x_name, "</b><br>", y_col, ": %{y:.3f}<extra></extra>"),
-              showlegend = FALSE
-            )
-        }
-
-        point_text <- paste0(
-          "<b>", plot_df$feature_label, "</b><br>",
-          y_col, ": ", signif(plot_df[[y_col]], 3), "<br>",
-          "feature: ", plot_df$feature_label, "<br>",
-          "padj: ", signif(plot_df$padj, 3), "<br>",
-          "class: ", plot_df$sig
-        )
-
-        return(
-          p |>
-            plotly::add_trace(
-              x = plot_df$x_value,
-              y = plot_df[[y_col]],
-              type = "scatter",
-              mode = "markers",
-              color = plot_df$sig,
-              colors = c(Up = "#C0392B", Down = "#2980B9", NS = "#BDC3C7"),
-              marker = list(size = 6, opacity = 0.65),
-              text = point_text,
-              hoverinfo = "text",
-              showlegend = TRUE
-            ) |>
-            plotly::layout(
-              legend = list(title = list(text = "Significance"), orientation = "h", y = -0.15),
-              xaxis = list(title = x_title, tickangle = -30),
-              yaxis = list(title = y_col),
-              showlegend = TRUE
-            )
-        )
+        return(build_distribution_plot(df, input$y_var, input$x_axis, "this feature", input$feature_term))
       }
 
       x_axis <- input$x_axis %||% "none"
@@ -499,6 +420,7 @@ violin_server <- function(id, de_data, selected_dataset, padj_thresh, lfc_thresh
       colour_levels <- unique(plot_df$colour_value)
       colour_map <- stats::setNames(rep_len(palette, length(colour_levels)), colour_levels)
 
+      # TODO: logic is somewhat convoluted to determine groupings for x-axis and colouring, could be simplified by standardising on internal column names for the plot data and only mapping to user-friendly labels for the UI display
       p <- plotly::plot_ly()
       for (colour_name in colour_levels) {
         group_df <- plot_df[plot_df$colour_value == colour_name, , drop = FALSE]
