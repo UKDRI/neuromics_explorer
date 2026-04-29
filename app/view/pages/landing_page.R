@@ -124,8 +124,7 @@ homepage_ui <- function(id) {
                   p("Browse and analyse multi-omic datasets submitted by UK DRI researchers"),
                   actionButton(
                     ns("go_explore"),
-                    "Get Started",
-                    onclick = "document.getElementById('nav-Explore Data').click();"
+                    "Get Started"
                   )
               )
           )
@@ -142,8 +141,7 @@ homepage_ui <- function(id) {
                   p("Learn about our mission, team, and the technology behind the platform"),
                   actionButton(
                     ns("go_about"),
-                    "Learn More",
-                    onclick = "document.getElementById('nav-About Us').click();"
+                    "Learn More"
                   )
               )
           )
@@ -160,8 +158,7 @@ homepage_ui <- function(id) {
                   p("Comprehensive guides and tutorials to help you get the most out of NeurOmics Explorer (NEx)"),
                   actionButton(
                     ns("go_guide"),
-                    "View Guides",
-                    onclick = "document.getElementById('nav-Getting Started').click();"
+                    "View Guides"
                   )
               )
           )
@@ -178,8 +175,7 @@ homepage_ui <- function(id) {
                   p("Share your research with the community and contribute to the platform"),
                   actionButton(
                     ns("go_submit"),
-                    "Submit Now",
-                    onclick = "document.getElementById('nav-Submit Data').click();"
+                    "Submit Now"
                   )
               )
           )
@@ -196,8 +192,7 @@ homepage_ui <- function(id) {
                   p("Help us improve the platform by sharing your thoughts and suggestions"),
                   actionButton(
                     ns("go_feedback"),
-                    "Send Feedback",
-                    onclick = "document.getElementById('nav-Feedback').click();"
+                    "Send Feedback"
                   )
               )
           )
@@ -206,31 +201,29 @@ homepage_ui <- function(id) {
   )
 }
 
+#' @param on_navigate function(page_value) called when a homepage card is activated
 #' @export
-homepage_server <- function(id) {
+homepage_server <- function(id, on_navigate = NULL) {
   moduleServer(id, function(input, output, session) {
     
     observeEvent(input$go_explore, {
-      # Navigate to explore tab
-      # runjs('document.querySelector(\'a[data-value="Explore Data"]\').click();')
-      # runjs('$("#main_tabs a[data-value=\'explore_data\']").tab("show")')
-      runjs('$("a[data-value=\'Explore Data\']").tab("show");')
+      if (is.function(on_navigate)) on_navigate("explore_data")
     })
     
     observeEvent(input$go_submit, {
-      runjs('$("a[data-value=\'Submit Data\']").tab("show");')
+      if (is.function(on_navigate)) on_navigate("submit_data")
     })
     
     observeEvent(input$go_about, {
-      runjs('$("a[data-value=\'About Us\']").tab("show");')
+      if (is.function(on_navigate)) on_navigate("about_us")
     })
     
     observeEvent(input$go_guide, {
-      runjs('$("a[data-value=\'Getting Started\']").tab("show");')
+      if (is.function(on_navigate)) on_navigate("getting_started")
     })
     
     observeEvent(input$go_feedback, {
-      runjs('$("a[data-value=\'Feedback\']").tab("show");')
+      if (is.function(on_navigate)) on_navigate("feedback")
     })
     
   })
