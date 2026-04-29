@@ -252,6 +252,7 @@ umap_server <- function(id, selected_dataset) {
             validate(
               need(nrow(term_df) > 0, paste("No embedding overlay rows are available for", term))
             )
+            term_df$expression_scaled <- log10(pmax(term_df$expression_value, 0) + 1)
 
             hover_text <- paste0(
               "<b>", term_df$obs, "</b><br>",
@@ -271,10 +272,10 @@ umap_server <- function(id, selected_dataset) {
               marker = list(
                 size = 4,
                 opacity = 0.85,
-                color = term_df$expression_value,
+                color = term_df$expression_scaled,
                 colorscale = "Viridis",
                 showscale = TRUE,
-                colorbar = list(title = term)
+                colorbar = list(title = paste0("log10(", term, " + 1)"))
               )
             ) |>
               plotly::layout(
@@ -316,7 +317,7 @@ umap_server <- function(id, selected_dataset) {
           term_df <- df[df$term == term, , drop = FALSE]
           if (nrow(term_df) == 0) next
 
-          scaled_alpha <- scale_to_alpha(term_df$expression_value)
+          scaled_alpha <- scale_to_alpha(log10(pmax(term_df$expression_value, 0) + 1))
           term_colours <- rgba_values(palette[[i]], scaled_alpha)
 
           p <- plotly::add_trace(
