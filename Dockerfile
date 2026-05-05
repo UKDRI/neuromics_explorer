@@ -39,7 +39,7 @@ FROM rocker/r-ver:4.5.3 AS shiny-frontend
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl ca-certificates \
     libcurl4 libssl3 libxml2 \
-    libfontconfig1 libfreetype6 libpng16-16 libjpeg62-turbo libtiff6 \
+    libfontconfig1 libfreetype6 libpng16-16 libjpeg-dev libtiff6 \
     libharfbuzz0b libfribidi0 \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
@@ -98,4 +98,4 @@ EXPOSE 7000
 #   CMD curl -f http://localhost:7000/health || exit 1
 
 CMD ["uvicorn", "app.logic.startup.main_setup:app", \
-    "--host", "0.0.0.0", "--port", "7000", "--workers", "2"]
+    "--host", "0.0.0.0", "--port", "7000", "--workers", "1"]
