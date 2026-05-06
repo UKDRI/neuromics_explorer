@@ -52,21 +52,25 @@ Deployment is currently done using Docker.
 - `NEX_API_BASE_URL`
   Defaults to `http://127.0.0.1:7000/api`
 - `NEX_DUCKDB_POOL_SIZE`
-  Controls the size of the read-only DuckDB connection pool
+  Controls the size of the read-only DuckDB connection pool used by FastAPI
 - `NEX_DUCKDB_THREADS`
   Controls DuckDB thread usage per pooled connection
+
+Notes:
+The FastAPI app itself defaults to port `7000` in `app/logic/startup/main_setup.py`.
+Production can still use `8000` by setting `NEX_API_BASE_URL`, which points at the mounted `/api` router.
 
 #### API Endpoints & Client
 
 - `app/logic/startup/main_setup.py`
-  Starts FastAPI, runs registry/setup tasks, configures pooled DuckDB connections, and mounts the API router.
+  Starts FastAPI, runs registry/setup tasks, configures pooled DuckDB connections, and mounts the router at `/api`.
 - `app/logic/startup/db_pool.py`
   Provides a pool of reusable read-only DuckDB connections for concurrent requests.
 - `app/logic/api/endpoints.py`
-  Owns SQL for dataset search, dataset stats, metadata, expression, and comparison queries.
+  Handles SQL and Arrow/JSON responses for dataset search, dataset stats, metadata, expression, embeddings, and comparison queries.
 - `app/main.R`
   Sets the API base URL and launches the UI.
-- `app/logic/api_client.R`
+- `app/logic/api/api_client.R`
   Calls the FastAPI endpoints and reads Arrow IPC responses into R.
 
 #### Query Contract
@@ -100,24 +104,34 @@ registry_load_issues / index_build_issues	logged_at, study_id, lab_source, issue
 #### Parquet storage
 
 File	Canonical-columns	Description
-expression.parquet gene_symbol, protein_id, log2fc, …padj
-counts.parquet	study_id, gene_symbol, cell_id, value	#Long-format raw counts sparse
-logcounts.parquet	study_id, gene_symbol, cell_id, value	#Long-format logcounts sparse
-metadata.parquet	study_id, cell_id, cell_type, cluster_id, tissue, age, sex, …colData cols	#Per-cell/sample metadata (colData)
-feature_info.parquet	study_id, gene_symbol, biotype, chromosome, …rowData cols	#Per-gene/cell annotations (rowData)
-UMAP.parquet	study_id, cell_id, Dim1, Dim2
-PCA.parquet	study_id, cell_id, Dim1…DimN
-tSNE.parquet	study_id, cell_id, Dim1, Dim2
+expression.parquet	gene_symbol, protein_id, log2fc, …padj  	    Canonical DE / expression data
+counts.parquet	feature_id, counts/values                         Raw counts (sparse long format); shape depends on source and converter script
+logcounts.parquet	feature_id, logcounts                          	Normalised counts (sparse long format)
+obs_metadata.parquet	obs, cell_type, cluster_id, tissue, …sex	  Per-cell / per-sample metadata often derived from `colData`
+feature_annotations.parquet	feature_id, biotype, …chromosome	    Per-feature annotations often derived from `rowData`
+PCA.parquet	obs, Dim1, …DimN                                    	PCA coordinates
+TSNE.parquet	obs, Dim1, Dim2	                                    t-SNE coordinates
+UMAP.parquet	obs, Dim1, Dim2	                                    UMAP coordinates
 
 #### Endpoints
 
-M	Endpoint	                            Description	                Response
-GET	/health	                                Liveness check	            JSON
-; GET	/api/registry/datasets	                List all datasets	        JSON
-; GET	/api/registry/datasets/{key}/summary	Stats from dataset_stats	JSON
-; GET	/api/genes/search	                    Gene lookup	                JSON
-; GET	/api/genes/autocomplete	                For selectize typeahead	    JSON
-; GET	/api/expression/{src}/{key}	            DE results	                Arrow IPC
-; GET	/api/metadata/{src}/{key}	            Cell/sample meta	        Arrow IPC
-; GET	/api/reductions/{src}/{key}	            Dim-reduction coords	    Arrow IPC
-; GET	/api/filters/{src}/{key}	            Cell types, conditions (cached)	JSON
+Method | Endpoint | Description | Response
+GET | `/health` | Liveness check | JSON
+GET | `/api/genes/index` | Gene autocomplete index | Arrow IPC
+GET | `/api/proteins/index` | Protein autocomplete index | Arrow IPC
+GET | `/api/datasets/all` | List all registered datasets | Arrow IPC
+GET | `/api/datasets/search` | Search datasets by gene and/or protein terms | Arrow IPC
+GET | `/api/datasets/stats` | Dataset summary stats | Arrow IPC
+GET | `/api/datasets/{lab}/{study_id}/expression` | Threshold-filtered semantic expression / DE rows | Arrow IPC
+GET | `/api/datasets/{lab}/{study_id}/expression/table` | Paginated expression table | Arrow IPC
+GET | `/api/datasets/{lab}/{study_id}/expression/volcano` | Lightweight volcano payload | Arrow IPC
+GET | `/api/datasets/{lab}/{study_id}/expression/summary` | One-row expression summary | Arrow IPC
+GET | `/api/datasets/{lab}/{study_id}/expression/histogram` | Histogram bins | Arrow IPC
+GET | `/api/datasets/{lab}/{study_id}/expression/groups` | Grouped expression for plots such as violin, bar etc. | Arrow IPC
+GET | `/api/datasets/{lab}/{study_id}/expression/goi` | Full rows for genes/proteins of interest | Arrow IPC
+GET | `/api/datasets/{lab}/{study_id}/expression/feature-values` | Feature values joined to metadata | Arrow IPC
+GET | `/api/datasets/{lab}/{study_id}/embeddings` | UMAP / PCA / tSNE coordinates with optional overlays | Arrow IPC
+GET | `/api/datasets/{lab}/{study_id}/top-de` | Top-N DE rows used by heatmaps and similarly ranked plots | Arrow IPC
+GET | `/api/datasets/{lab}/{study_id}/metadata/options` | Distinct metadata values for filters | Arrow IPC
+GET | `/api/datasets/{lab}/{study_id}/metadata` | Full metadata table | Arrow IPC
+GET | `/api/compare/expression` | Cross-dataset (expression) comparison | Arrow IPC
