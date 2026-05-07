@@ -84,12 +84,12 @@ HEURISTIC_MAPPINGS = {
                                 "Sample_or_condition_B", "condition"],
     "de_category":          ["DE", "DE_category", "de_category", "DE_Category", "de_group", "DE_group", "Comparison",
                                 "comparison", "Group", "group"],
-    "cell_type":            ["cell_type", "Cell_Type", "celltype", "cell_label", "cluster_label", 
+    "cell_type":            ["cell_type", "Cell_Type", "celltype", "CellType", "cell_label", "cluster_label", 
                                 "annotation"],
     "age":                  ["age", "Age", "age_years", "age_group", "Age_group", "Age_Group"],
     "sex":                  ["gender", "sex", "Sex", "Gender"],
     "tissue":               ["Tissue", "tissue", "brain_region", "region"],
-    "cell_line":            ["cell_line", "Cell_Line", "Cell_line", "cellLine"],
+    "cell_line":            ["cell_line", "Cell_Line", "Cell_line", "cellLine", "cell_lineage", "Cell_Lineage", "cellLineage"],
     "cluster_id":           ["cluster_id", "seurat_clusters", "seurat_cluster", "seurat_clust", "cluster", "clusters", 
                                 "leiden", "louvain"],
     "cell_id":              ["Cell_ID", "cell_id", "cellID", "CellID", "barcode", "cell_barcode"],
@@ -99,7 +99,7 @@ HEURISTIC_MAPPINGS = {
 # Map table name → logical role mapping i.e.:
 # sqlite/duckdb sources: *_exp / _results → expression, 
 #                        study_info / *_metadata → obs_metadata (sample/cell info), extra_metadata
-# rds (SCE obj) sources: assay logcounts → (log)counts, assay counts → counts,
+# rds (SCE obj) sources: assay logcounts → logcounts, assay counts → counts,
 #                    colData → obs_metadata, metadata(),
 #                    rowData → feature_annotations
 SQLITE_TABLE_MAPPINGS = {
@@ -118,7 +118,7 @@ SQLITE_TABLE_MAPPINGS = {
     "study_info":           "extra_metadata",   #organism, modality, 
 }
 RDS_OBJ_MAPPINGS = {
-    "assay(obj, 'logcounts')": "counts",
+    "assay(obj, 'logcounts')": "logcounts",
     "assay(obj, 'counts')":    "counts",
     "colData(obj)":            "obs_metadata",     #contains sample/cell info, sex, age, doublet_scores, project name for eac cell_id
     "metadata(obj)":           "obs_metadata",     #or 'extra_metadata' or 'expression' results
