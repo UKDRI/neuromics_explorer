@@ -523,7 +523,8 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
       validate(need(nrow(df) > 0, "No volcano rows are available for this dataset."))
       plot_df <- df |>
         dplyr::mutate(
-          neg_log10p = -log10(pmax(pvalue, 1e-300)),
+          significance_value = ifelse(!is.na(padj), padj, pvalue),
+          neg_log10p = -log10(pmax(significance_value, 1e-300)),
           feature_label = feature_labels(df),
           sig = dplyr::case_when(
             !is.na(padj) & padj < padj_thresh & log2fc >  lfc_thresh ~ "Up",
@@ -540,7 +541,8 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
       hover_text <- paste0(
         "<b>", plot_df$feature_label, "</b><br>",
         "log2FC: ", round(x_values, 3), "<br>",
-        "padj: ", signif(plot_df$padj, 3)
+        "padj: ", signif(plot_df$padj, 3), "<br>",
+        "pvalue: ", signif(plot_df$pvalue, 3)
       )
 
       p <- plotly::plot_ly(
@@ -580,7 +582,7 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
         plotly::layout(
           title = list(text = dataset_name, x = 0.02),
           xaxis = list(title = "log2 Fold Change"),
-          yaxis = list(title = "-log10(p-value)"),
+          yaxis = list(title = "-log10(padj / p-value)"),
           showlegend = FALSE,
           margin = list(t = 50)
         )

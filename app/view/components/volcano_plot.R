@@ -59,12 +59,15 @@ volcano_server <- function(id, de_data, padj_thresh, lfc_thresh, gene = reactive
       req(de_data(), nrow(de_data()) > 0)
       df <- de_data()
 
-      # Require at minimum log2fc and pvalue columns
-      req("log2fc" %in% names(df), "pvalue" %in% names(df))
+      # Require at minimum log2fc plus one significance column
+      req("log2fc" %in% names(df))
+      req(("padj" %in% names(df) && any(!is.na(df$padj))) ||
+            ("pvalue" %in% names(df) && any(!is.na(df$pvalue))))
 
       df |>
         dplyr::mutate(
-          neg_log10p = -log10(pmax(pvalue, 1e-300)),
+          significance_value = ifelse(!is.na(padj), padj, pvalue),
+          neg_log10p = -log10(pmax(significance_value, 1e-300)),
           sig = dplyr::case_when(
             !is.na(padj) & padj < padj_thresh() & log2fc >  lfc_thresh() ~ "Up",
             !is.na(padj) & padj < padj_thresh() & log2fc < -lfc_thresh() ~ "Down",
@@ -75,6 +78,7 @@ volcano_server <- function(id, de_data, padj_thresh, lfc_thresh, gene = reactive
             "<b>", gene_symbol, "</b><br>",
             "log2FC: ",  round(log2fc,  3), "<br>",
             "padj: ",    signif(padj,  3), "<br>",
+            "pvalue: ",  signif(pvalue, 3), "<br>",
             if ("cell_type" %in% names(df)) paste0("Cell type: ", cell_type, "<br>") else "",
             if ("condition_a" %in% names(df)) paste0(condition_a, " vs ", condition_b) else ""
           )
@@ -132,7 +136,7 @@ volcano_server <- function(id, de_data, padj_thresh, lfc_thresh, gene = reactive
             gridcolor   = "#ECF0F1"
           ),
           yaxis = list(
-            title     = "-log₁₀(p-value)",
+            title     = "-log₁₀(padj / p-value)",
             gridcolor = "#ECF0F1"
           ),
           legend = list(title = list(text = "Direction"), orientation = "h",

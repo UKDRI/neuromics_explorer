@@ -727,7 +727,7 @@ def expression_volcano(
     view = _safe_view_name("v", lab, study_id)
     clauses, params = _expression_filters([], [], cell_type)
     clauses.append("log2fc IS NOT NULL")
-    clauses.append("pvalue IS NOT NULL")
+    clauses.append("(padj IS NOT NULL OR pvalue IS NOT NULL)")
     where_sql = _where_sql(clauses)
 
     params.extend([limit, offset])
