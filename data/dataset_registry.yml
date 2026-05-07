@@ -525,6 +525,142 @@ sources:
         annotations:
           - obs
 
+  # --- BOWLES LAB ---
+  bowles:
+    lab_name: "Bowles"
+    label: "tau-V337M"
+    contact: ""
+
+    defaults:
+      source_type: "parquet"
+    
+    datasets:
+      tau-V337M_bulk:
+        study_id: 1
+        display_name: "tau-V337M bulk"
+        source_type: "parquet"
+        data_path: "data/Bowles/bulk/conversions"
+        omic_type: ["bulk"]
+        tables:
+          counts: "counts.parquet"
+          expression: "expression.parquet"
+          obs_metadata: "obs_metadata.parquet"
+          feature_annotations: "feature_annotations.parquet"
+        feature_cols:
+          - gene_symbol
+          - feature_id
+          - feature_type
+        metric_cols:
+          - log2fc
+          - padj
+          - pvalue
+          - z_score
+        annotations:
+          - comparison
+          - sample_a
+          - sample_b
+          - condition_a
+          - condition_b
+          - timepoint_a
+          - timepoint_b
+          - obs
+
+      tau-V337M_2mo_scrna:
+        study_name: "tau-V337M 2mo scrna"
+        study_id: 2
+        display_name: "tau-V337M 2mo scrna"
+        source_type: "parquet"
+        data_path: "data/Bowles/scrna/conversions/All_2mo_Clustered"
+        omic_type: ["scrna"]
+        tables:
+          counts: "counts.parquet"
+          logcounts: "logcounts.parquet"
+          expression: "expression.parquet"
+          obs_metadata: "obs_metadata.parquet"
+          feature_annotations: "feature_annotations.parquet"
+        feature_cols:
+          - gene_symbol
+          - feature_id
+          - feature_type
+        metric_cols:
+          - log2fc
+          - padj
+          - pvalue
+          - z_score
+        annotations:
+          - comparison
+          - sample_a
+          - sample_b
+          - condition_a
+          - condition_b
+          - timepoint_a
+          - timepoint_b
+          - obs
+
+      tau-V337M_4mo_scrna:
+        study_name: "tau-V337M 4mo scrna"
+        study_id: 3
+        display_name: "tau-V337M 4mo scrna"
+        source_type: "parquet"
+        data_path: "data/Bowles/scrna/conversions/All_4mo_Clustered"
+        omic_type: ["scrna"]
+        tables:
+          counts: "counts.parquet"
+          logcounts: "logcounts.parquet"
+          expression: "expression.parquet"
+          obs_metadata: "obs_metadata.parquet"
+          feature_annotations: "feature_annotations.parquet"
+        feature_cols:
+          - gene_symbol
+          - feature_id
+          - feature_type
+        metric_cols:
+          - log2fc
+          - padj
+          - pvalue
+          - z_score
+        annotations:
+          - comparison
+          - sample_a
+          - sample_b
+          - condition_a
+          - condition_b
+          - timepoint_a
+          - timepoint_b
+          - obs
+
+      tau-V337M_6mo_scrna:
+        study_name: "tau-V337M 6mo scrna"
+        study_id: 4
+        display_name: "tau-V337M 6mo scrna"
+        source_type: "parquet"
+        data_path: "data/Bowles/scrna/conversions/All_6mo_Clustered"
+        omic_type: ["scrna"]
+        tables:
+          counts: "counts.parquet"
+          logcounts: "logcounts.parquet"
+          expression: "expression.parquet"
+          obs_metadata: "obs_metadata.parquet"
+          feature_annotations: "feature_annotations.parquet"
+        feature_cols:
+          - gene_symbol
+          - feature_id
+          - feature_type
+        metric_cols:
+          - log2fc
+          - padj
+          - pvalue
+          - z_score
+        annotations:
+          - comparison
+          - sample_a
+          - sample_b
+          - condition_a
+          - condition_b
+          - timepoint_a
+          - timepoint_b
+          - obs
+
 # # Global Config
 # config:
 #   # Logging
