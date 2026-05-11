@@ -51,7 +51,7 @@ build_feature_annotations <- function(annotation_path) {
     ) |> names()
 
   annot <- annot[, keep_cols, drop = FALSE]
-  annot <- annot[!duplicated(annot$transcript_id), , drop = FALSE] #annot$feature_id as there are duplicate feature_id
+  annot <- annot[!duplicated(annot$transcript_id), , drop = FALSE] #annot$feature_id as there are duplicate feature_id, gene_name
   rownames(annot) <- NULL
   annot
 }
@@ -90,10 +90,16 @@ build_expression_table <- function(differential_paths, feature_df) {
     stop("At least one differential result file is required.")
   }
 
+  feature_df <- feature_df[!duplicated(feature_df$feature_id), , drop = FALSE]  #since deduplication wasnt done for annot
+
   expr_blocks <- lapply(differential_paths, function(path) {
     df <- utils::read.delim(path, check.names = FALSE, stringsAsFactors = FALSE)
     if (!all(c("gene_id", "log2FoldChange", "pvalue", "padj") %in% names(df))) {
       stop("Differential file is missing one or more required columns: ", basename(path))
+    }
+    if (nrow(df) == 0) {
+      message("Skipping empty differential result: ", basename(path))
+      return(NULL)
     }
 
     meta <- parse_differential_filename(path)
@@ -106,18 +112,21 @@ build_expression_table <- function(differential_paths, feature_df) {
       sort = FALSE
     )
     gene_symbol <- as.character(merged$gene_symbol)
-    gene_symbol[is.na(gene_symbol) | !nzchar(gene_symbol)] <- as.character(merged$gene_id)
+    # If gene name empty, add ensembl or feature id
+    # gene_symbol[is.na(gene_symbol) | !nzchar(gene_symbol)] <- as.character(merged$gene_id)
+    missing_gene <- is.na(gene_symbol) | gene_symbol == ""
+    gene_symbol[missing_gene] <- as.character(merged$gene_id[missing_gene])
 
     data.frame(
       feature_id = as.character(merged$gene_id),
       gene_symbol = gene_symbol,
       feature_type = as.character(merged$feature_type),
       protein_id = NA_character_,
-      log2fc = suppressWarnings(as.numeric(merged$log2FoldChange)),
-      pvalue = suppressWarnings(as.numeric(merged$pvalue)),
-      padj = suppressWarnings(as.numeric(merged$padj)),
-      base_mean = suppressWarnings(as.numeric(merged$baseMean %||% NA)),
-      lfc_se = suppressWarnings(as.numeric(merged$lfcSE %||% NA)),
+      log2fc = as.numeric(merged$log2FoldChange),
+      pvalue = as.numeric(merged$pvalue),
+      padj = as.numeric(merged$padj),
+      base_mean = as.numeric(merged$baseMean %||% NA),
+      lfc_se = as.numeric(merged$lfcSE %||% NA),
       comparison = meta$comparison,
       sample_a = meta$sample_a,
       sample_b = meta$sample_b,
@@ -146,11 +155,11 @@ build_sparse_long_matrix <- function(path, value_name = "counts",
     stop("Matrix file does not contain feature id column '", feature_id_col, "': ", basename(path))
   }
 
-  value_cols <- setdiff(names(df), c(feature_id_col, drop_cols))
+  counts_cols <- setdiff(names(df), c(feature_id_col, drop_cols))
   feature_ids <- as.character(df[[feature_id_col]])
 
-  blocks <- lapply(value_cols, function(col_name) {
-    values <- suppressWarnings(as.numeric(df[[col_name]]))
+  blocks <- lapply(counts_cols, function(col_name) {
+    values <- as.numeric(df[[col_name]])
     keep <- !is.na(values) & values != 0
     if (!any(keep)) return(NULL)
 
@@ -162,7 +171,7 @@ build_sparse_long_matrix <- function(path, value_name = "counts",
     )
   })
 
-  blocks <- Filter(Negate(is.null), blocks)
+  blocks <- blocks[!vapply(blocks, is.null, logical(1))]    # remove NULL blocks
   if (length(blocks) == 0) {
     out <- data.frame(feature_id = character(0), obs = character(0), value = numeric(0), stringsAsFactors = FALSE)
   } else {
@@ -202,16 +211,16 @@ write_parquet <- function(df, path) {
   path
 }
 
-#' Convert a dev nf-core bulk RNA-seq result folder into parquet assets.
+#' Convert an nf-core bulk RNA-seq results into parquet.
 #'
 #' @param annotation_path Path to the annotation TSV.
 #' @param differential_dir Directory containing `genotype_*.deseq2.results_filtered.tsv`.
 #' @param counts_path Path to `rsem.merged.gene_counts.tsv`.
 #' @param logcounts_path Optional path to `all.normalised_counts.tsv`.
-#' @param output_dir Output directory for parquet assets.
+#' @param output_dir Output directory for parquet.
 #'
 #' @return Invisibly returns the written parquet paths.
-convert_salih_hardy_bulk_to_parquet <- function(
+convert_nf_bulk_to_parquet <- function(
     annotation_path = "data/Salih_Hardy/BUR_MM_4/nfcore/differentialabundance/out/tables/annotation/chrMus_musculus.anno.tsv",
     differential_dir = "data/Salih_Hardy/BUR_MM_4/nfcore/differentialabundance/out/tables/differential",
     counts_path = "data/Salih_Hardy/BUR_MM_4/nfcore/rnaseq/out/star_rsem/rsem.merged.gene_counts.tsv",
@@ -234,6 +243,22 @@ convert_salih_hardy_bulk_to_parquet <- function(
     drop_cols = intersect(c("transcript_id(s)"), counts_header)
   )
 
+  # Merge counts with gene symbols from feature_df to replace Ensembl or other feature ids with gene names
+  counts_df <- merge(
+    counts_df,
+    feature_df[, c("feature_id", "gene_symbol"), drop = FALSE],
+    by = "feature_id",
+    all.x = TRUE,
+    sort = FALSE
+  )
+  counts_df <- counts_df |>
+    select(, -feature_id) |>
+    rename(, feature_id = gene_symbol) |>
+    relocate(, feature_id)
+
+  # Deduplicate by keeping first occurrence per feature_id (in case of multiple comparisons)
+  # counts_df <- counts_df[!duplicated(counts_df[, c("feature_id", "obs")]), , drop = FALSE]
+
   obs_values <- sort(unique(counts_df$obs))
   obs_df <- build_obs_metadata(obs_values)
 
@@ -250,13 +275,23 @@ convert_salih_hardy_bulk_to_parquet <- function(
       value_name = "logcounts",
       feature_id_col = "gene_id"
     )
+    # Replace Ensembl/feature ids with gene symbols
+    logcounts_df <- merge(
+      logcounts_df,
+      feature_df[, c("feature_id", "gene_symbol"), drop = FALSE],
+      by = "feature_id",
+      all.x = TRUE,
+      sort = FALSE
+    )
+    # Deduplicate by keeping first occurrence per feature_id (in case of multiple comparisons)
+    # logcounts_df <- logcounts_df[!duplicated(logcounts_df[, c("feature_id", "obs")]), , drop = FALSE]
     written <- c(
       written,
       write_parquet(logcounts_df, file.path(output_dir, "logcounts.parquet"))
     )
   }
 
-  message("Wrote Salih_Hardy parquet file(s):")
+  message("Wrote parquet file(s):")
   for (path in written) {
     message("  - ", path)
   }
@@ -269,9 +304,10 @@ if (identical(environment(), globalenv()) && !interactive()) {
   annotation_path <- if (length(args) >= 1) args[[1]] else "data/Salih_Hardy/BUR_MM_4/nfcore/differentialabundance/out/tables/annotation/chrMus_musculus.anno.tsv"
   differential_dir <- if (length(args) >= 2) args[[2]] else "data/Salih_Hardy/BUR_MM_4/nfcore/differentialabundance/out/tables/differential"
   counts_path <- if (length(args) >= 3) args[[3]] else "data/Salih_Hardy/BUR_MM_4/nfcore/rnaseq/out/star_rsem/rsem.merged.gene_counts.tsv"
+  ## TODO: amend as normalised != logcounts
   logcounts_path <- if (length(args) >= 4) args[[4]] else "data/Salih_Hardy/BUR_MM_4/nfcore/differentialabundance/out/tables/processed_abundance/all.normalised_counts.tsv"
   output_dir <- if (length(args) >= 5) args[[5]] else "data/Salih_Hardy/BUR_MM_4/conversions"
-  convert_salih_hardy_bulk_to_parquet(
+  convert_nf_bulk_to_parquet(
     annotation_path = annotation_path,
     differential_dir = differential_dir,
     counts_path = counts_path,
