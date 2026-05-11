@@ -296,6 +296,9 @@ server <- function(input, output, session) {
     # Prevent observer from running more than once and overwriting user nav if already applied
     if (isTRUE(deep_link_applied())) return()
 
+    # Mark deep linking as applied immediately to enable navbar URL syncing on all subsequent clicks
+    deep_link_applied(TRUE)
+
     search <- cdata$url_search
     if (is.null(search) || !nzchar(search)) return()
 

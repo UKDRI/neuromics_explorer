@@ -292,18 +292,24 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
       paste0("?", paste(query_parts, collapse = "&"))
     }
 
-    #  
+    # Reconstructs the `selected_dataset` payload from URL query parameters for sharing
+    # bookmarking, or linking URL (e.g. neuromics-explorer.ukdri.ac.uk/?page=explore&lab=diaz&study=5&gene=GAPDH)
     build_link_selected_payload <- function(params) {
+
+      # Fetch master dataset catalogue to use as lookup table
       all_rows <- tryCatch(
         fetch_all_datasets(),
         error = function(e) data.frame()
       )
       if (nrow(all_rows) == 0) return(NULL)
 
+      # Filter catalogue rows to specific dataset via URL params using case-insensitive matching.
+      # Below if-else statement can cause partial URLs (e.g. no lab, study only) to still work as study_id is the minimum required identifier.
       rows <- all_rows
       if (!is.null(params$lab_source) && nzchar(params$lab_source)) {
         rows <- rows[tolower(rows$lab_source) == tolower(params$lab_source), , drop = FALSE]
       }
+      # TODO: allow all datasets to be listed w just genes/proteins (ie ?page=explore&study=1&gene=APOE; ?page=explore&gene=APOE)
       if (!is.null(params$study_id) && !is.na(params$study_id)) {
         rows <- rows[rows$study_id == params$study_id, , drop = FALSE]
       } else {
@@ -312,8 +318,7 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
 
       if (nrow(rows) == 0) return(NULL)
 
-      # rows <- rows[order(rows$lab_source, rows$study_id), , drop = FALSE]
-      # Verify which genes actually exist in this dataset
+      # Verify which genes actually exist in this dataset (as normally done via modal), and cross-reference hits with url params
       verified_genes <- character(0)
       verified_proteins <- character(0)
       if (length(params$genes) > 0 || length(params$proteins) > 0) {
@@ -345,15 +350,16 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
 
       # Active row in dataset listings table
       active_row <- rows[1, , drop = FALSE]
+      # Returns list matching shape produced by gene_dataset_selector modal
       list(
-        genes = verified_genes,
-        proteins = verified_proteins,
-        lab_source = active_row$lab_source[1],
-        study_id = active_row$study_id[1],
-        dataset_name = active_row$dataset_name[1],
-        omic_type = active_row$omic_type[1],
+        genes             = params$genes,
+        proteins          = params$proteins,
+        lab_source        = active_row$lab_source[1],
+        study_id          = active_row$study_id[1],
+        dataset_name      = active_row$dataset_name[1],
+        omic_type         = active_row$omic_type[1],
         selected_datasets = rows,
-        cell_types = load_active_cell_types(
+        cell_types        = load_active_cell_types(
           active_row$lab_source[1],
           active_row$study_id[1]
         )
@@ -1138,8 +1144,8 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
       if (!is.null(selected_dataset())) return()
 
       payload <- build_link_selected_payload(list(
-        lab_source = link$lab_source %||% NULL,
-        study_id = link$study_id %||% NULL,
+        lab_source = link$lab_source %||% NULL,   # currently not required in url
+        study_id = link$study_id %||% NULL,       # currently required in url
         genes = clean_terms(link$genes %||% character(0)),
         proteins = clean_terms(link$proteins %||% character(0))
       ))
