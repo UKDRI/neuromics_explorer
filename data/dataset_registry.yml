@@ -661,6 +661,91 @@ sources:
           - timepoint_b
           - obs
 
+  # --- SALIH / HARDY LAB ---
+  salih_hardy:
+    lab_name: "Salih & Hardy"
+    label: "Salih & Hardy bulk RNA-seq"
+    contact: ""
+
+    defaults:
+      source_type: "parquet"
+
+    datasets:
+      BUR_MM_4:
+        study_name: "BUR_MM_4"
+        study_id: 1
+        display_name: "Salih & Hardy bulk RNA-seq"
+        source_type: "parquet"
+        data_path: "data/Salih_Hardy/BUR_MM_4/conversions"
+        omic_type: ["bulk"]
+        tables:
+          expression: "expression.parquet"
+          counts: "counts.parquet"
+          # logcounts: "logcounts.parquet"
+          obs_metadata: "obs_metadata.parquet"
+          feature_annotations: "feature_annotations.parquet"
+        feature_cols:
+          - gene_symbol
+          - feature_id
+          - feature_type
+        metric_cols:
+          - log2fc
+          - pvalue
+          - padj
+          - base_mean
+          - lfc_se
+        annotations:
+          - comparison
+          - sample_a
+          - sample_b
+          - condition_a
+          - condition_b
+          - obs
+
+
+  # --- HARDINGHAM LAB ---
+  hardingham:
+    lab_name: "Hardingham"
+    label: "Hardingham bulk RNA-seq"
+    contact: ""
+
+    defaults:
+      source_type: "parquet"
+
+    datasets:
+      BUR_MM_5:
+        study_name: "BUR_MM_5"
+        study_id: 1
+        display_name: "Hardingham bulk RNA-seq"
+        source_type: "parquet"
+        data_path: "data/Hardingham/BUR_MM_5/conversions"
+        omic_type: ["bulk"]
+        tables:
+          expression: "expression.parquet"
+          counts: "counts.parquet"
+          # logcounts: "logcounts.parquet"
+          obs_metadata: "obs_metadata.parquet"
+          feature_annotations: "feature_annotations.parquet"
+        feature_cols:
+          - gene_symbol
+          - feature_id
+          - feature_type
+        metric_cols:
+          - log2fc
+          - pvalue
+          - padj
+          - base_mean
+          - lfc_se
+        annotations:
+          - comparison
+          - sample_a
+          - sample_b
+          - condition_a
+          - condition_b
+          - obs
+
+
+
 # # Global Config
 # config:
 #   # Logging
