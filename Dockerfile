@@ -65,7 +65,7 @@ USER shinyuser
 EXPOSE 4848
 # HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
 #   CMD curl -f http://localhost:4848/ || exit 1
-CMD ["R", "-e", "shiny::runApp('/app/main.R', host = '0.0.0.0', port = 4848)"]
+CMD ["R", "-e", "shiny::runApp('/app/app/main.R', host = '0.0.0.0', port = 4848)"]
 
 
 # ─────────────────────────────────────────────
