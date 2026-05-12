@@ -29,6 +29,20 @@
   color: #ffffff !important;
 }
 
+.dev-release-banner {
+  background: #eef1f4;
+  border-bottom: 1px solid #d7dde5;
+  color: #4b5968;
+  font-size: 0.9rem;
+  line-height: 1.35;
+  padding: 6px 18px;
+  text-align: center;
+}
+
+.prod-host .dev-release-banner {
+  display: none !important;
+}
+
 body {
   font-family: var(--font-body);
   color: #162333;

@@ -54,6 +54,16 @@ ui <- page_navbar(
       .hide-nav .navbar-nav { display: none !important; }
       .hide-nav #navbar-brand { display: flex !important; }
     ")),
+    # Optional dev banner
+    tags$script(HTML("
+      document.addEventListener('DOMContentLoaded', function() {
+        var host = (window.location.hostname || '').toLowerCase();
+        var isProductionHost = host === 'neuromics-explorer.ukdri.ac.uk';
+        if (isProductionHost) {
+          document.documentElement.classList.add('prod-host');
+        }
+      });
+    ")),
     # bs_theme_toggle(),
     # CSS toggleTheme():
     # <button class="theme-toggle" type="button" onclick="toggleTheme()" aria-label="Switch to dark mode">
@@ -68,6 +78,19 @@ ui <- page_navbar(
   
   # Add shinyjs
   useShinyjs(),
+
+  div(
+    class = "dev-release-banner",
+    role = "status",
+    style = "background:#f5f5f5; border-bottom:2px solid #e0e0e0; text-align:center;
+           padding:6px 0; font-size:11px; color:#888; letter-spacing:0.03em; width:100%;",
+    span(
+      style = "display:inline-block; width:7px; height:7px; border-radius:50%;
+              background:#f0ad4e; margin-right:6px; vertical-align:middle;",
+      ""
+    ),
+    "DEVELOPMENT RELEASE: this site is under active construction, features and data subject to change without notice."
+  ),
   
   # Nav panels
   nav_panel(
