@@ -1,0 +1,31 @@
+services:
+
+  backend:
+    image: shesanislandukdri/neuromics_explorer_backend
+    expose:
+      - "7000"
+    volumes:
+      - ./data:/app/data
+    user: "1001:1001"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  frontend:
+    image: shesanislandukdri/neuromics_explorer_shiny
+    ports:
+      - "4848:4848"
+    expose:
+      - "4848"
+    volumes:
+      - ./data:/app/data
+    user: "1001:1001"
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      - NEX_API_BASE_URL=http://backend:7000/api
