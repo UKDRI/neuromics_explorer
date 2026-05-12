@@ -4,7 +4,7 @@
 # -----------------------------------------------------------------------------
 # Expected inputs:
 #   - annotation/*.anno.tsv
-#   - differential/genotype_*.deseq2.results_filtered.tsv
+#   - differential/*.deseq2.results_filtered.tsv
 #   - star_rsem/rsem.merged.gene_counts.tsv
 #   - processed_abundance/all.normalised_counts.tsv (optional)
 #
@@ -58,20 +58,27 @@ build_feature_annotations <- function(annotation_path) {
 
 #' Parse one genotype comparison label from its filename.
 #'
-#' @param path Path to a `genotype_*.deseq2.results_filtered.tsv` file.
+#' @param path Path to a `*.deseq2.results_filtered.tsv` file.
 #'
 #' @return A named list of comparison metadata.
 parse_differential_filename <- function(path) {
   filename <- basename(path)
-  comparison <- sub("\\.deseq2\\.results_filtered\\.tsv$", "", filename, ignore.case = TRUE)
-  comparison <- sub("^genotype_", "", comparison, ignore.case = TRUE)
+  differential_prefix <- sub("_.*", "", filename)
 
+  comparison <- sub("\\.deseq2\\.results_filtered\\.tsv$", "", filename, ignore.case = TRUE)
+  comparison <- sub("^[^_]+_", "", comparison, ignore.case = TRUE)
   parts <- strsplit(comparison, "__", fixed = TRUE)[[1]]
   left <- parts[1] %||% comparison
   right <- parts[2] %||% NA_character_
 
+  block <- NA_character_
+  block_variable <- grep("^block_", parts, value = TRUE)
+  if (length(block_variable) > 0) block <- sub("^block_", "", block_variable[1])
+
   list(
     comparison = comparison,
+    differential_prefix = differential_prefix,
+    block = block,
     sample_a = left,
     sample_b = right,
     condition_a = left,
@@ -103,6 +110,7 @@ build_expression_table <- function(differential_paths, feature_df) {
     }
 
     meta <- parse_differential_filename(path)
+
     merged <- merge(
       df,
       feature_df[, c("feature_id", "gene_symbol", "feature_type"), drop = FALSE],
@@ -128,6 +136,8 @@ build_expression_table <- function(differential_paths, feature_df) {
       base_mean = as.numeric(merged$baseMean %||% NA),
       lfc_se = as.numeric(merged$lfcSE %||% NA),
       comparison = meta$comparison,
+      differential_prefix = meta$differential_prefix,
+      block = meta$block,
       sample_a = meta$sample_a,
       sample_b = meta$sample_b,
       condition_a = meta$condition_a,
@@ -214,7 +224,7 @@ write_parquet <- function(df, path) {
 #' Convert an nf-core bulk RNA-seq results into parquet.
 #'
 #' @param annotation_path Path to the annotation TSV.
-#' @param differential_dir Directory containing `genotype_*.deseq2.results_filtered.tsv`.
+#' @param differential_dir Directory containing `*.deseq2.results_filtered.tsv`.
 #' @param counts_path Path to `rsem.merged.gene_counts.tsv`.
 #' @param logcounts_path Optional path to `all.normalised_counts.tsv`.
 #' @param output_dir Output directory for parquet.
@@ -228,7 +238,7 @@ convert_nf_bulk_to_parquet <- function(
     output_dir = "data/Salih_Hardy/BUR_MM_4/conversions") {
   differential_paths <- sort(list.files(
     differential_dir,
-    pattern = "^genotype_.*\\.deseq2\\.results_filtered\\.tsv$",
+    pattern = "^[^_]+_.*\\.deseq2\\.results_filtered\\.tsv$",
     full.names = TRUE
   ))
 
