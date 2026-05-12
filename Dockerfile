@@ -25,7 +25,9 @@ ENV RENV_PATHS_LIBRARY=/app/renv/library \
     RENV_CONFIG_CACHE_SYMLINKS=FALSE
 
 RUN R -e "install.packages('renv', repos='https://cloud.r-project.org')" && \
-    R -e "renv::restore(prompt = FALSE)"
+    R -e "install.packages('S7', repos='https://cloud.r-project.org')" && \
+    R -e "install.packages('httr2', repos='https://cloud.r-project.org')" && \
+    R -e "renv::restore(prompt = FALSE, exclude='S7')"
 
 COPY app/ app/
 COPY app.R dependencies.R .Rprofile rhino.yml config.yml _quarto.yml ./
