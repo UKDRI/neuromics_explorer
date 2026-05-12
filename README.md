@@ -36,6 +36,7 @@ app/
 │   │   ├── bowles_tsv_to_parquet.R     # DE .tsv workbook → .parquet (specific to Bowles)
 │   │   ├── rds_to_parquet_containers.R # SingleCellExperiment / SummarizedExperiment RDS → Parquet #TODO: add Seurat conversion
 │   │   ├── rds_to_parquet_indep.R      # Multiple independent RDS files → Parquet
+│   │   ├── nf_bulk_to_parquet.R        # nf-core bulk pipeline outputs → Parquet
 │   │   └── williams_xlsx_to_parquet.R  # DE excel workbook → expression.parquet (specific to Williams)
 │   ├── query_data/                     # Per user requests - R queries only db views
 │   │   ├── expression.R                # API client wrappers to fetch expression data for a gene+dataset
@@ -145,4 +146,3 @@ shiny::runApp('app/main.R', port = 4848, host = "0.0.0.0")
 
 -   [Architecture summary](docs/architecture_summary.md)
 <!-- -   [API endpoints overview](docs/api-endpoints-overview.md) -->
-
