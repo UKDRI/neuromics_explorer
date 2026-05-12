@@ -14,9 +14,12 @@ violin_ui <- function(id) {
   tagList(
     fluidRow(
       column(4, selectInput(ns("feature_term"), "View", choices = character(0))),
+      # Handles all modalities and adapts based on mode (dataset-wide vs. goi-specific expression)
       column(4, selectInput(ns("y_var"), "Y axis", choices = character(0))),
       column(4, selectInput(ns("x_axis"), "X-axis", choices = character(0)))
     ),
+    # Handles specific modalities (scrna/snrna)
+    uiOutput(ns("assay_ui")),
     uiOutput(ns("group_by_ui")),
     checkboxInput(ns("show_box"), "Show box plot overlay", value = TRUE),
     plotlyOutput(ns("plot"), height = "480px")
@@ -248,7 +251,7 @@ violin_server <- function(id, de_data, selected_dataset, padj_thresh, lfc_thresh
           study_id = ds$study_id,
           genes = if (input$feature_term %in% (ds$genes %||% character(0))) input$feature_term else character(0),
           proteins = if (input$feature_term %in% (ds$proteins %||% character(0))) input$feature_term else character(0),
-          assay = "counts",
+          assay = input$feature_assay %||% "logcounts",
           limit = 100000L
         )
       } else {
@@ -266,6 +269,19 @@ violin_server <- function(id, de_data, selected_dataset, padj_thresh, lfc_thresh
     is_single_cell_gene_mode <- reactive({
       ds <- selected_dataset()
       is_gene_mode() && !is.null(ds) && isTRUE(ds$omic_type %in% c("scrna", "snrna"))
+    })
+
+    output$assay_ui <- renderUI({
+      if (!is_single_cell_gene_mode()) return(NULL)
+      fluidRow(
+        column(4,
+          selectInput(
+            session$ns("feature_assay"), "Expression level",
+            choices = c("Logcounts" = "logcounts", "Counts" = "counts"),  # , "Expression" = "expression"
+            selected = "counts"
+          )
+        )
+      )
     })
 
     x_axis_choices <- reactive({
