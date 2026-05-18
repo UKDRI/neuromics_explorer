@@ -137,7 +137,7 @@ gene_selector_server <- function(id, selected_dataset) {
                     options  = list(
                         placeholder = "Start typing e.g. GAPDH, AQP4...",
                         create      = FALSE,
-                        maxItems    = 15,
+                        maxItems    = 120,
                         maxOptions  = 30,
                         preload     = "focus",
                         openOnFocus = TRUE,
@@ -163,7 +163,7 @@ gene_selector_server <- function(id, selected_dataset) {
                     options  = list(
                         placeholder = "Start typing e.g. P04406...",
                         create      = FALSE,
-                        maxItems    = 15,
+                        maxItems    = 50,
                         maxOptions  = 30,
                         preload     = "focus",
                         openOnFocus = TRUE,
