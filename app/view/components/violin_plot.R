@@ -69,12 +69,13 @@ violin_server <- function(id, de_data, selected_dataset, padj_thresh, lfc_thresh
       age = "Age",
       cell_id = "Cell ID"
     )
+    group_exclusions <- c("cell_id")
 
     metadata_choices <- function(df, include_none = FALSE) {
       choices <- c()
       if (include_none) choices[["None"]] <- "none"
 
-      for (candidate in names(metadata_label_map)) {
+      for (candidate in setdiff(names(metadata_label_map), group_exclusions)) {
         if (has_multiple_values(df, candidate)) {
           choices[[metadata_label_map[[candidate]]]] <- candidate
         }
@@ -251,7 +252,7 @@ violin_server <- function(id, de_data, selected_dataset, padj_thresh, lfc_thresh
           study_id = ds$study_id,
           genes = if (input$feature_term %in% (ds$genes %||% character(0))) input$feature_term else character(0),
           proteins = if (input$feature_term %in% (ds$proteins %||% character(0))) input$feature_term else character(0),
-          assay = input$feature_assay %||% "logcounts",
+          assay = input$feature_assay %||% "counts",
           limit = 100000L
         )
       } else {
@@ -287,7 +288,7 @@ violin_server <- function(id, de_data, selected_dataset, padj_thresh, lfc_thresh
     x_axis_choices <- reactive({
       if (is_single_cell_gene_mode()) {
         df <- feature_expression_data()
-        if (is.null(df) || nrow(df) == 0) return(c("All cells" = "none"))
+        if (is.null(df) || nrow(df) == 0) return(c("None" = "none"))
         metadata_choices(df, include_none = TRUE)
       } else {
         df <- de_data()
