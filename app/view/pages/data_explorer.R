@@ -259,7 +259,7 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
       }), use.names = FALSE))
     }
 
-    clean_terms <- function(values, max_terms = 15L) {
+    clean_terms <- function(values, max_terms = 150L) {
       if (is.null(values) || length(values) == 0) return(character(0))
       values <- unique(trimws(as.character(values)))
       values <- values[!is.na(values) & nzchar(values)]
