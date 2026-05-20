@@ -130,22 +130,22 @@ homepage_ui <- function(id) {
           )
       ),
       
-      # Card 2: About Us
-      div(class = "flip-card card-about",
-          div(class = "flip-card-inner",
-              div(class = "flip-card-front",
-                  icon("info-circle", style = "color: #f5576c;"),
-                  h3("About Us", style = "text-align:center;")
-              ),
-              div(class = "flip-card-back",
-                  p("Learn about our mission, team, and the technology behind the platform"),
-                  actionButton(
-                    ns("go_about"),
-                    "Learn More"
-                  )
-              )
-          )
-      ),
+      # # Card 2: About Us
+      # div(class = "flip-card card-about",
+      #     div(class = "flip-card-inner",
+      #         div(class = "flip-card-front",
+      #             icon("info-circle", style = "color: #f5576c;"),
+      #             h3("About Us", style = "text-align:center;")
+      #         ),
+      #         div(class = "flip-card-back",
+      #             p("Learn about our mission, team, and the technology behind the platform"),
+      #             actionButton(
+      #               ns("go_about"),
+      #               "Learn More"
+      #             )
+      #         )
+      #     )
+      # ),
       
       # Card 3: Getting Started
       div(class = "flip-card card-guide",
@@ -164,39 +164,39 @@ homepage_ui <- function(id) {
           )
       ),
       
-      # Card 4: Submit Data
-      div(class = "flip-card card-submit",
-          div(class = "flip-card-inner",
-              div(class = "flip-card-front",
-                  icon("upload", style = "color: #fa709a;"),
-                  h3("Submit Data", style = "text-align:center;")
-              ),
-              div(class = "flip-card-back",
-                  p("Share your research with the community and contribute to the platform"),
-                  actionButton(
-                    ns("go_submit"),
-                    "Submit Now"
-                  )
-              )
-          )
-      ),
+      # # Card 4: Submit Data
+      # div(class = "flip-card card-submit",
+      #     div(class = "flip-card-inner",
+      #         div(class = "flip-card-front",
+      #             icon("upload", style = "color: #fa709a;"),
+      #             h3("Submit Data", style = "text-align:center;")
+      #         ),
+      #         div(class = "flip-card-back",
+      #             p("Share your research with the community and contribute to the platform"),
+      #             actionButton(
+      #               ns("go_submit"),
+      #               "Submit Now"
+      #             )
+      #         )
+      #     )
+      # ),
       
-      # Card 5: Feedback
-      div(class = "flip-card card-feedback",
-          div(class = "flip-card-inner",
-              div(class = "flip-card-front",
-                  icon("comments", style = "color: #30cfd0;"),
-                  h3("Feedback", style = "text-align:center;")
-              ),
-              div(class = "flip-card-back",
-                  p("Help us improve the platform by sharing your thoughts and suggestions"),
-                  actionButton(
-                    ns("go_feedback"),
-                    "Send Feedback"
-                  )
-              )
-          )
-      )
+      # # Card 5: Feedback
+      # div(class = "flip-card card-feedback",
+      #     div(class = "flip-card-inner",
+      #         div(class = "flip-card-front",
+      #             icon("comments", style = "color: #30cfd0;"),
+      #             h3("Feedback", style = "text-align:center;")
+      #         ),
+      #         div(class = "flip-card-back",
+      #             p("Help us improve the platform by sharing your thoughts and suggestions"),
+      #             actionButton(
+      #               ns("go_feedback"),
+      #               "Send Feedback"
+      #             )
+      #         )
+      #     )
+      # )
     )
   )
 }

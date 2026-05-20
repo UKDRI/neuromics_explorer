@@ -107,12 +107,12 @@ ui <- page_navbar(
     explorer_ui("explore")
   ),
   
-  nav_panel(
-    title = "Submit Data",
-    icon = icon("upload"),
-    value = "submit_data",
-    submit_ui("submit")
-  ),
+  # nav_panel(
+  #   title = "Submit Data",
+  #   icon = icon("upload"),
+  #   value = "submit_data",
+  #   submit_ui("submit")
+  # ),
   
   # Dropdown menu with additional pages
   nav_menu(
@@ -139,98 +139,98 @@ ui <- page_navbar(
       )
     ),
     
-    nav_panel(
-      title = "Documentation",
-      icon = icon("file-alt"),
-      value = "documentation",
-      div(
-        class = "container mt-4",
-        h2("COMING SOON"),
-        tags$h2("Documentation"),
-        tags$p("Comprehensive documentation for the platform...")
-      )
-    ),
-    
-    "----",  # Divider
-    
-    nav_panel(
-      title = "Tutorials",
-      icon = icon("graduation-cap"),
-      value = "tutorials",
-      div(
-        class = "container mt-4",
-        h2("COMING SOON"),
-        h2("Tutorials"),
-        p("Step-by-step guides on what is good data, and what is bad...")
-      )
-    )
+    # nav_panel(
+    #   title = "Documentation",
+    #   icon = icon("file-alt"),
+    #   value = "documentation",
+    #   div(
+    #     class = "container mt-4",
+    #     h2("COMING SOON"),
+    #     tags$h2("Documentation"),
+    #     tags$p("Comprehensive documentation for the platform...")
+    #   )
+    # ),
+    #
+    # "----",  # Divider
+    #
+    # nav_panel(
+    #   title = "Tutorials",
+    #   icon = icon("graduation-cap"),
+    #   value = "tutorials",
+    #   div(
+    #     class = "container mt-4",
+    #     h2("COMING SOON"),
+    #     h2("Tutorials"),
+    #     p("Step-by-step guides on what is good data, and what is bad...")
+    #   )
+    # )
   ),
   
   # Another dropdown for Help/About
-  nav_menu(
-    title = "About",
-    icon = icon("info-circle"),
-    
-    nav_panel(
-      title = "About Us",
-      # shiny::uiOutput("about_page") # TODO add for AboutUs.rmd doc - remove below
-      icon = icon("users"),
-      value = "about_us",
-      div(
-        class = "container mt-4",
-        h2("About the Core Informatics Team @ UK DRI"),
-        style = "border: 1px solid #ddd; padding: 15px; border-radius: 8px; background: white; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin: 10px 0;",
-        p(style = "margin-bottom: 0;",
-               "This platform can also help teams with:"),
-        tags$ul(
-          tags$li("Data analytics and collaborative interpretations"),
-          tags$li("Conceptualisation through data mining"),
-          tags$li("Training sessions")
-        ),
-        tags$p("For more information, please visit the"), 
-        tags$a(href="https://coreinformatics.uk/ukdri", "LINK COMING SOON! - UK DRI Core Informatics")
-      )
-    ),
-    
-    nav_panel(
-      title = "Contact",
-      icon = icon("envelope"),
-      value = "contact",
-      div(
-        class = "container mt-4",
-        h2("COMING SOON"),
-        h2("Contact Us"),
-        p("Get in touch with our team...")
-      )
-    ),
-    
-    nav_panel(
-      title = "FAQ",
-      icon = icon("question-circle"),
-      value = "faq",
-      div(
-        class = "container mt-4",
-        h2("COMING SOON"),
-        h2("Frequently Asked Questions"),
-        p("Common questions and answers...")
-      )
-    )
-  ),
+  # nav_menu(
+  #   title = "About",
+  #   icon = icon("info-circle"),
+  #
+  #   nav_panel(
+  #     title = "About Us",
+  #     # shiny::uiOutput("about_page") # TODO add for AboutUs.rmd doc - remove below
+  #     icon = icon("users"),
+  #     value = "about_us",
+  #     div(
+  #       class = "container mt-4",
+  #       h2("About the Core Informatics Team @ UK DRI"),
+  #       style = "border: 1px solid #ddd; padding: 15px; border-radius: 8px; background: white; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin: 10px 0;",
+  #       p(style = "margin-bottom: 0;",
+  #              "This platform can also help teams with:"),
+  #       tags$ul(
+  #         tags$li("Data analytics and collaborative interpretations"),
+  #         tags$li("Conceptualisation through data mining"),
+  #         tags$li("Training sessions")
+  #       ),
+  #       tags$p("For more information, please visit the"),
+  #       tags$a(href="https://coreinformatics.uk/ukdri", "LINK COMING SOON! - UK DRI Core Informatics")
+  #     )
+  #   ),
+  #
+  #   nav_panel(
+  #     title = "Contact",
+  #     icon = icon("envelope"),
+  #     value = "contact",
+  #     div(
+  #       class = "container mt-4",
+  #       h2("COMING SOON"),
+  #       h2("Contact Us"),
+  #       p("Get in touch with our team...")
+  #     )
+  #   ),
+  #
+  #   nav_panel(
+  #     title = "FAQ",
+  #     icon = icon("question-circle"),
+  #     value = "faq",
+  #     div(
+  #       class = "container mt-4",
+  #       h2("COMING SOON"),
+  #       h2("Frequently Asked Questions"),
+  #       p("Common questions and answers...")
+  #     )
+  #   )
+  # ),
   
   # Right-aligned items
   nav_spacer(),
   
-  nav_panel(
-    title = "Feedback",
-    icon = icon("comment-dots"),
-    value = "feedback",
-    div(
-      class = "container mt-4",
-      h2("COMING SOON"),
-      h2("Send Feedback"),
-      p("We'd love to hear from you...")
-    )
-  )
+  # nav_panel(
+  #   title = "Feedback",
+  #   icon = icon("comment-dots"),
+  #   value = "feedback",
+  #   div(
+  #     class = "container mt-4",
+  #     h2("COMING SOON"),
+  #     h2("Send Feedback"),
+  #     p("We'd love to hear from you...")
+  #   )
+  # )
 )
 
 
