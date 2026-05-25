@@ -7,10 +7,13 @@ and computing/ aggregating dataset-level stats for quick retrieval.
 """
 
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from fastapi import FastAPI
 from pathlib import Path
+import asyncio
 import os
 import sys
+import threading
 import uvicorn
 
 # __file__ uses absolute path to main_setup.py (sets working directory separate from main.R & run_startup.R)
@@ -25,10 +28,16 @@ _DATA_DIR     = _PROJECT_DIR / "data"             # ./data/
 from app.logic.startup.registry_parser import parse_and_load_registry, build_registry_index
 from app.logic.startup.data_summaries import build_dataset_stats
 from app.logic.startup.db_pool import DuckDBPool
+from app.logic.startup.usage_metrics import (
+    get_client_ip,
+    initialise_usage_metrics,
+    log_request_metrics,
+)
 from app.logic.api.endpoints import router as api_router
 
 REGISTRY_YAML = str(_DATA_DIR / "dataset_registry.yml")
 DB_PATH       = str(_DATA_DIR / "neuromics_registry.duckdb")
+METRICS_DB_PATH = str(_DATA_DIR / "usage_metrics.duckdb")
 DIAZ_DB       = str(_DATA_DIR / "diaz_castro.duckdb")
 HONG_DB       = str(_DATA_DIR / "hong.duckdb")
 DATA_DIR      = str(_DATA_DIR)
@@ -51,7 +60,12 @@ async def lifespan(app: FastAPI):
         print("3. Computing dataset stats...")
         build_dataset_stats(DB_PATH)
 
-        print("4. Initialising connection pool to create new instance...")
+        print("4. Initialising usage metrics tables...")
+        initialise_usage_metrics(METRICS_DB_PATH)
+        app.state.metrics_db_path = METRICS_DB_PATH
+        app.state.metrics_write_lock = threading.Lock()
+
+        print("5. Initialising connection pool to create new instance...")
         duckdb_pool = DuckDBPool(
             db_path = DB_PATH, 
             pool_size = POOL_SIZE,
@@ -90,6 +104,33 @@ app = FastAPI(
     version="0.0.0",
     description="Neuromics Explorer visualisation dashboard for UK DRI datasets")
 app.include_router(api_router)
+
+
+@app.middleware("http")
+async def track_usage_metrics(request, call_next):
+    started_at = datetime.now(timezone.utc)
+    response = await call_next(request)
+
+    # Get db_path and write lock if they exist in app state (i.e. if startup successful), otherwise skip tracking to avoid errors during startup
+    db_path = getattr(request.app.state, "metrics_db_path", None)
+    write_lock = getattr(request.app.state, "metrics_write_lock", None)
+    if db_path is None or write_lock is None:
+        return response
+
+    duration_ms = (datetime.now(timezone.utc) - started_at).total_seconds() * 1000.0
+    await asyncio.to_thread(
+        log_request_metrics,
+        db_path,
+        write_lock,
+        user_ip=get_client_ip(request),
+        method=request.method,
+        path=request.url.path,
+        status_code=response.status_code,
+        duration_ms=duration_ms,
+        user_agent=request.headers.get("user-agent"),
+        referer=request.headers.get("referer"),
+    )
+    return response
 
 @app.get("/")
 def root():

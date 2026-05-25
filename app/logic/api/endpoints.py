@@ -9,6 +9,7 @@ import io
 import os
 import re
 
+import duckdb
 import pyarrow.ipc as ipc
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 
@@ -403,10 +404,119 @@ def _resolve_metadata_source_view(con, lab: str, study_id: int) -> str:
         return v_view
 
 
+def _query_rows(request: Request, sql: str, params: list | None = None) -> list[dict]:
+    """Run SQL and return JSON-friendly row dicts for admin and debugging endpoints."""
+    pool = _require_pool(request)
+    with get_conn(pool) as con:
+        cursor = con.execute(sql, params or [])
+        columns = [item[0] for item in cursor.description]
+        rows = cursor.fetchall()
+    return [dict(zip(columns, row)) for row in rows]
+
+
+def _query_metrics_rows(request: Request, sql: str, params: list | None = None) -> list[dict]:
+    """Run SQL against the metrics DuckDB file and return JSON-friendly row dicts for admin and debugging endpoints."""
+    metrics_db_path = getattr(request.app.state, "metrics_db_path", None)
+    if metrics_db_path is None:
+        raise HTTPException(status_code=503, detail="Metrics database is not initialised.")
+
+    con = duckdb.connect(metrics_db_path, read_only=False)
+    try:
+        cursor = con.execute(sql, params or [])
+        columns = [item[0] for item in cursor.description]
+        rows = cursor.fetchall()
+    finally:
+        con.close()
+    return [dict(zip(columns, row)) for row in rows]
+
+
 @router.get("/health")
 def health():
     """Lightweight liveness check used by local startup and deploy smoke tests."""
     return {"status": "ok"}
+
+
+@router.get("/metrics/usage")
+def usage_metrics(request: Request, days: int = Query(30, ge=1, le=365)):
+    """
+    Return JSON usage metrics from the registry DuckDB for quick admin inspection.
+
+    This is JSON rather than Arrow because it is primarily for browser,
+    curl, and Postman use rather than the Shiny data client.
+    """
+    summary_rows = _query_metrics_rows(
+        request,
+        """
+        SELECT
+            COUNT(*) AS total_requests,
+            COUNT(DISTINCT user_ip) AS unique_visitors,
+            COUNT(DISTINCT path) AS unique_paths,
+            ROUND(AVG(duration_ms), 2) AS avg_duration_ms,
+            MAX(visited_at) AS last_request_at,
+            SUM(CASE WHEN visited_at >= CURRENT_TIMESTAMP - INTERVAL '1 day' THEN 1 ELSE 0 END) AS requests_last_24h,
+            SUM(CASE WHEN visited_at >= CURRENT_TIMESTAMP - INTERVAL '7 day' THEN 1 ELSE 0 END) AS requests_last_7d,
+            SUM(CASE WHEN visited_at >= CURRENT_TIMESTAMP - INTERVAL '30 day' THEN 1 ELSE 0 END) AS requests_last_30d,
+            SUM(CASE WHEN visited_at >= CURRENT_TIMESTAMP - INTERVAL '180 day' THEN 1 ELSE 0 END) AS requests_last_6m
+        FROM request_log
+        """,
+    )
+    # Track most-requested API routes in the last N days?
+    top_paths = _query_metrics_rows(
+        request,
+        """
+        SELECT
+          path,
+          method,
+          COUNT(*) AS requests,
+          COUNT(DISTINCT user_ip) AS unique_visitors,
+          ROUND(AVG(duration_ms), 2) AS avg_duration_ms,
+          MAX(visited_at) AS last_seen_at
+        FROM request_log
+        WHERE visited_at >= CURRENT_TIMESTAMP - (? * INTERVAL '1 day')
+        GROUP BY path, method
+        ORDER BY requests DESC, path ASC, method ASC
+        LIMIT 20
+        """,
+        [days],
+    )
+    daily_requests = _query_metrics_rows(
+        request,
+        """
+        SELECT
+          event_date,
+          COUNT(*) AS requests,
+          COUNT(DISTINCT user_ip) AS unique_visitors,
+          ROUND(AVG(duration_ms), 2) AS avg_duration_ms
+        FROM request_log
+        WHERE event_date >= CURRENT_DATE - (? * INTERVAL '1 day')
+        GROUP BY event_date
+        ORDER BY event_date DESC
+        """,
+        [days],
+    )
+    recent_visitors = _query_metrics_rows(
+        request,
+        """
+        SELECT
+          user_ip,
+          first_visit,
+          last_visit,
+          total_visits,
+          last_method,
+          last_path
+        FROM visitor_stats
+        ORDER BY last_visit DESC
+        LIMIT 20
+        """,
+    )
+
+    return {
+        "window_days": days,
+        "summary": summary_rows[0] if summary_rows else {},
+        "top_paths": top_paths,
+        "daily_requests": daily_requests,
+        "recent_visitors": recent_visitors,
+    }
 
 
 @router.get("/genes/index")
