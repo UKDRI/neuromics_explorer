@@ -24,7 +24,8 @@
 component_to_logical_table <- function(component_name) {
   name <- tolower(component_name)
 
-  if (grepl("^assay:(counts|logcounts|normcounts|normalised|expr|expression)", name)) return("counts")
+  if (grepl("^assay:(counts|normcounts|normalised|expr|expression)", name)) return("counts")
+  if (grepl("^assay:(logcounts|logexpr|logexpression)", name)) return("logcounts")
   if (grepl("^assay:(log2fc|logfc|dea|de_|diff|padj|pval|pvalue)", name)) return("expression")
   if (grepl("^row_data$", name)) return("feature_annotations")
   if (grepl("^col_data$", name)) return("obs_metadata")
@@ -215,7 +216,7 @@ write_assay_component <- function(x, output_dir, assay_name, compression = "snap
 }
 
 # Row-level annotations are preserved exactly as declared by the lab. For ranged
-# containers we prefer genomic coordinates when available because they are often
+# containers genomic coordinates prefered when available because they are often
 # more useful than a plain rowData frame downstream.
 #' Write row-level annotations from a container object to Parquet.
 #'
@@ -329,7 +330,14 @@ convert_container_rds <- function(input_rds, output_dir, compression = "snappy")
 
   manifest <- list()
   exp_name <- if (inherits(obj, "SingleCellExperiment")) {
-    tryCatch(SingleCellExperiment::mainExpName(obj), error = function(e) NA_character_)
+    tryCatch({
+      out <- SingleCellExperiment::mainExpName(obj)
+      if (is.null(out) || length(out) == 0 || is.na(out[[1]]) || !nzchar(out[[1]])) {
+        NA_character_
+      } else {
+        as.character(out[[1]])
+      }
+    }, error = function(e) NA_character_)
   } else {
     NA_character_
   }
@@ -367,7 +375,16 @@ convert_container_rds <- function(input_rds, output_dir, compression = "snappy")
       character(0)
     }
 
-    reduced_names <- names(reduced_out) %||% character(0)
+    reduced_names <- names(reduced_out)
+    if (is.null(reduced_names) || length(reduced_names) != length(reduced_out)) {
+      reduced_names <- tryCatch(
+        SingleCellExperiment::reducedDimNames(obj),
+        error = function(e) character(0)
+      )
+    }
+    if (is.null(reduced_names) || length(reduced_names) != length(reduced_out)) {
+      reduced_names <- character(0)
+    }
 
     manifest <- do.call(rbind, c(
       lapply(seq_along(assay_names), function(i) {
@@ -384,8 +401,16 @@ convert_container_rds <- function(input_rds, output_dir, compression = "snappy")
         build_manifest_row("col_data", "col_component", col_out, output_dir, exp_name = exp_name)
       ),
       lapply(seq_along(reduced_out), function(i) {
+        reduced_name <- if (length(reduced_names) >= i &&
+          !is.na(reduced_names[[i]]) &&
+          nzchar(reduced_names[[i]])) {
+          reduced_names[[i]]
+        } else {
+          as.character(i)
+        }
+
         build_manifest_row(
-          component = paste0("reduced_dim:", reduced_names[[i]]),
+          component = paste0("reduced_dim:", reduced_name),
           component_class = "reduced_dim",
           output_path = reduced_out[[i]],
           output_dir = output_dir,
@@ -405,6 +430,7 @@ convert_container_rds <- function(input_rds, output_dir, compression = "snappy")
       } else if (inherits(value, "Matrix")) {
         write_sparse_matrix_parquet(value, target, compression = compression)
       } else if (is.matrix(value)) {
+        # TODO : consider removing as must be in sparse format
         write_dense_matrix_parquet(value, target, compression = compression)
       } else if (is.atomic(value)) {
         write_df_parquet(data.frame(value = value, stringsAsFactors = FALSE), target, compression = compression)
