@@ -5,19 +5,19 @@
 # Expected inputs:
 #   - annotation/*.anno.tsv
 #   - differential/*.deseq2.results_filtered.tsv
-#   - star_rsem/rsem.merged.gene_counts.tsv
-#   - processed_abundance/all.normalised_counts.tsv (optional)
+#   - processed_abundance/all.normalised_counts.tsv
+#   - optional logcounts matrix when a separate log-scale assay is available
 #
 # Outputs:
 #   - expression.parquet
-#   - counts.parquet
-#   - logcounts.parquet (when normalised counts are supplied)
+#   - counts.parquet (raw or normalised, latter preferred)
+#   - logcounts.parquet (when available)
 #   - feature_annotations.parquet
 #   - obs_metadata.parquet
 
 `%||%` <- function(a, b) if (is.null(a)) b else a
 
-#' Build one-row-per-transcript (NOT gene) annotations from the nf-core annotation table.
+#' Build one-row-per-feature annotations from the nf-core annotation table.
 #'
 #' @param annotation_path Path to `*.anno.tsv`.
 #'
@@ -38,20 +38,22 @@ build_feature_annotations <- function(annotation_path) {
     annot$feature_type <- NA_character_
   }
 
-  keep_cols <- annot |>
-    select(
-      feature_id,
-      gene_symbol,
-      feature_type,
-      any_of(c(
+  keep_cols <- unique(c(
+    "feature_id",
+    "gene_symbol",
+    "feature_type",
+    intersect(
+      c(
         "chromosome", "start", "end", "width",
         "source", "type",
         "gene_version", "transcript_id", "gene_source", "gene_biotype"
-      ))
-    ) |> names()
+      ),
+      names(annot)
+    )
+  ))
 
   annot <- annot[, keep_cols, drop = FALSE]
-  annot <- annot[!duplicated(annot$transcript_id), , drop = FALSE] #annot$feature_id as there are duplicate feature_id, gene_name
+  annot <- annot[!duplicated(annot$transcript_id), , drop = FALSE] # changed from annot$feature_id as there are duplicate feature_id, gene_name, or gene_id for different transcripts
   rownames(annot) <- NULL
   annot
 }
@@ -225,17 +227,30 @@ write_parquet <- function(df, path) {
 #'
 #' @param annotation_path Path to the annotation TSV.
 #' @param differential_dir Directory containing `*.deseq2.results_filtered.tsv`.
-#' @param counts_path Path to `rsem.merged.gene_counts.tsv`.
-#' @param logcounts_path Optional path to `all.normalised_counts.tsv`.
+#' @param counts_path Path to `all.normalised_counts.tsv`.
+#' @param logcounts_path Optional path to a separate logcounts matrix.
 #' @param output_dir Output directory for parquet.
 #'
 #' @return Invisibly returns the written parquet paths.
 convert_nf_bulk_to_parquet <- function(
-    annotation_path = "data/Salih_Hardy/BUR_MM_4/nfcore/differentialabundance/out/tables/annotation/chrMus_musculus.anno.tsv",
-    differential_dir = "data/Salih_Hardy/BUR_MM_4/nfcore/differentialabundance/out/tables/differential",
-    counts_path = "data/Salih_Hardy/BUR_MM_4/nfcore/rnaseq/out/star_rsem/rsem.merged.gene_counts.tsv",
-    logcounts_path = "data/Salih_Hardy/BUR_MM_4/nfcore/differentialabundance/out/tables/processed_abundance/all.normalised_counts.tsv",
-    output_dir = "data/Salih_Hardy/BUR_MM_4/conversions") {
+    annotation_path,
+    differential_dir,
+    counts_path,
+    logcounts_path = NULL,
+    output_dir) {
+  if (missing(annotation_path) || !nzchar(annotation_path)) {
+    stop("Provide 'annotation_path'.")
+  }
+  if (missing(differential_dir) || !nzchar(differential_dir)) {
+    stop("Provide 'differential_dir'.")
+  }
+  if (missing(counts_path) || !nzchar(counts_path)) {
+    stop("Provide 'counts_path' pointing to a counts file like all.normalised_counts.tsv.")
+  }
+  if (missing(output_dir) || !nzchar(output_dir)) {
+    stop("Provide 'output_dir'.")
+  }
+
   differential_paths <- sort(list.files(
     differential_dir,
     pattern = "^[^_]+_.*\\.deseq2\\.results_filtered\\.tsv$",
@@ -266,8 +281,8 @@ convert_nf_bulk_to_parquet <- function(
     rename(, feature_id = gene_symbol) |>
     relocate(, feature_id)
 
-  # Deduplicate by keeping first occurrence per feature_id (in case of multiple comparisons)
-  # counts_df <- counts_df[!duplicated(counts_df[, c("feature_id", "obs")]), , drop = FALSE]
+  # Deduplicate by keeping first occurrence per feature_id (e.g. in case of multiple comparisons or transcripts)
+  counts_df <- counts_df[!duplicated(counts_df[, c("feature_id", "obs", "counts")]), , drop = FALSE]
 
   obs_values <- sort(unique(counts_df$obs))
   obs_df <- build_obs_metadata(obs_values)
@@ -294,7 +309,8 @@ convert_nf_bulk_to_parquet <- function(
       sort = FALSE
     )
     # Deduplicate by keeping first occurrence per feature_id (in case of multiple comparisons)
-    # logcounts_df <- logcounts_df[!duplicated(logcounts_df[, c("feature_id", "obs")]), , drop = FALSE]
+    logcounts_df <- logcounts_df[!duplicated(logcounts_df[, c("feature_id", "obs", "logcounts")]), , drop = FALSE]
+
     written <- c(
       written,
       write_parquet(logcounts_df, file.path(output_dir, "logcounts.parquet"))
@@ -311,12 +327,21 @@ convert_nf_bulk_to_parquet <- function(
 
 if (identical(environment(), globalenv()) && !interactive()) {
   args <- commandArgs(trailingOnly = TRUE)
-  annotation_path <- if (length(args) >= 1) args[[1]] else "data/Salih_Hardy/BUR_MM_4/nfcore/differentialabundance/out/tables/annotation/chrMus_musculus.anno.tsv"
-  differential_dir <- if (length(args) >= 2) args[[2]] else "data/Salih_Hardy/BUR_MM_4/nfcore/differentialabundance/out/tables/differential"
-  counts_path <- if (length(args) >= 3) args[[3]] else "data/Salih_Hardy/BUR_MM_4/nfcore/rnaseq/out/star_rsem/rsem.merged.gene_counts.tsv"
-  ## TODO: amend as normalised != logcounts
-  logcounts_path <- if (length(args) >= 4) args[[4]] else "data/Salih_Hardy/BUR_MM_4/nfcore/differentialabundance/out/tables/processed_abundance/all.normalised_counts.tsv"
-  output_dir <- if (length(args) >= 5) args[[5]] else "data/Salih_Hardy/BUR_MM_4/conversions"
+  if (length(args) < 4) {
+    stop(
+      paste(
+        "Usage:",
+        "Rscript app/logic/conversions/nf_bulk_to_parquet.R",
+        "<annotation_path> <differential_dir> <counts_path> <output_dir> [logcounts_path]"
+      )
+    )
+  }
+
+  annotation_path <- args[[1]]
+  differential_dir <- args[[2]]
+  counts_path <- args[[3]]
+  output_dir <- args[[4]]
+  logcounts_path <- if (length(args) >= 5 && nzchar(args[[5]])) args[[5]] else NULL
   convert_nf_bulk_to_parquet(
     annotation_path = annotation_path,
     differential_dir = differential_dir,
