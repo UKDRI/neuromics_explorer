@@ -228,13 +228,19 @@ write_assay_component <- function(x, output_dir, assay_name, compression = "snap
 write_row_component <- function(x, output_dir, compression = "snappy") {
   out <- file.path(output_dir, "feature_annotations.parquet")
 
+  if (methods::is(x, "SingleCellExperiment") || methods::is(x, "SummarizedExperiment")) {
+    df <- as.data.frame(SummarizedExperiment::rowData(x))
+    df <- prepend_rownames_column(df, rownames(x), "feature_id")
+    return(write_df_parquet(df, out, compression = compression))
+  }
+
   if (methods::is(x, "GenomicRanges")) {
     df <- as.data.frame(x)
     return(write_df_parquet(df, out, compression = compression))
   }
 
-  if (is.data.frame(x) || methods::is(x, "SingleCellExperiment")) {
-    df <- prepend_rownames_column(rowData(x), rownames(x), "feature_id")
+  if (is.data.frame(x)) {
+    df <- prepend_rownames_column(x, rownames(x), "feature_id")
     return(write_df_parquet(df, out, compression = compression))
   }
 
@@ -285,6 +291,95 @@ write_reduced_dims <- function(x, output_dir, compression = "snappy") {
     out <- file.path(out_dir, paste0(name, ".parquet"))
     write_dense_matrix_parquet(mat, out, row_id_name = "obs", compression = compression)
   }, character(1))
+}
+
+#' Coerce one rank-genes-groups component into a comparable matrix/data frame.
+#'
+#' @param x Metadata component such as `names`, `logfoldchanges`, or `pvals_adj` from SCE object.
+#'
+#' @return A matrix-like object with one column per comparison, or `NULL`.
+as_rank_genes_groups_table <- function(x) {
+  if (is.null(x)) return(NULL)
+  # if (is.matrix(x) || is.data.frame(x)) return(x)
+  if ((is.list(x) || is.data.frame(x)) && !is.null(names(x)) && length(x) > 0) {
+    max_len <- max(vapply(x, length, integer(1)), 0L)
+    out <- lapply(x, function(col) {
+      col <- as.vector(col)
+      length(col) <- max_len
+      col
+    })
+    return(as.data.frame(out, stringsAsFactors = FALSE, check.names = FALSE))
+  }
+  NULL
+}
+
+#' Extract Scanpy-style differential expression results from container metadata.
+#'
+#' @param obj SummarizedExperiment-like object.
+#'
+#' @return A long-form expression data frame, or `NULL` when unavailable.
+extract_rank_genes_groups_expression <- function(obj) {
+  if (!requireNamespace("SummarizedExperiment", quietly = TRUE)) {
+    return(NULL)
+  }
+
+  meta <- S4Vectors::metadata(obj)     # meta <- tryCatch(SummarizedExperiment::metadata(obj), error = function(e) NULL)
+  rgg <- meta$rank_genes_groups
+  if (is.null(rgg) || !is.list(rgg)) return(NULL)
+
+  names_tbl <- as_rank_genes_groups_table(rgg$names)
+  logfc_tbl <- as_rank_genes_groups_table(rgg$logfoldchanges)
+  padj_tbl <- as_rank_genes_groups_table(rgg$pvals_adj)
+  pval_tbl <- as_rank_genes_groups_table(rgg$pvals)
+
+  if (is.null(names_tbl) || is.null(logfc_tbl) || is.null(padj_tbl)) {
+    return(NULL)
+  }
+
+  cluster_names <- colnames(names_tbl)
+  cluster_names <- if (is.null(cluster_names) || length(cluster_names) == 0) {
+    names(rgg$names) %||% as.character(seq_len(ncol(names_tbl)))
+  } else {
+    colnames(logfc_tbl)
+  }
+
+
+  n_cols <- min(
+    ncol(names_tbl),
+    ncol(logfc_tbl),
+    ncol(padj_tbl),
+    length(cluster_names)
+  )
+  if (n_cols == 0) return(NULL)
+  if (length(unique(c(
+    ncol(names_tbl),
+    ncol(logfc_tbl),
+    ncol(padj_tbl),
+    length(cluster_names)
+  ))) != 1L) {
+    warning("Mismatched column counts; truncating to ", n_cols, "rows.")
+  }
+
+  expr_blocks <- lapply(seq_len(n_cols), function(i) {
+    gene_names <- as.character(names_tbl[[i]])
+    keep <- !is.na(gene_names) & nzchar(gene_names)
+    if (!any(keep)) return(NULL)
+
+    data.frame(
+      feature_id = gene_names[keep],
+      gene_symbol = gene_names[keep],
+      log2fc = as.numeric(logfc_tbl[[i]][keep]),
+      padj = as.numeric(padj_tbl[[i]][keep]),
+      pvalue = as.numeric(pval_tbl[[i]][keep]),
+      cluster = as.character(cluster_names[[i]]),
+      # condition_a = as.character(cluster_names[[i]]),
+      stringsAsFactors = FALSE
+    )
+  })
+
+  expr_blocks <- Filter(Negate(is.null), expr_blocks) # OR expr_blocks <- expr_blocks[!vapply(expr_blocks, is.null, logical(1))]
+  if (length(expr_blocks) == 0) return(NULL)
+  do.call(rbind, expr_blocks)
 }
 
 #' Canonicalise unique logical-table filenames after conversion.
@@ -360,15 +455,14 @@ convert_container_rds <- function(input_rds, output_dir, compression = "snappy")
       )
     }, character(1))
 
-    row_source <- if (inherits(obj, "RangedSummarizedExperiment") &&
-      requireNamespace("SummarizedExperiment", quietly = TRUE)) {
-      tryCatch(SummarizedExperiment::rowRanges(obj), error = function(e) SummarizedExperiment::rowData(obj))
-    } else {
-      SummarizedExperiment::rowData(obj)
-    }
-
-    row_out <- write_row_component(row_source, output_dir, compression = compression)
+    row_out <- write_row_component(obj, output_dir, compression = compression)
     col_out <- write_col_component(SummarizedExperiment::colData(obj), output_dir, compression = compression)
+    expression_df <- extract_rank_genes_groups_expression(obj)
+    expression_out <- if (!is.null(expression_df) && nrow(expression_df) > 0) {
+      write_df_parquet(expression_df, file.path(output_dir, "expression.parquet"), compression = compression)
+    } else {
+      character(0)
+    }
     reduced_out <- if (inherits(obj, "SingleCellExperiment")) {
       write_reduced_dims(obj, output_dir, compression = compression)
     } else {
@@ -400,6 +494,18 @@ convert_container_rds <- function(input_rds, output_dir, compression = "snappy")
         build_manifest_row("row_data", "row_component", row_out, output_dir, exp_name = exp_name),
         build_manifest_row("col_data", "col_component", col_out, output_dir, exp_name = exp_name)
       ),
+      if (length(expression_out) == 1) {
+        list(build_manifest_row(
+          component = "metadata:rank_genes_groups",
+          component_class = "rank_genes_groups list",
+          output_path = expression_out,
+          output_dir = output_dir,
+          logical_table = "expression",
+          exp_name = exp_name
+        ))
+      } else {
+        list()
+      },
       lapply(seq_along(reduced_out), function(i) {
         reduced_name <- if (length(reduced_names) >= i &&
           !is.na(reduced_names[[i]]) &&
