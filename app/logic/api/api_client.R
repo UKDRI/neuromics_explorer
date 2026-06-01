@@ -4,9 +4,11 @@
 
 box::use(
   httr2[req_headers, req_perform, request, resp_body_raw],
+  shiny[getDefaultReactiveDomain],
 )
 
 ARROW_MEDIA_TYPE <- "application/vnd.apache.arrow.stream"
+SESSION_HEADER <- "X-NEX-Session-ID"
 
 # Internal helpers in this file intentionally stay `@noRd` because they are
 # wiring for one HTTP client implementation, not user-facing package API.
@@ -16,6 +18,20 @@ ARROW_MEDIA_TYPE <- "application/vnd.apache.arrow.stream"
 #' @export
 set_api_base_url <- function(base_url) {
   options(nex.api_base_url = normalise_api_base_url(base_url))
+}
+
+#' @export
+set_api_session_id <- function(session_id) {
+  options(nex.api_session_id = session_id)
+}
+
+#' @noRd
+api_session_id <- function() {
+  domain <- shiny::getDefaultReactiveDomain()
+  if (!is.null(domain) && !is.null(domain$token) && nzchar(domain$token)) {
+    return(domain$token)
+  }
+  getOption("nex.api_session_id", NULL)
 }
 
 #' Resolve the configured API base URL.
@@ -112,9 +128,17 @@ build_url <- function(base_url, path, query = list()) {
 #' @noRd
 build_request <- function(base_url, path, query = list(), accept_arrow = TRUE) {
   req <- httr2::request(build_url(base_url, path, query = query))
+  session_id <- api_session_id()
 
   if (accept_arrow) {
     req <- httr2::req_headers(req, Accept = ARROW_MEDIA_TYPE)
+  }
+
+  if (!is.null(session_id) && length(session_id) == 1 && nzchar(session_id)) {
+    req <- do.call(
+      httr2::req_headers,
+      c(list(req), stats::setNames(list(session_id), SESSION_HEADER))
+    )
   }
 
   req

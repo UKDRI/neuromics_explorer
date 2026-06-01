@@ -110,7 +110,7 @@ app.include_router(api_router)
 
 @app.middleware("http")
 async def track_usage_metrics(request, call_next):
-    session_id = request.cookies.get("nex_session_id") or uuid4().hex
+    session_id = request.headers.get("x-nex-session-id") or request.cookies.get("nex_session_id") or uuid4().hex
     request.state.session_id = session_id
     started_at = datetime.now(timezone.utc)
     response = await call_next(request)
