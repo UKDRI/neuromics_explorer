@@ -165,7 +165,7 @@ sources:
       source_type: "duckdb"
       db_path: "data/hong.duckdb"
     
-    # Datasets within this source - DuckDB
+    # Datasets within this source
     datasets:
       3KL_vs_WT_ME-Macs:
         study_name: "3KL_vs_WT_ME-Macs"
@@ -681,7 +681,6 @@ sources:
         tables:
           expression: "expression.parquet"
           counts: "counts.parquet"
-          # logcounts: "logcounts.parquet"
           obs_metadata: "obs_metadata.parquet"
           feature_annotations: "feature_annotations.parquet"
         feature_cols:
@@ -701,7 +700,6 @@ sources:
           - condition_a
           - condition_b
           - obs
-
 
   # --- HARDINGHAM LAB ---
   hardingham:
@@ -723,7 +721,6 @@ sources:
         tables:
           expression: "expression.parquet"
           counts: "counts.parquet"
-          # logcounts: "logcounts.parquet"
           obs_metadata: "obs_metadata.parquet"
           feature_annotations: "feature_annotations.parquet"
         feature_cols:
@@ -744,6 +741,87 @@ sources:
           - condition_b
           - obs
 
+  # --- RUEPP LAB ---
+  ruepp:
+    lab_name: "Marc-David Ruepp"
+    label: "Ruepp bulk RNA-seq"
+    contact: ""
+
+    defaults:
+      source_type: "parquet"
+
+    datasets:
+      BUR_HS_2:
+        study_name: "BUR_HS_2"
+        study_id: 1
+        display_name: "Ruepp bulk RNA-seq"
+        source_type: "parquet"
+        data_path: "data/Ruepp/BUR_HS_2/conversions"
+        omic_type: ["bulk"]
+        tables:
+          expression: "expression.parquet"
+          counts: "counts.parquet"
+          obs_metadata: "obs_metadata.parquet"
+          feature_annotations: "feature_annotations.parquet"
+        feature_cols:
+          - gene_symbol
+          - feature_id
+          - feature_type
+        metric_cols:
+          - log2fc
+          - pvalue
+          - padj
+          - base_mean
+          - lfc_se
+        annotations:
+          - comparison
+          - differential_prefix
+          - block
+          - sample_a
+          - sample_b
+          - condition_a
+          - condition_b
+          - obs
+
+  # --- DION LAB ---
+  dion:
+    lab_name: "Dion"
+    label: "Dion scRNA-seq"
+    contact: ""
+
+    defaults:
+      source_type: "parquet"
+
+    datasets:
+      SCR_MM_2:
+        study_name: "SCR_MM_2"
+        study_id: 1
+        display_name: "Dion scRNA-seq"
+        source_type: "parquet"
+        data_path: "data/Dion/SCR_MM_2/conversions"
+        omic_type: ["scrna"]
+        tables:
+          expression: "expression.parquet"
+          counts: "counts.parquet"
+          obs_metadata: "obs_metadata.parquet"
+          feature_annotations: "feature_annotations.parquet"
+          umap: "UMAP.parquet"
+          pca: "PCA.parquet"
+        feature_cols:
+          - gene_symbol
+          - feature_id
+          - feature_type
+        metric_cols:
+          - counts
+          - log2fc
+          - pvalue
+          - padj
+        annotations:
+          - cell_type
+          - cluster
+          - sample
+          - condition
+          - obs
 
 
 # # Global Config
