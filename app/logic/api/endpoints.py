@@ -8,6 +8,7 @@ from __future__ import annotations
 import io
 import os
 import re
+import sqlite3
 
 import duckdb
 import pyarrow.ipc as ipc
@@ -404,30 +405,20 @@ def _resolve_metadata_source_view(con, lab: str, study_id: int) -> str:
         return v_view
 
 
-def _query_rows(request: Request, sql: str, params: list | None = None) -> list[dict]:
-    """Run SQL and return JSON-friendly row dicts for admin and debugging endpoints."""
-    pool = _require_pool(request)
-    with get_conn(pool) as con:
-        cursor = con.execute(sql, params or [])
-        columns = [item[0] for item in cursor.description]
-        rows = cursor.fetchall()
-    return [dict(zip(columns, row)) for row in rows]
-
-
 def _query_metrics_rows(request: Request, sql: str, params: list | None = None) -> list[dict]:
-    """Run SQL against the metrics DuckDB file and return JSON-friendly row dicts for admin and debugging endpoints."""
+    """Run SQL against the metrics SQLite file and return row dicts."""
     metrics_db_path = getattr(request.app.state, "metrics_db_path", None)
     if metrics_db_path is None:
         raise HTTPException(status_code=503, detail="Metrics database is not initialised.")
 
-    con = duckdb.connect(metrics_db_path, read_only=False)
+    con = sqlite3.connect(f"file:{metrics_db_path}?mode=ro", uri=True, timeout=5.0)
+    con.row_factory = sqlite3.Row
     try:
         cursor = con.execute(sql, params or [])
-        columns = [item[0] for item in cursor.description]
         rows = cursor.fetchall()
     finally:
         con.close()
-    return [dict(zip(columns, row)) for row in rows]
+    return [dict(row) for row in rows]
 
 
 @router.get("/health")
@@ -439,7 +430,7 @@ def health():
 @router.get("/metrics/usage")
 def usage_metrics(request: Request, days: int = Query(30, ge=1, le=365)):
     """
-    Return JSON usage metrics from the registry DuckDB for quick admin inspection.
+    Return JSON usage metrics from the dedicated metrics store for quick admin inspection.
 
     This is JSON rather than Arrow because it is primarily for browser,
     curl, and Postman use rather than the Shiny data client.
@@ -449,18 +440,18 @@ def usage_metrics(request: Request, days: int = Query(30, ge=1, le=365)):
         """
         SELECT
             COUNT(*) AS total_requests,
+            SUM(search_event) AS total_search_events,
             COUNT(DISTINCT user_ip) AS unique_visitors,
             COUNT(DISTINCT path) AS unique_paths,
             ROUND(AVG(duration_ms), 2) AS avg_duration_ms,
             MAX(visited_at) AS last_request_at,
-            SUM(CASE WHEN visited_at >= CURRENT_TIMESTAMP - INTERVAL '1 day' THEN 1 ELSE 0 END) AS requests_last_24h,
-            SUM(CASE WHEN visited_at >= CURRENT_TIMESTAMP - INTERVAL '7 day' THEN 1 ELSE 0 END) AS requests_last_7d,
-            SUM(CASE WHEN visited_at >= CURRENT_TIMESTAMP - INTERVAL '30 day' THEN 1 ELSE 0 END) AS requests_last_30d,
-            SUM(CASE WHEN visited_at >= CURRENT_TIMESTAMP - INTERVAL '180 day' THEN 1 ELSE 0 END) AS requests_last_6m
+            SUM(CASE WHEN visited_at >= datetime('now', '-1 day') THEN 1 ELSE 0 END) AS requests_last_24h,
+            SUM(CASE WHEN visited_at >= datetime('now', '-7 day') THEN 1 ELSE 0 END) AS requests_last_7d,
+            SUM(CASE WHEN visited_at >= datetime('now', '-30 day') THEN 1 ELSE 0 END) AS requests_last_30d,
+            SUM(CASE WHEN visited_at >= datetime('now', '-180 day') THEN 1 ELSE 0 END) AS requests_last_6m
         FROM request_log
         """,
     )
-    # Track most-requested API routes in the last N days?
     top_paths = _query_metrics_rows(
         request,
         """
@@ -468,16 +459,17 @@ def usage_metrics(request: Request, days: int = Query(30, ge=1, le=365)):
           path,
           method,
           COUNT(*) AS requests,
+          SUM(search_event) AS search_events,
           COUNT(DISTINCT user_ip) AS unique_visitors,
           ROUND(AVG(duration_ms), 2) AS avg_duration_ms,
           MAX(visited_at) AS last_seen_at
         FROM request_log
-        WHERE visited_at >= CURRENT_TIMESTAMP - (? * INTERVAL '1 day')
+        WHERE visited_at >= datetime('now', ?)
         GROUP BY path, method
         ORDER BY requests DESC, path ASC, method ASC
         LIMIT 20
         """,
-        [days],
+        [f"-{days} day"],
     )
     daily_requests = _query_metrics_rows(
         request,
@@ -485,14 +477,15 @@ def usage_metrics(request: Request, days: int = Query(30, ge=1, le=365)):
         SELECT
           event_date,
           COUNT(*) AS requests,
+          SUM(search_event) AS search_events,
           COUNT(DISTINCT user_ip) AS unique_visitors,
           ROUND(AVG(duration_ms), 2) AS avg_duration_ms
         FROM request_log
-        WHERE event_date >= CURRENT_DATE - (? * INTERVAL '1 day')
+        WHERE event_date >= date('now', ?)
         GROUP BY event_date
         ORDER BY event_date DESC
         """,
-        [days],
+        [f"-{days} day"],
     )
     recent_visitors = _query_metrics_rows(
         request,
@@ -502,6 +495,8 @@ def usage_metrics(request: Request, days: int = Query(30, ge=1, le=365)):
           first_visit,
           last_visit,
           total_visits,
+          total_requests,
+          last_session_id,
           last_method,
           last_path
         FROM visitor_stats

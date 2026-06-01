@@ -15,6 +15,7 @@ import os
 import sys
 import threading
 import uvicorn
+from uuid import uuid4
 
 # __file__ uses absolute path to main_setup.py (sets working directory separate from main.R & run_startup.R)
 _SCRIPT_DIR   = Path(__file__).resolve().parent   # ./app/logic/startup/
@@ -37,7 +38,7 @@ from app.logic.api.endpoints import router as api_router
 
 REGISTRY_YAML = str(_DATA_DIR / "dataset_registry.yml")
 DB_PATH       = str(_DATA_DIR / "neuromics_registry.duckdb")
-METRICS_DB_PATH = str(_DATA_DIR / "usage_metrics.duckdb")
+METRICS_DB_PATH = str(_DATA_DIR / "usage_metrics.sqlite3")
 DIAZ_DB       = str(_DATA_DIR / "diaz_castro.duckdb")
 HONG_DB       = str(_DATA_DIR / "hong.duckdb")
 DATA_DIR      = str(_DATA_DIR)
@@ -64,6 +65,7 @@ async def lifespan(app: FastAPI):
         initialise_usage_metrics(METRICS_DB_PATH)
         app.state.metrics_db_path = METRICS_DB_PATH
         app.state.metrics_write_lock = threading.Lock()
+        app.state.metrics_recent_requests = {}
 
         print("5. Initialising connection pool to create new instance...")
         duckdb_pool = DuckDBPool(
@@ -108,28 +110,38 @@ app.include_router(api_router)
 
 @app.middleware("http")
 async def track_usage_metrics(request, call_next):
+    session_id = request.cookies.get("nex_session_id") or uuid4().hex
+    request.state.session_id = session_id
     started_at = datetime.now(timezone.utc)
     response = await call_next(request)
+    if "nex_session_id" not in request.cookies:
+        response.set_cookie("nex_session_id", session_id, httponly=True, samesite="lax")
 
     # Get db_path and write lock if they exist in app state (i.e. if startup successful), otherwise skip tracking to avoid errors during startup
     db_path = getattr(request.app.state, "metrics_db_path", None)
     write_lock = getattr(request.app.state, "metrics_write_lock", None)
-    if db_path is None or write_lock is None:
+    recent_requests = getattr(request.app.state, "metrics_recent_requests", None)
+    if db_path is None or write_lock is None or recent_requests is None:
         return response
 
     duration_ms = (datetime.now(timezone.utc) - started_at).total_seconds() * 1000.0
-    await asyncio.to_thread(
-        log_request_metrics,
-        db_path,
-        write_lock,
-        user_ip=get_client_ip(request),
-        method=request.method,
-        path=request.url.path,
-        status_code=response.status_code,
-        duration_ms=duration_ms,
-        user_agent=request.headers.get("user-agent"),
-        referer=request.headers.get("referer"),
-    )
+    try:
+        await asyncio.to_thread(
+            log_request_metrics,
+            db_path,
+            write_lock,
+            recent_requests,
+            session_id=session_id,
+            user_ip=get_client_ip(request),
+            method=request.method,
+            path=request.url.path,
+            status_code=response.status_code,
+            duration_ms=duration_ms,
+            user_agent=request.headers.get("user-agent"),
+            referer=request.headers.get("referer"),
+        )
+    except Exception as exc:
+        print(f"Usage metrics logging skipped: {exc}")
     return response
 
 @app.get("/")
