@@ -600,7 +600,7 @@ convert_container_rds <- function(input_rds, output_dir, compression = "snappy")
 #' @return A named list ready for `do.call(main, ...)`.
 parse_cli_args <- function(args = commandArgs(trailingOnly = TRUE)) {
   if (length(args) < 2) {
-    stop("Usage: Rscript misc/rds_to_parquet_containers.R <input.rds> <output_dir> [compression]")
+    stop("Usage: Rscript 'app/logic/conversions/rds_to_parquet_containers.R <input.rds> <output_dir> [compression]")
   }
 
   list(

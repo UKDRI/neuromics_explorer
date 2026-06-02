@@ -325,7 +325,7 @@ convert_nf_bulk_to_parquet <- function(
   invisible(written)
 }
 
-if (identical(environment(), globalenv()) && !interactive()) {
+if (sys.nframe() == 0) {
   args <- commandArgs(trailingOnly = TRUE)
   if (length(args) < 4) {
     stop(
