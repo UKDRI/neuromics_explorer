@@ -538,6 +538,7 @@ sources:
       tau-V337M_bulk:
         study_id: 1
         display_name: "tau-V337M bulk"
+        study_group: "tau-V337M_bulk"
         source_type: "parquet"
         data_path: "data/Bowles/bulk/conversions"
         omic_type: ["bulk"]
@@ -569,97 +570,126 @@ sources:
         study_name: "tau-V337M 2mo scrna"
         study_id: 2
         display_name: "tau-V337M 2mo scrna"
+        study_group: "tau-V337M_scrna"
         source_type: "parquet"
         data_path: "data/Bowles/scrna/conversions/All_2mo_Clustered"
         omic_type: ["scrna"]
         tables:
           counts: "counts.parquet"
           logcounts: "logcounts.parquet"
-          expression: "expression.parquet"
+          # expression: "expression.parquet"
           obs_metadata: "obs_metadata.parquet"
           feature_annotations: "feature_annotations.parquet"
         feature_cols:
-          - gene_symbol
           - feature_id
-          - feature_type
         metric_cols:
-          - log2fc
-          - padj
-          - pvalue
-          - z_score
+          - counts
         annotations:
-          - comparison
-          - sample_a
-          - sample_b
-          - condition_a
-          - condition_b
-          - timepoint_a
-          - timepoint_b
+          # - comparison
+          # - sample_a
+          # - sample_b
+          # - condition_a
+          # - condition_b
+          # - timepoint_a
+          # - timepoint_b
           - obs
+          - Age
+          - seurat_clusters
+          - CellType
 
       tau-V337M_4mo_scrna:
         study_name: "tau-V337M 4mo scrna"
         study_id: 3
         display_name: "tau-V337M 4mo scrna"
+        study_group: "tau-V337M_scrna"
         source_type: "parquet"
         data_path: "data/Bowles/scrna/conversions/All_4mo_Clustered"
         omic_type: ["scrna"]
         tables:
-          counts: "counts.parquet"
           logcounts: "logcounts.parquet"
-          expression: "expression.parquet"
+          # expression: "expression.parquet"
           obs_metadata: "obs_metadata.parquet"
           feature_annotations: "feature_annotations.parquet"
+          umap: "UMAP.parquet"
+          pca: "PCA.parquet"
+          tsne: "TSNE.parquet"
         feature_cols:
-          - gene_symbol
           - feature_id
-          - feature_type
         metric_cols:
-          - log2fc
-          - padj
-          - pvalue
-          - z_score
+          - counts
         annotations:
-          - comparison
-          - sample_a
-          - sample_b
-          - condition_a
-          - condition_b
-          - timepoint_a
-          - timepoint_b
+          # - comparison
+          # - sample_a
+          # - sample_b
+          # - condition_a
+          # - condition_b
+          # - timepoint_a
+          # - timepoint_b
           - obs
+          - Age
+          - seurat_clusters
+          - CellType
 
       tau-V337M_6mo_scrna:
         study_name: "tau-V337M 6mo scrna"
         study_id: 4
         display_name: "tau-V337M 6mo scrna"
+        study_group: "tau-V337M_scrna"
         source_type: "parquet"
         data_path: "data/Bowles/scrna/conversions/All_6mo_Clustered"
         omic_type: ["scrna"]
         tables:
-          counts: "counts.parquet"
           logcounts: "logcounts.parquet"
-          expression: "expression.parquet"
+          # expression: "expression.parquet"
           obs_metadata: "obs_metadata.parquet"
           feature_annotations: "feature_annotations.parquet"
+          umap: "UMAP.parquet"
+          pca: "PCA.parquet"
+          tsne: "TSNE.parquet"
+        feature_cols:
+          - feature_id
+        metric_cols:
+          - counts
+        annotations:
+          # - comparison
+          # - sample_a
+          # - sample_b
+          # - condition_a
+          # - condition_b
+          # - timepoint_a
+          # - timepoint_b
+          - obs
+          - Age
+          - seurat_clusters
+          - CellType
+      tau-V337M_glutamatergic_deg:
+        study_name: "tau-V337M glutamatergic pooled deg"
+        study_id: 5
+        display_name: "Broad glutamatergic neuronal DEGs for tau-V337M"
+        study_group: "tau-V337M_scrna"
+        source_type: "parquet"
+        data_path: "data/Bowles/scrna/conversions"
+        omic_type: ["scrna"]
+        tables:
+          expression: "expression.parquet"
         feature_cols:
           - gene_symbol
           - feature_id
-          - feature_type
         metric_cols:
           - log2fc
           - padj
           - pvalue
-          - z_score
+          - pct_expressed_a
+          - pct_expressed_b
         annotations:
+          - organism
           - comparison
           - sample_a
           - sample_b
           - condition_a
           - condition_b
-          - timepoint_a
-          - timepoint_b
-          - obs
+          - cell_type
+          - cell_type_label
 
   # --- SALIH / HARDY LAB ---
   salih_hardy:
@@ -822,6 +852,44 @@ sources:
           - sample
           - condition
           - obs
+
+  # --- MARZI LAB ---
+  marzi:
+    lab_name: "Marzi"
+    label: "Marzi bulk RNA-seq"
+    contact: ""
+
+    defaults:
+      source_type: "parquet"
+
+    datasets:
+      BUR_HS_1:
+        study_name: "BUR_HS_1"
+        study_id: 1
+        display_name: "Marzi bulk RNA-seq"
+        source_type: "parquet"
+        data_path: "data/Marzi/BUR_HS_1/conversions"
+        omic_type: ["bulk"]
+        tables:
+          expression: "expression.parquet"
+          counts: "counts.parquet"
+          obs_metadata: "obs_metadata.parquet"
+          feature_annotations: "feature_annotations.parquet"
+        feature_cols:
+          - gene_symbol
+          - feature_id
+        metric_cols:
+          - log2fc
+          - pvalue
+          - padj
+          - base_mean
+          - lfc_se
+        annotations:
+          - comparison
+          - sample_a
+          - sample_b
+          - condition_a
+          - condition_b
 
 
 # # Global Config

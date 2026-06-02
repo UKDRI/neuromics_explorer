@@ -518,7 +518,7 @@ def usage_metrics(request: Request, days: int = Query(30, ge=1, le=365)):
 def gene_index(
     request: Request,
     q: str | None = None,
-    limit: int = Query(5000, ge=1, le=50000),
+    limit: int = Query(5000, ge=1, le=200000),
 ):
     """
     Return the typeahead gene list for the search modal selectize input.
@@ -551,7 +551,7 @@ def gene_index(
 def protein_index(
     request: Request,
     q: str | None = None,
-    limit: int = Query(5000, ge=1, le=50000),
+    limit: int = Query(5000, ge=1, le=200000),
 ):
     """Protein-id sibling of `/genes/index` for the modal's second selectize control."""
     clauses = ["protein_id IS NOT NULL"]

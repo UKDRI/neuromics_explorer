@@ -269,7 +269,7 @@ perform_json_request <- function(path, query = list()) {
 #' UI connection: preloads the gene selectize choices when the dataset-search
 #' modal opens, and narrows those suggestions as the user types.
 #' @export
-fetch_gene_index_genes <- function(query = NULL, limit = 50000L) {
+fetch_gene_index_genes <- function(query = NULL, limit = 200000L) {
   tbl <- perform_arrow_request(
     "/genes/index",
     query = list(q = query, limit = as.integer(limit))
@@ -283,7 +283,7 @@ fetch_gene_index_genes <- function(query = NULL, limit = 50000L) {
 #'
 #' UI connection: mirrors `fetch_gene_index_genes()` for the protein search box.
 #' @export
-fetch_protein_index_ids <- function(query = NULL, limit = 500L) {
+fetch_protein_index_ids <- function(query = NULL, limit = 200000L) {
   tbl <- perform_arrow_request(
     "/proteins/index",
     query = list(q = query, limit = as.integer(limit))
