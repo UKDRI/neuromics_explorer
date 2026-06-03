@@ -278,7 +278,7 @@ violin_server <- function(id, de_data, selected_dataset, padj_thresh, lfc_thresh
         column(4,
           selectInput(
             session$ns("feature_assay"), "Expression level",
-            choices = c("Logcounts" = "logcounts", "Counts" = "counts"),  # , "Expression" = "expression"
+            choices = c("Logcounts" = "logcounts", "Counts" = "counts", "Expression" = "expression"),
             selected = "counts"
           )
         )
