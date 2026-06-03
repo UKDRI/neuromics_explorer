@@ -574,10 +574,11 @@ sources:
         source_type: "parquet"
         data_path: "data/Bowles/scrna/conversions/All_2mo_Clustered"
         omic_type: ["scrna"]
+          missing_embeddings: true    # no UMAP/PCA/tSNE parquets exist
         tables:
           counts: "counts.parquet"
           logcounts: "logcounts.parquet"
-          # expression: "expression.parquet"
+          expression: "feature_annotations.parquet"   # alias for index building instead of "expression.parquet"
           obs_metadata: "obs_metadata.parquet"
           feature_annotations: "feature_annotations.parquet"
         feature_cols:
@@ -607,7 +608,7 @@ sources:
         omic_type: ["scrna"]
         tables:
           logcounts: "logcounts.parquet"
-          # expression: "expression.parquet"
+          expression: "feature_annotations.parquet"   # alias for index building instead of "expression.parquet"
           obs_metadata: "obs_metadata.parquet"
           feature_annotations: "feature_annotations.parquet"
           umap: "UMAP.parquet"
@@ -640,7 +641,7 @@ sources:
         omic_type: ["scrna"]
         tables:
           logcounts: "logcounts.parquet"
-          # expression: "expression.parquet"
+          expression: "feature_annotations.parquet"   # alias for index building instead of "expression.parquet"
           obs_metadata: "obs_metadata.parquet"
           feature_annotations: "feature_annotations.parquet"
           umap: "UMAP.parquet"
@@ -670,6 +671,7 @@ sources:
         source_type: "parquet"
         data_path: "data/Bowles/scrna/conversions"
         omic_type: ["scrna"]
+          missing_embeddings: false
         tables:
           expression: "expression.parquet"
         feature_cols:
