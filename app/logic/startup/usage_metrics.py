@@ -111,12 +111,31 @@ def initialise_usage_metrics(metrics_db_path: str) -> None:
 
 
 def get_client_ip(request) -> str | None:
-    """Prefer proxy-forwarded client IPs when present."""
+    """
+    Preference order for client IPs for usage analytics:
+      1. Browser-supplied public IP header (X-Client-Public-IP or X-Client-IP) - e.g. static/public_ip_cache.js
+         can fetch and cache public IPs, including when proxy/NAT hides real client addresses.
+      2. X-Forwarded-For — standard proxy header (first entry is original client).
+      3. X-Real-IP — some proxies set this header.
+      4. request.client.host — ASGI peer address (may be the proxy IP).
+    """
+    # 1) Browser-based public IP: cached from ipify or similar client-side lookups
+    browser_ip = request.headers.get("x-client-public-ip") or request.headers.get("x-client-ip")
+    if browser_ip:
+        return browser_ip.strip()
+
+    # 2) Standard proxy header: comma-separated list, first item is the original client; also nginx proxy header
     forwarded_for = request.headers.get("x-forwarded-for")
     if forwarded_for:
         return forwarded_for.split(",")[0].strip()
 
-    if request.client:
+    # 3) X-Real-IP: e.g. nginx proxy header
+    real_ip = request.headers.get("x-real-ip")
+    if real_ip:
+        return real_ip.strip()
+
+    # 4) ASGI-reported peer address
+    if getattr(request, "client", None):
         return request.client.host
 
     return None

@@ -35,6 +35,7 @@ from app.logic.startup.usage_metrics import (
     log_request_metrics,
 )
 from app.logic.api.endpoints import router as api_router
+from fastapi.staticfiles import StaticFiles
 
 REGISTRY_YAML = str(_DATA_DIR / "dataset_registry.yml")
 DB_PATH       = str(_DATA_DIR / "neuromics_registry.duckdb")
@@ -105,6 +106,8 @@ app = FastAPI(
     title="Neuromics Explorer",
     version="0.0.0",
     description="Neuromics Explorer visualisation dashboard for UK DRI datasets")
+# Serve static assets (ie JS helper, CSS)
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
 app.include_router(api_router)
 
 
