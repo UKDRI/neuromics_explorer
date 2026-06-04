@@ -3,7 +3,7 @@
  * attach it to API requests via X-Client-Public-IP.
  */
 
-const STORAGE_KEY = "public_ip";
+const STORAGE_KEY = "nex_client_ip";
 
 /**
  * Get cached public IP if available.
@@ -18,6 +18,10 @@ function getCachedPublicIp() {
 export async function getPublicIp() {
   const cached = getCachedPublicIp();
   if (cached) {
+    // Inform Shiny immediately when cached value exists
+    if (typeof window !== "undefined" && window.Shiny && typeof window.Shiny.setInputValue === "function") {
+      try { window.Shiny.setInputValue('nex_client_ip', cached, {priority: 'event'}); } catch (e) {}
+    }
     return cached;
   }
 
@@ -32,6 +36,12 @@ export async function getPublicIp() {
 
     if (ip) {
       localStorage.setItem(STORAGE_KEY, ip);
+      // optional: set cookie for servers that prefer cookies
+      document.cookie = `nex_client_ip=${ip}; path=/; samesite=lax`;
+      // Notify Shiny of detected IP
+      if (typeof window !== "undefined" && window.Shiny && typeof window.Shiny.setInputValue === "function") {
+        try { window.Shiny.setInputValue('nex_client_ip', ip, {priority: 'event'}); } catch (e) {}
+      }
       return ip;
     }
   } catch (err) {
@@ -50,7 +60,10 @@ export async function fetchWithClientIp(url, options = {}) {
   const headers = new Headers(options.headers || {});
 
   if (ip) {
-    headers.set("X-Client-Public-IP", ip);
+    // Use canonical header expected by backend
+    headers.set("X-NEX-Client-IP", ip);
+    // send to Shiny; priority event ensures timely delivery
+    // Shiny.setInputValue('nex_client_ip', ip, {priority: 'event'});
   }
 
   return fetch(url, {

@@ -9,6 +9,23 @@ box::use(
 
 ARROW_MEDIA_TYPE <- "application/vnd.apache.arrow.stream"
 SESSION_HEADER <- "X-NEX-Session-ID"
+CLIENT_IP_HEADER <- "X-NEX-Client-IP"
+
+
+#' @noRd
+api_client_ip <- function() {
+  domain <- shiny::getDefaultReactiveDomain()
+  # Prefer a browser-provided Shiny input when available
+  if (!is.null(domain) && !is.null(domain$input) && !is.null(domain$input$nex_client_ip)) {
+    ipval <- domain$input$nex_client_ip
+    if (!is.null(ipval) && nzchar(as.character(ipval))) return(as.character(ipval))
+  }
+
+  # Fall back to an option or environment variable if set
+  ip_opt <- getOption("nex.client_ip", Sys.getenv("NEX_CLIENT_IP", ""))
+  if (nzchar(ip_opt)) return(ip_opt)
+  NULL
+}
 
 # Internal helpers in this file intentionally stay `@noRd` because they are
 # wiring for one HTTP client implementation, not user-facing package API.
@@ -138,6 +155,15 @@ build_request <- function(base_url, path, query = list(), accept_arrow = TRUE) {
     req <- do.call(
       httr2::req_headers,
       c(list(req), stats::setNames(list(session_id), SESSION_HEADER))
+    )
+  }
+
+  # Attach client public IP when available (provided from browser via Shiny input)
+  client_ip <- api_client_ip()
+  if (!is.null(client_ip) && nzchar(client_ip)) {
+    req <- do.call(
+      httr2::req_headers,
+      c(list(req), stats::setNames(list(client_ip), CLIENT_IP_HEADER))
     )
   }
 

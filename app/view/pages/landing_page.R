@@ -11,6 +11,17 @@ homepage_ui <- function(id) {
   
   tagList(
     useShinyjs(),
+    # Load helper as an ES module and call `getPublicIp()` to kick-start cache on app load.
+    tags$head(
+      tags$script(
+        type = "module",
+        HTML("
+          import { getPublicIp } from '/static/public_ip_cache.js';
+          
+          getPublicIp().catch(()=>{ console.warn('Failed to fetch public IP'); });
+        ")
+      )
+    ),
     tags$head(
       tags$style(HTML("
       

@@ -106,8 +106,7 @@ app = FastAPI(
     title="Neuromics Explorer",
     version="0.0.0",
     description="Neuromics Explorer visualisation dashboard for UK DRI datasets")
-# Serve static assets (ie JS helper, CSS)
-app.mount("/static", StaticFiles(directory="app/static"), name="static")
+app.mount("/static", StaticFiles(directory="app/static"), name="static")    # attach static assets (ie JS helper, CSS)
 app.include_router(api_router)
 
 
