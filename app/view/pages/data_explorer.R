@@ -1093,14 +1093,34 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
       current_state
     }
 
-    # This reactiveVal tracks the current row selection inside Dataset Listings.
-    # The same selected row set powers the combined table, compare tab, and
-    # aggregate value boxes.
+    # ── Datasets ────────────────────────────────────────────
+    # `selected_dataset` holds all search results and searched terms: 
+    # list(
+    #   genes, lab_source, study_id, dataset_name, omic_type,
+    #   selected_datasets, cell_types
+    # )
+    selected_dataset <- reactiveVal(NULL)
+
+    # This reactiveVal tracks the current rows selected inside Dataset Listings and drives 'Expression' and 'Compare' tab
+    # Can also drive the aggregate value boxes.
     listing_selection <- reactiveVal(integer())
     last_dataset_keys <- reactiveVal(character())
 
-    # This reactive exposes the currently selected dataset rows from the
-    # Dataset Listings table.
+    # Active single-dataset selection for 'Plot' tab.
+    active_row <- reactiveVal(NULL)
+    active_dataset <- reactive({
+      ds <- selected_dataset()
+      idx <- active_row()
+      if (is.null(ds) || is.null(ds$selected_datasets) || nrow(ds$selected_datasets) == 0) return(NULL)
+      if (is.null(idx) || length(idx) == 0 || idx < 1 || idx > nrow(ds$selected_datasets)) return(NULL)
+      row <- ds$selected_datasets[idx, , drop = FALSE]
+      row_selected <- as.list(row[1, , drop = FALSE])
+      row_selected$genes <- ds$genes
+      row_selected$proteins <- ds$proteins
+      row_selected
+    })
+
+    # Reactive exposes the currently selected datasets from the Dataset Listings table for the 'Compare' tab.
     compare_source_rows <- reactive({
       ds <- selected_dataset()
       if (is.null(ds) || is.null(ds$selected_datasets) || nrow(ds$selected_datasets) == 0) {
@@ -1116,16 +1136,7 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
       ds$selected_datasets[idx, , drop = FALSE]
     })
 
-    # ── Datasets & sub-modules ────────────────────────────────────────────
-    # selected_dataset holds: list(
-    #   genes, lab_source, study_id, dataset_name, omic_type,
-    #   selected_datasets, cell_types
-    # )
-    selected_dataset <- reactiveVal(NULL)
-    gene_selector_server("gene_selector", selected_dataset)
-    sidebar_vals <- sidebar_server("filters", selected_dataset)
-
-    # Sync URL with selected dataset (i.e. updates on every checkbox toggle in Dataset Listings)
+    # ── Sync URL with selected dataset (i.e. updates on every checkbox toggle in Dataset Listings) ────
     observe({
       ds <- selected_dataset()
       req(!is.null(ds))
@@ -1165,12 +1176,26 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
     # row in Dataset Listings controls which dataset is rendered. ────────────
     # This render block swaps the single-dataset plot module based on the
     # sidebar plot selector while keeping the active dataset row in control.
+    gene_selector_server("gene_selector", selected_dataset)
+    sidebar_vals <- sidebar_server("filters", selected_dataset)
+
     output$plot_ui <- renderUI({
       plot_type <- sidebar_vals$plot_type()
       requires_single_cell <- plot_type %in% c("UMAP", "Dots Plot", "Top Features")
+      active <- active_dataset()
+
+      if (is.null(active)) {
+        return(
+          tags$div(
+            class = "alert alert-info",
+            role = "alert",
+            "Select one or more rows from the dataset listing to render plots."
+          )
+        )
+      }
 
       if (requires_single_cell &&
-          !isTRUE(selected_dataset()$omic_type %in% c("scrna", "snrna"))) {
+          !isTRUE(active$omic_type %in% c("scrna", "snrna"))) {
         return(
           tags$div(
             class = "alert alert-info",
@@ -1202,21 +1227,21 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
         role = "alert",
         style = "margin-bottom: 12px;",
         tags$strong("Expression data is showing: "),
-        paste(ds$dataset_name, "·", ds$omic_type),
+        paste(ds$dataset_name %||% "", "·", ds$omic_type %||% "", ds$lab_source %||% ""),
         tags$br(),
         tags$small("Preview loads the searched terms sorted by padj.")
       )
     })
 
     output$active_dataset_banner_plot <- renderUI({
-      ds <- selected_dataset()
+      ds <- active_dataset()
       if (is.null(ds)) return(NULL)
       tags$div(
         class = "alert alert-secondary",
         role = "alert",
         style = "margin-bottom: 12px;",
         tags$strong("Plot is showing: "),
-        paste(ds$dataset_name, "·", ds$omic_type)
+        paste(ds$dataset_name %||% "", "·", ds$omic_type %||% "", ds$lab_source %||% "")
       )
     })
 
@@ -1319,7 +1344,7 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
     # Volcano gets a lean payload; violin uses a wider but still paginated
     # table slice; the other plot modules fetch their own purpose-built shapes.
     volcano_data <- reactive({
-      ds <- selected_dataset()
+      ds <- active_dataset()
       req(ds)
 
       fetch_expression_volcano(
@@ -1331,7 +1356,7 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
     })
 
     violin_data <- reactive({
-      ds <- selected_dataset()
+      ds <- active_dataset()
       req(ds)
 
       fetch_expression_table(
@@ -1456,7 +1481,7 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
           card(
             full_screen = TRUE,
             card_header(
-              paste0(row$dataset_name[1], " · ", row$lab_source[1], " · ", row$omic_type[1])
+              paste0(row$dataset_name[1], " · ", row$omic_type[1], " · ", row$lab_source[1])
             ),
             card_body(
               plotlyOutput(session$ns(paste0("compare_plot_", i)), height = "420px")
@@ -1632,7 +1657,8 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
       )
     })
 
-    # Reset checkbox state whenever the modal confirms a fresh dataset list.
+    # Reset checkbox state whenever the modal confirms a fresh dataset list by comparing
+    # keys to previous dataset(s) to detect any changes in the listing
     observe({
       ds <- selected_dataset()
       req(ds, !is.null(ds$selected_datasets), nrow(ds$selected_datasets) > 0)
@@ -1641,49 +1667,42 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
       if (!identical(dataset_keys, last_dataset_keys())) {
         last_dataset_keys(dataset_keys)
         listing_selection(seq_len(nrow(ds$selected_datasets)))
+        active_row(1) # defaults to first row
       }
     })
 
-    # Simple Shiny checkbox inputs drive dataset inclusion. The newest checked
-    # row becomes active for the single-dataset Plot tab; checked rows as a
-    # whole drive Expression and Compare.
+    # Simple Shiny checkbox inputs drive dataset inclusion. The newest checked row becomes active
+    # for the single-dataset 'Plot' tab; checked rows as a whole drive 'Expression' and 'Compare.'
     observe({
       current <- selected_dataset()
       req(current, !is.null(current$selected_datasets), nrow(current$selected_datasets) > 0)
 
+      # Determines which datasets were recently un/checked by
+      # converting datasets into a vector of selected row indices and compares to the previous selection
       row_ids <- seq_len(nrow(current$selected_datasets))
       if (!all(vapply(row_ids, function(i) !is.null(input[[paste0("dataset_row_", i)]]), logical(1)))) {
         return(invisible(NULL))
-      }
+      } # guards against unchecked rows by checking before proceeding
 
+      # Selected rows in dataset listing
       row_idx <- which(vapply(row_ids, function(i) isTRUE(input[[paste0("dataset_row_", i)]]), logical(1)))
       previous_idx <- isolate(listing_selection())
       if (identical(row_idx, previous_idx)) {
         return(invisible(NULL))
-      }
+      } # guards against re-triggering when selection hasn't changed
 
       listing_selection(row_idx)
       if (length(row_idx) == 0) {
+        active_row(NULL)
         return(invisible(NULL))
       }
 
-      active_idx <- which(
-        current$selected_datasets$lab_source == current$lab_source &
-        current$selected_datasets$study_id == current$study_id
-      )[1]
-
+      # Check if any new changes made (to promote to active for 'Plot' tab, or demote if an active dataset is unchecked)
       newly_checked <- setdiff(row_idx, previous_idx)
-      target_idx <- if (length(newly_checked) > 0) {
-        utils::tail(newly_checked, 1)
-      } else if (length(active_idx) == 0 || is.na(active_idx) || !(active_idx %in% row_idx)) {
-        row_idx[1]
-      } else {
-        NA_integer_
-      }
-
-      if (!is.na(target_idx)) {
-        row <- current$selected_datasets[target_idx, , drop = FALSE]
-        selected_dataset(set_active_dataset(current, row))
+      if (length(newly_checked) > 0) {
+        active_row(utils::tail(newly_checked, 1))
+      } else if (is.null(active_row()) || !(active_row() %in% row_idx)) {
+        active_row(row_idx[1])
       }
     })
     
@@ -1693,28 +1712,28 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
                    padj_thresh = sidebar_vals$padj_thresh,
                    lfc_thresh  = sidebar_vals$lfc_thresh_min,
                    gene        = reactive({
-                     ds <- selected_dataset()
+                     ds <- active_dataset()
                      terms <- c(ds$genes, ds$proteins)
                      if (is.null(ds) || length(terms) == 0) return(NULL)
                      terms[nzchar(trimws(terms))]
                    }))
-    heatmap_server("heatmap",  selected_dataset,
+    heatmap_server("heatmap",  active_dataset,
                    padj_thresh = sidebar_vals$padj_thresh,
                    lfc_thresh  = sidebar_vals$lfc_thresh_min,
                    n_genes     = reactive(20L))
-    umap_server("umap",       selected_dataset)
+    umap_server("umap",       active_dataset)
     violin_server("violin",    violin_data,
-                  selected_dataset = selected_dataset,
+                  selected_dataset = active_dataset,
                   padj_thresh = sidebar_vals$padj_thresh,
                   lfc_thresh  = sidebar_vals$lfc_thresh_min)
     
     # ── New plot modules ──────────────────────────────────────────────────
-    feature_scatter_server("feature_scatter", selected_dataset,
+    feature_scatter_server("feature_scatter", active_dataset,
                            padj_thresh = sidebar_vals$padj_thresh,
                            lfc_thresh = sidebar_vals$lfc_thresh_min)
-    histogram_server("histogram", selected_dataset, violin_data)  #violin_data reactive as convenient source for histogram metrics/metadata to reduce fetching
-    dots_server("dots", selected_dataset)
-    highest_expr_server("highest_expr", selected_dataset)
+    histogram_server("histogram", active_dataset, violin_data)  #violin_data reactive as convenient source for histogram metrics/metadata to reduce fetching
+    dots_server("dots", active_dataset)
+    highest_expr_server("highest_expr", active_dataset)
     
     # ── Value boxes (tied to dataset_stats) ─────────────────────────────
     stats_row <- reactive({
