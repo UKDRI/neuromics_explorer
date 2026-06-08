@@ -152,22 +152,25 @@ def build_dataset_stats(registry_db_path: str, force: bool = False):
                 feature_stats_query = f"""
                     SELECT
                         COUNT(DISTINCT gene_symbol)                         AS total_features,
-                        SUM(CASE WHEN padj < 0.05 THEN 1 ELSE 0 END)        AS n_sig_features      -- row-level summary
-                        -- COUNT(DISTINCT CASE WHEN padj < 0.05 THEN gene_symbol ELSE NULL END) AS n_sig_features       -- gene-level summaries due to unique rows only
+                        SUM(CASE 
+                            WHEN padj IS NOT NULL AND padj < 0.05 THEN 1
+                            WHEN padj IS NULL AND pvalue IS NOT NULL AND pvalue < 0.05 THEN 1
+                            ELSE 0 END)                                     AS n_sig_features      -- SUM(CASE WHEN padj < 0.05 THEN 1 ELSE 0 END)        AS n_sig_features      -- gene-level summaries due to unique rows only
                     FROM {expr_view}    
                 """ # FROM {db_alias}.main.{expr_table} or FROM {db_alias}.main.{actual_table} or FROM '{data_path}'
                 
                 # Metadata summaries from metadata view (if exists)
                 obs_stats_query = f"""
                     SELECT
-                        COUNT(DISTINCT sample_a) + COUNT(DISTINCT sample_b)       AS total_samples,           -- COUNT(DISTINCT sample_id) AS total_samples,
-                        COUNT(DISTINCT condition_a) + COUNT(DISTINCT condition_b) AS n_conditions,            -- COUNT(DISTINCT condition) AS n_conditions
+                        COUNT(DISTINCT sample_a) + COUNT(DISTINCT sample_b)       AS total_samples,
+                        COUNT(DISTINCT condition_a) + COUNT(DISTINCT condition_b) AS n_conditions,
                         COUNT(DISTINCT cell_id)                                   AS total_cells,
                         COUNT(DISTINCT cell_type)                                 AS n_cell_types,
                         COUNT(DISTINCT cluster_id)                                AS n_clusters,
                         -- DISTINCT AVG(doublet_scores)                           AS avg_doublet_score,            -- JSON_GROUP_ARRAY(DISTINCT doublet_scores) AS doublet_scores_json, -- OR consider TO_JSON(LIST(DISTINCT doublet_scores))
                         TO_JSON(LIST(DISTINCT cell_type))                         AS cell_types_json,                -- json_group_array(DISTINCT cell_type)
-                        TO_JSON(LIST(DISTINCT condition_a || ' vs ' || condition_b)) AS conditions_json,         -- TO_JSON(LIST(DISTINCT struct_pack(cond_a := condition_a, cond_b := condition_b))) AS conditions_json,   -- TO_JSON(LIST(DISTINCT (condition_a, condition_b)))     AS conditions_json,                -- json_group_array(DISTINCT (condition_a, condition_b))  -- json_group_array(DISTINCT condition_a) || json_group_array(DISTINCT condition_b);   JSON_GROUP_ARRAY()
+                        TO_JSON(LIST_DISTINCT(LIST_CAT(LIST(DISTINCT condition_a), LIST(DISTINCT condition_b)))) AS conditions_json,
+                        -- TO_JSON(LIST(DISTINCT condition_a || ' vs ' || condition_b)) AS conditions_json,         -- TO_JSON(LIST(DISTINCT struct_pack(cond_a := condition_a, cond_b := condition_b))) AS conditions_json,   -- TO_JSON(LIST(DISTINCT (condition_a, condition_b)))     AS conditions_json,                -- json_group_array(DISTINCT (condition_a, condition_b))  -- json_group_array(DISTINCT condition_a) || json_group_array(DISTINCT condition_b);   JSON_GROUP_ARRAY()
                         TO_JSON(LIST(DISTINCT tissue))                            AS tissues_json,                   -- json_group_array(DISTINCT tissue)
                         JSON_OBJECT('min', MIN(age), 'max', MAX(age), 'unit', 'months') AS age_range_json,    -- JSON_GROUP_OBJECT gives key/value merging OR JSON_OBJECT for single structure
                         TO_JSON(LIST(DISTINCT sex))                               AS sexes_json                      -- json_group_array(DISTINCT sex)

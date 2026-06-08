@@ -76,12 +76,12 @@ HEURISTIC_MAPPINGS = {
     "normalisation_method": ["normalisation_method", "normalization_method", "norm_method", 
                                 "normalisation", "normalization", "normalisation_type", "normalization_type"],
     # obs (sample/ cell) metadata
-    "sample_a":             ["Sample_or_condition_A", "sample_A", "Sample_A", "Sample_ID"], #"obs", "SampleName"
+    "sample_a":             ["Sample_or_condition_A", "sample_A", "Sample_A", "Sample_ID", "sample", "SampleName", "sample_id"], #"obs"
     "sample_b":             ["Sample_or_condition_B", "sample_B", "Sample_B"],
     "condition_a":          ["condition_a", "condition_A", "group_A", "treatment", "Condition_A", 
-                                "Sample_or_condition_A", "condition", "Condition"], #"obs"
+                                "Sample_or_condition_A", "condition", "Condition"],
     "condition_b":          ["condition_b", "condition_B", "group_B", "control", "Condition_B",
-                                "Sample_or_condition_B", "condition"],
+                                "Sample_or_condition_B"],
     "de_category":          ["DE", "DE_category", "de_category", "DE_Category", "de_group", "DE_group", "Comparison",
                                 "comparison", "Group", "group"],
     "cell_type":            ["cell_type", "Cell_Type", "celltype", "CellType", "cell_label", "cluster_label", 
@@ -90,8 +90,8 @@ HEURISTIC_MAPPINGS = {
     "sex":                  ["gender", "sex", "Sex", "Gender"],
     "tissue":               ["Tissue", "tissue", "brain_region", "region"],
     "cell_line":            ["cell_line", "Cell_Line", "Cell_line", "cellLine", "cell_lineage", "Cell_Lineage", "cellLineage"],
-    "cluster_id":           ["cluster_id", "seurat_clusters", "seurat_cluster", "seurat_clust", "cluster", "clusters", 
-                                "leiden", "louvain"],
+    "cluster_id":           ["cluster_id", "ident", "Fine_cluster", "seurat_clusters", "seurat_cluster", "seurat_clust", "cluster",
+                                 "clusters", "leiden", "louvain"],
     "cell_id":              ["Cell_ID", "cell_id", "cellID", "CellID", "barcode", "cell_barcode"],
     "doublet_scores":       ["scDblFinder_score", "score"],
 }

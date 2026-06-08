@@ -222,6 +222,8 @@ sources:
         annotations:
           - Comparison
           - Subcellular_Location
+          - Sample_or_condition_A
+          - Sample_or_condition_B
         
   # --- WILLIAMS LAB ---
   williams:  
@@ -258,12 +260,13 @@ sources:
           - pct_expressed_a
           - pct_expressed_b
         annotations:
+          - Fine_cluster
           - cluster_id
           - cell_type
-          - sample_a
-          - sample_b
-          - condition_a
-          - condition_b
+          # - sample_a
+          # - sample_b
+          # - condition_a
+          # - condition_b
           - obs
           - Tissue
           - seurat_clusters
@@ -297,11 +300,12 @@ sources:
           - pct_expressed_b
         annotations:
           - cluster_id
+          - ident
           - cell_type
-          - sample_a
-          - sample_b
-          - condition_a
-          - condition_b
+          # - sample_a
+          # - sample_b
+          # - condition_a
+          # - condition_b
           - obs
           - Tissue
           - seurat_clusters
@@ -334,14 +338,12 @@ sources:
         annotations:
           - cluster_id
           - cell_type
-          - sample_a
-          - sample_b
-          - condition_a
-          - condition_b
+          # - sample_a
+          # - sample_b
+          # - condition_a
+          # - condition_b
           - obs
           - Tissue
-          - cluster_id
-          - seurat_clusters
           - gender
           - Age
       04_HCA_microglia_Seeker2023:
@@ -370,13 +372,13 @@ sources:
           - pct_expressed_b
         annotations:
           - cluster_id
+          - ident
           - cell_type
-          - sample_a
-          - sample_b
-          - condition_a
-          - condition_b
+          # - sample_a
+          # - sample_b
+          # - condition_a
+          # - condition_b
           - obs
-          - seurat_clusters
           - microglia_clu
           - Tissue
           - gender
@@ -407,13 +409,13 @@ sources:
           - pct_expressed_b
         annotations:
           - cluster_id
+          - ident
           - cell_type
-          - sample_a
-          - sample_b
-          - condition_a
-          - condition_b
+          # - sample_a
+          # - sample_b
+          # - condition_a
+          # - condition_b
           - obs
-          - seurat_clusters
           - vascular_cells_clu
           - Tissue
           - gender
@@ -445,12 +447,12 @@ sources:
         annotations:
           - cluster_id
           - cell_type
-          - sample_a
-          - sample_b
-          - condition_a
-          - condition_b
+          # - sample_a
+          # - sample_b
+          # - condition_a
+          # - condition_b
           - obs
-          - seurat_clusters
+          - ident
           - neurons_clu
           - Tissue
           - gender
@@ -487,7 +489,7 @@ sources:
           - condition_a
           - condition_b
           - obs
-          - seurat_clusters
+          - ident
           - ol_clusters_named
           - Tissue
           - gender
@@ -523,7 +525,11 @@ sources:
           - expression_padj
           - expression_pvalue
         annotations:
-          - obs
+          - SampleName
+          - Condition
+          - cell_id
+          - Donor
+          # - obs
 
   # --- BOWLES LAB ---
   bowles:
@@ -574,7 +580,7 @@ sources:
         source_type: "parquet"
         data_path: "data/Bowles/scrna/conversions/All_2mo_Clustered"
         omic_type: ["scrna"]
-          missing_embeddings: true    # no UMAP/PCA/tSNE parquets exist
+        missing_embeddings: true    # no UMAP/PCA/tSNE parquets exist
         tables:
           counts: "counts.parquet"
           logcounts: "logcounts.parquet"
@@ -671,7 +677,7 @@ sources:
         source_type: "parquet"
         data_path: "data/Bowles/scrna/conversions"
         omic_type: ["scrna"]
-          missing_embeddings: false
+        missing_embeddings: false
         tables:
           expression: "expression.parquet"
         feature_cols:
@@ -731,7 +737,7 @@ sources:
           - sample_b
           - condition_a
           - condition_b
-          - obs
+          - sample_id #obs #
 
   # --- HARDINGHAM LAB ---
   hardingham:
@@ -771,7 +777,8 @@ sources:
           - sample_b
           - condition_a
           - condition_b
-          - obs
+          - sample_id
+          # - block
 
   # --- RUEPP LAB ---
   ruepp:
@@ -851,6 +858,7 @@ sources:
         annotations:
           - cell_type
           - cluster
+          - leiden
           - sample
           - condition
           - obs
