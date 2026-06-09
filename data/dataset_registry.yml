@@ -127,8 +127,8 @@ sources:
           - Sample_or_condition_A
           - Sample_or_condition_B
           - DE
-      BEC_RNAseq:
-        study_name: "BEC_RNAseq"
+      BEC_RNAseq_LPS_vs_PBS:
+        study_name: "BEC_RNAseq_LPS_vs_PBS"
         study_id: 5
         display_name: "BEC bulk RNAseq "
         source_type: "duckdb"    #overrides source-level defaults
@@ -201,6 +201,7 @@ sources:
           - sample_id
           - cell_id
           - obs
+          - comparison
 
       3KL_vs_WT_ME-Macs_2:
         study_name: "3KL_vs_WT_ME-Macs"

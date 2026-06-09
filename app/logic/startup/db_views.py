@@ -92,8 +92,10 @@ def attach_source_dbs(
 
         # Attach each unique db_path once if not done already, record alias per path
         abs_path = os.path.realpath(data_path)  # ensures lookup is consistent
-        if abs_path and abs_path not in attached_dbs: # two guards against passing None to ATTACH & prevent re-attaching the same db under a second alias with multiple studies
-            alias = f"src_{lab_source}"
+        attached_aliases: set[str] = set()
+
+        alias = f"src_{lab_source}"
+        if alias not in attached_aliases:    # guards against re-attaching the same db under a second alias with multiple studies
             try:
                 con.execute(f"ATTACH '{abs_path}' AS {alias} (READ_ONLY)")
                 attached_dbs[abs_path] = alias

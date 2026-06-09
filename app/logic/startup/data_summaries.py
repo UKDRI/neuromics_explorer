@@ -152,10 +152,10 @@ def build_dataset_stats(registry_db_path: str, force: bool = False):
                 feature_stats_query = f"""
                     SELECT
                         COUNT(DISTINCT gene_symbol)                         AS total_features,
-                        SUM(CASE 
-                            WHEN padj IS NOT NULL AND padj < 0.05 THEN 1
-                            WHEN padj IS NULL AND pvalue IS NOT NULL AND pvalue < 0.05 THEN 1
-                            ELSE 0 END)                                     AS n_sig_features      -- SUM(CASE WHEN padj < 0.05 THEN 1 ELSE 0 END)        AS n_sig_features      -- gene-level summaries due to unique rows only
+                        COUNT(DISTINCT CASE 
+                            WHEN padj IS NOT NULL AND padj < 0.05 THEN gene_symbol
+                            WHEN padj IS NULL AND pvalue IS NOT NULL AND pvalue < 0.05 THEN gene_symbol
+                            ELSE NULL END)                                     AS n_sig_features      -- SUM(CASE WHEN padj < 0.05 THEN 1 ELSE 0 END)        AS n_sig_features      -- gene-level summaries due to unique rows only
                     FROM {expr_view}    
                 """ # FROM {db_alias}.main.{expr_table} or FROM {db_alias}.main.{actual_table} or FROM '{data_path}'
                 
