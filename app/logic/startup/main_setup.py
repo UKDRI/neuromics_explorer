@@ -30,7 +30,7 @@ from app.logic.startup.registry_parser import parse_and_load_registry, build_reg
 from app.logic.startup.data_summaries import build_dataset_stats
 from app.logic.startup.db_pool import DuckDBPool
 from app.logic.startup.usage_metrics import (
-    get_client_ip,
+    get_client_id,
     initialise_usage_metrics,
     log_request_metrics,
 )
@@ -134,7 +134,7 @@ async def track_usage_metrics(request, call_next):
             write_lock,
             recent_requests,
             session_id=session_id,
-            user_ip=get_client_ip(request),
+            user_id=get_client_id(request),
             method=request.method,
             path=request.url.path,
             status_code=response.status_code,

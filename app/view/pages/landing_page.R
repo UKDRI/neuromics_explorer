@@ -16,9 +16,8 @@ homepage_ui <- function(id) {
       tags$script(
         type = "module",
         HTML("
-          import { getPublicIp } from '/static/public_ip_cache.js';
-          
-          getPublicIp().catch(()=>{ console.warn('Failed to fetch public IP'); });
+          import { getUserId } from '/static/get_user_id.js';
+          getUserId().catch(()=>{ console.warn('Failed to fetch or create user ID'); });
         ")
       )
     ),

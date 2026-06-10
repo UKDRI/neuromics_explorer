@@ -9,20 +9,20 @@ box::use(
 
 ARROW_MEDIA_TYPE <- "application/vnd.apache.arrow.stream"
 SESSION_HEADER <- "X-NEX-Session-ID"
-CLIENT_IP_HEADER <- "X-NEX-Client-IP"
+USER_ID_HEADER <- "X-NEX-User-ID"
 
 
 #' @noRd
-api_client_ip <- function() {
-  domain <- shiny::getDefaultReactiveDomain()
+api_user_id <- function() {
+  domain <- shiny::getDefaultReactiveDomain() # lifetime / session ownership management
   # Prefer a browser-provided Shiny input when available
-  if (!is.null(domain) && !is.null(domain$input) && !is.null(domain$input$nex_client_ip)) {
-    ipval <- domain$input$nex_client_ip
+  if (!is.null(domain) && !is.null(domain$input) && !is.null(domain$input$nex_user_id)) {
+    ipval <- domain$input$nex_user_id
     if (!is.null(ipval) && nzchar(as.character(ipval))) return(as.character(ipval))
   }
 
   # Fall back to an option or environment variable if set
-  ip_opt <- getOption("nex.client_ip", Sys.getenv("NEX_CLIENT_IP", ""))
+  ip_opt <- getOption("nex.user_id", Sys.getenv("NEX_USER_ID", ""))
   if (nzchar(ip_opt)) return(ip_opt)
   NULL
 }
@@ -159,11 +159,11 @@ build_request <- function(base_url, path, query = list(), accept_arrow = TRUE) {
   }
 
   # Attach client public IP when available (provided from browser via Shiny input)
-  client_ip <- api_client_ip()
-  if (!is.null(client_ip) && nzchar(client_ip)) {
+  user_id <- api_user_id()
+  if (!is.null(user_id) && nzchar(user_id)) {
     req <- do.call(
       httr2::req_headers,
-      c(list(req), stats::setNames(list(client_ip), CLIENT_IP_HEADER))
+      c(list(req), stats::setNames(list(user_id), USER_ID_HEADER))
     )
   }
 

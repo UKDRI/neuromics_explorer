@@ -51,7 +51,7 @@ def initialise_usage_metrics(metrics_db_path: str) -> None:
         con.execute(
             """
             CREATE TABLE IF NOT EXISTS visitor_stats (
-                user_ip TEXT PRIMARY KEY,
+                user_id TEXT PRIMARY KEY,
                 first_visit TEXT,
                 last_visit TEXT,
                 total_visits INTEGER DEFAULT 0,
@@ -67,7 +67,7 @@ def initialise_usage_metrics(metrics_db_path: str) -> None:
             """
             CREATE TABLE IF NOT EXISTS visitor_sessions (
                 session_id TEXT PRIMARY KEY,
-                user_ip TEXT,
+                user_id TEXT,
                 first_visit TEXT,
                 last_visit TEXT,
                 first_path TEXT,
@@ -82,7 +82,7 @@ def initialise_usage_metrics(metrics_db_path: str) -> None:
                 visited_at TEXT,
                 event_date TEXT,
                 session_id TEXT,
-                user_ip TEXT,
+                user_id TEXT,
                 method TEXT,
                 path TEXT,
                 search_event INTEGER DEFAULT 0,
@@ -110,35 +110,24 @@ def initialise_usage_metrics(metrics_db_path: str) -> None:
         con.close()
 
 
-def get_client_ip(request) -> str | None:
+def get_client_id(request) -> str | None:
     """
     Preference order for client IPs for usage analytics:
-      1. Browser-supplied public IP header (X-NEX-Client-IP or X-Client-IP) - e.g. static/public_ip_cache.js
-         can fetch and cache public IPs, including when proxy/NAT hides real client addresses.
-      2. X-Forwarded-For — standard proxy header (first entry is original client).
-      3. X-Real-IP — some proxies set this header.
-      4. request.client.host — ASGI peer address (may be the proxy IP).
+      1. Browser-persistent UUID - e.g. nex_user_id from static/get_user_id.js
+      2. X-Forwarded-For — standard proxy header
+      3. X-Real-IP: - nginx proxy header
+      4. request.client.host attributes — ASGI peer address (may be the proxy IP).
     """
-    # 1) Browser-based public IP: cached from ipify or similar client-side lookups
-    browser_ip = request.headers.get("x-nex-client-ip") or request.headers.get("x-client-ip")
-    if browser_ip:
-        return browser_ip.strip()
-
-    # 2) Standard proxy header: comma-separated list, first item is the original client; also nginx proxy header
-    forwarded_for = request.headers.get("x-forwarded-for")
-    if forwarded_for:
-        return forwarded_for.split(",")[0].strip()
-
-    # 3) X-Real-IP: e.g. nginx proxy header
-    real_ip = request.headers.get("x-real-ip")
-    if real_ip:
-        return real_ip.strip()
-
-    # 4) ASGI-reported peer address
-    if getattr(request, "client", None):
-        return request.client.host
-
-    return None
+    return(
+        # 1) Browser-based public ID or similar client-side lookups
+        request.headers.get("x-nex-user-id")
+        # 2) Standard proxy header: comma-separated list, first item is the original client; also nginx proxy header
+        or request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+        # 3) X-Real-IP: e.g. nginx proxy header
+        or request.headers.get("x-real-ip").strip()
+        # 4) ASGI-reported peer address
+        or getattr(request, "host", None)   #client
+    )
 
 
 def should_track_path(path: str) -> bool:
@@ -184,7 +173,7 @@ def log_request_metrics(
     recent_requests: dict[tuple[str, str, str, int], float],
     *,
     session_id: str | None,
-    user_ip: str | None,
+    user_id: str | None,
     method: str,
     path: str,
     status_code: int,
@@ -193,7 +182,7 @@ def log_request_metrics(
     referer: str | None,
 ) -> None:
     """Persist one request and update the per-visitor logs."""
-    if not user_ip or not session_id or not should_track_path(path):
+    if not user_id or not session_id or not should_track_path(path):
         return
 
     now = datetime.now(timezone.utc)
@@ -219,12 +208,12 @@ def log_request_metrics(
                 con.execute(
                     """
                     INSERT INTO visitor_sessions (
-                        session_id, user_ip, first_visit, last_visit,
+                        session_id, user_id, first_visit, last_visit,
                         first_path, last_path, user_agent
                     )
                     VALUES (?, ?, ?, ?, ?, ?, ?)
                     """,
-                    [session_id, user_ip, now_iso, now_iso, path, path, user_agent],
+                    [session_id, user_id, now_iso, now_iso, path, path, user_agent],
                 )
             else:
                 con.execute(
@@ -239,7 +228,7 @@ def log_request_metrics(
             con.execute(
                 """
                 INSERT INTO request_log (
-                    visited_at, event_date, session_id, user_ip, method, path,
+                    visited_at, event_date, session_id, user_id, method, path,
                     search_event, status_code, duration_ms, user_agent, referer
                 )
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -248,7 +237,7 @@ def log_request_metrics(
                     now_iso,
                     event_date,
                     session_id,
-                    user_ip,
+                    user_id,
                     method,     
                     path,
                     search_event, 
@@ -261,11 +250,11 @@ def log_request_metrics(
             con.execute(
                 """
                 INSERT INTO visitor_stats (
-                    user_ip, first_visit, last_visit, total_visits, total_requests,
+                    user_id, first_visit, last_visit, total_visits, total_requests,
                     last_session_id, last_path, last_method, last_user_agent
                 )
                 VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?)
-                ON CONFLICT(user_ip) DO UPDATE SET
+                ON CONFLICT(user_id) DO UPDATE SET
                     last_visit = excluded.last_visit,
                     total_visits = visitor_stats.total_visits + excluded.total_visits,
                     total_requests = visitor_stats.total_requests + 1,
@@ -275,7 +264,7 @@ def log_request_metrics(
                     last_user_agent = excluded.last_user_agent
                 """,
                 [
-                    user_ip,
+                    user_id,
                     now_iso,
                     now_iso,
                     1 if is_new_session else 0,
