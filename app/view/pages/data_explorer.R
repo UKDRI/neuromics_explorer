@@ -1491,8 +1491,8 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
       )
     })
 
-    # This observe keeps the Compare tab plot outputs in sync with the current
-    # dataset set and selected plot type by binding one renderPlotly per card.
+    # Keep 'Compare' tab plot outputs in sync with the current dataset set and selected 
+    # plot type by binding one renderPlotly per card.
     observe({
       datasets <- compare_source_rows()
       plot_type <- sidebar_vals$plot_type()
@@ -1657,8 +1657,8 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
       )
     })
 
-    # Reset checkbox state whenever the modal confirms a fresh dataset list by comparing
-    # keys to previous dataset(s) to detect any changes in the listing
+    # ── Reset checkbox state ─────────────────────────────────────────
+    # Compare keys to previous dataset(s) to detect any changes in the listing whenever the search modal confirms a fresh dataset list
     observe({
       ds <- selected_dataset()
       req(ds, !is.null(ds$selected_datasets), nrow(ds$selected_datasets) > 0)
@@ -1671,8 +1671,8 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
       }
     })
 
-    # Simple Shiny checkbox inputs drive dataset inclusion. The newest checked row becomes active
-    # for the single-dataset 'Plot' tab; checked rows as a whole drive 'Expression' and 'Compare.'
+    # ── Checkbox drive dataset inclusion ───────────────────────────────
+    # The newest checked row becomes active for the single-dataset 'Plot' tab; all checked rows drive 'Expression' and 'Compare' tabs.
     observe({
       current <- selected_dataset()
       req(current, !is.null(current$selected_datasets), nrow(current$selected_datasets) > 0)
