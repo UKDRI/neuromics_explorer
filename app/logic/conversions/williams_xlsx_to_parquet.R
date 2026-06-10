@@ -1,6 +1,6 @@
 #!/usr/bin/env Rscript
 
-# Convert the Williams Seeker2023 Excel DE workbook into per-dataset parquet files.
+# Convert the Williams Seeker2023 Excel DE workbooks (MOESM2, MOESM4, MOESM5) into per-dataset parquet files.
 # -----------------------------------------------------------------------------
 # This is intentionally much simpler than the generic RDS conversion scripts:
 # the workbook already contains flat DE-style tables, so the job here is to:
@@ -85,7 +85,7 @@ standardise_williams_expression <- function(df,
     condition_a = ifelse(is.na(default_condition_a), NA_character_, default_condition_a),
     condition_b = ifelse(is.na(default_condition_b), NA_character_, default_condition_b),
     cell_type = as.character(df$cell_lineage),
-    cluster_id = ifelse(is.na(df$cluster), as.character(df$cluster), NA_character_),
+    cluster_id = ifelse(is.na(df$cluster), NA_character_, as.character(df$cluster)),
     cluster_description = as.character(df$variable),
     stringsAsFactors = FALSE
   )
@@ -137,7 +137,7 @@ convert_williams_xlsx_to_parquet <- function(
 
   normalise_key <- function(x) {
     tolower(gsub("[^a-z0-9]+", "_", trimws(as.character(x))))
-  }
+  } #gsub("[^A-Za-z0-9]+", "_", tolower(trimws(as.character(x))))
 
   written <- character(0)
 
@@ -188,7 +188,7 @@ convert_williams_xlsx_to_parquet <- function(
   invisible(unique(written))
 }
 
-if (identical(environment(), globalenv()) && !interactive()) {
+if (sys.nframe() == 0) {
   args <- commandArgs(trailingOnly = TRUE)
   xlsx_path <- if (length(args) >= 1) args[[1]] else "data/Williams/snrna/03_Seeker_seurat_objects/40478_2023_1568_MOESM4_ESM.xlsx"
   output_root <- if (length(args) >= 2) args[[2]] else "data/Williams/snrna/conversions"

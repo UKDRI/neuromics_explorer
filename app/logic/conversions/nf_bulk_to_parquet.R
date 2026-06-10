@@ -68,7 +68,7 @@ parse_differential_filename <- function(path) {
   differential_prefix <- sub("_.*", "", filename)
 
   comparison <- sub("\\.deseq2\\.results_filtered\\.tsv$", "", filename, ignore.case = TRUE)
-  comparison <- sub("^[^_]+_", "", comparison, ignore.case = TRUE)
+  comparison <- sub("^[^_]+_*", "", comparison, ignore.case = TRUE)
   parts <- strsplit(comparison, "__", fixed = TRUE)[[1]]
   left <- parts[1] %||% comparison
   right <- parts[2] %||% NA_character_
