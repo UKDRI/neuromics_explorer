@@ -16,15 +16,23 @@ USER_ID_HEADER <- "X-NEX-User-ID"
 api_user_id <- function() {
   domain <- shiny::getDefaultReactiveDomain() # lifetime / session ownership management
   # Prefer a browser-provided Shiny input when available
-  if (!is.null(domain) && !is.null(domain$input) && !is.null(domain$input$nex_user_id)) {
-    ipval <- domain$input$nex_user_id
-    if (!is.null(ipval) && nzchar(as.character(ipval))) return(as.character(ipval))
+  if (!is.null(domain)) {
+    val <- domain$input$nex_user_id
+    if (!is.null(val) && nzchar(as.character(val))) return(as.character(val))
+
+    # Set cookie synchronously (by JS before Shiny connects to prevent race issue)
+    cookie_header <- domain$request$HTTP_COOKIE
+    if (!is.null(cookie_header)) {
+      m <- regmatches(cookie_header, regexpr("nex_user_id=([^;]+)", cookie_header))
+      if (length(m)) return(sub("nex_user_id=", "", m))
+    }
   }
 
-  # Fall back to an option or environment variable if set
+  # Final fall back to an option or environment variable if set
   ip_opt <- getOption("nex.user_id", Sys.getenv("NEX_USER_ID", ""))
   if (nzchar(ip_opt)) return(ip_opt)
   NULL
+
 }
 
 # Internal helpers in this file intentionally stay `@noRd` because they are

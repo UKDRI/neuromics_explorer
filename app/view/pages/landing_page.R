@@ -17,7 +17,7 @@ homepage_ui <- function(id) {
         type = "module",
         HTML("
           import { getUserId } from '/static/get_user_id.js';
-          getUserId().catch(()=>{ console.warn('Failed to fetch or create user ID'); });
+          getUserId();
         ")
       )
     ),

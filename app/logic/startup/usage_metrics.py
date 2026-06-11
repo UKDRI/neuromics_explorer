@@ -112,21 +112,27 @@ def initialise_usage_metrics(metrics_db_path: str) -> None:
 
 def get_client_id(request) -> str | None:
     """
-    Preference order for client IPs for usage analytics:
-      1. Browser-persistent UUID - e.g. nex_user_id from static/get_user_id.js
-      2. X-Forwarded-For — standard proxy header
-      3. X-Real-IP: - nginx proxy header
-      4. request.client.host attributes — ASGI peer address (may be the proxy IP).
+    Return a stable client identifier for usage analytics.
+
+    Preference order:
+      1. Browser-generated UUID supplied via X-NEX-User-ID header (from static/get_user_id.js).
+      2. Browser-generated UUID stored in the nex_user_id cookie (from static/get_user_id.js).
+      3. X-Forwarded-For original client IP (proxy header fallback).
+      4. X-Real-IP (proxy header fallback).
+      5. request.client.host (ASGI peer address fallback).
+
+    The UUID-based identifiers are preferred because multiple users may
+    share the same IP address and individual users may change IPs over time.
     """
     return(
-        # 1) Browser-based public ID or similar client-side lookups
+        # Browser-based user identifier
         request.headers.get("x-nex-user-id")
-        # 2) Standard proxy header: comma-separated list, first item is the original client; also nginx proxy header
+        or request.cookies.get("nex_user_id")   # TODO: consider implementing cookie first to use IP: document.cookie: 'nex_client_ip=144.82.114.207; nex_user_id=ffcc7348-0dd2-4941-8f7d-1d272403aef2'
+
+        # IP-based fallbacks
         or request.headers.get("x-forwarded-for", "").split(",")[0].strip()
-        # 3) X-Real-IP: e.g. nginx proxy header
-        or request.headers.get("x-real-ip").strip()
-        # 4) ASGI-reported peer address
-        or getattr(request, "host", None)   #client
+        or (request.headers.get("x-real-ip") or "").strip()
+        or getattr(request.client, "host", None)
     )
 
 
