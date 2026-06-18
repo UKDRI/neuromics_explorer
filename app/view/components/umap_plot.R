@@ -99,16 +99,17 @@ umap_server <- function(id, selected_dataset) {
       ds <- selected_dataset()
       req(ds, is_single_cell())
 
-        tryCatch(fetch_dataset_embeddings(
+      result <- tryCatch(fetch_dataset_embeddings(
           lab_source = ds$lab_source,
-          study_id = ds$study_id,
-          reduction = input$reduction,
-          assay = input$assay,
-          genes = input$embedding_terms %||% character(0)
+          study_id   = ds$study_id,
+          reduction  = input$reduction,
+          assay      = input$assay,
+          genes      = input$embedding_terms %||% character(0)
         ),
           error = function(e) NULL
         )
-        req(!is.null(embedding_data))
+      req(!is.null(result))
+      result
     })
 
     checked_terms <- reactive({
