@@ -4,6 +4,7 @@ box::use(
   shiny[NS, moduleServer, reactive, req, tagList, selectInput, updateSelectInput,
         observe, uiOutput, renderUI, checkboxGroupInput, tags],
   plotly[plotlyOutput, renderPlotly, plot_ly, layout],
+  stringi[stri_sort],
   tidyr[pivot_wider],
   tibble[column_to_rownames],
   app/logic/api/api_client[fetch_top_de, fetch_expression_goi],
@@ -103,46 +104,29 @@ heatmap_server <- function(id, selected_dataset,
     })
 
     heatmap_data <- reactive({
-      df <- top_genes()
+      top_df <- top_genes()
+
+      req(nrow(top_df) > 0)
+
+      top_gene_symbols <- unique(top_df$gene_symbol)
       selected_terms <- input$heatmap_terms %||% character(0)
       selected_terms <- selected_terms[nzchar(selected_terms)]
-
-      if (length(selected_terms) == 0) {
-        return(df)
-      }
+      all_genes <- unique(c(top_gene_symbols, selected_terms))
 
       ds <- selected_dataset()
       req(ds)
-      selected_df <- fetch_expression_goi(
+      fetch_expression_goi(
         lab_source = ds$lab_source,
         study_id = ds$study_id,
-        genes = selected_terms,
+        genes = all_genes,
         limit = 5000L
       )
 
-      if (nrow(selected_df) == 0) {
-        return(df)
-      }
-
-      # Ensure GOI rows have de_category if top_genes rows do to append without issue
-      group_col <- input$x_axis %||% "de_category"
-      if (!group_col %in% names(selected_df)) {
-        selected_df[[group_col]] <- selected_df[[group_col]][1] #"GOI"
-      }
-      if (!"de_category" %in% names(selected_df)) { #"de_category" %in% names(df) && !"de_category" %in% names(selected_df)
-        selected_df$de_category <- "GOI"
-      }
-
-      common_cols <- union(names(df), names(selected_df))
-      for (col in setdiff(common_cols, names(df))) df[[col]] <- NA
-      for (col in setdiff(common_cols, names(selected_df))) selected_df[[col]] <- NA
-
-      combined <- rbind(df[, common_cols, drop = FALSE], selected_df[, common_cols, drop = FALSE])
-      combined
     })
 
     x_axis_choices <- reactive({
       df <- heatmap_data()
+      # Ensure GOI and top-de rows have de_category column
       df$de_category <- build_de_category(df)
       choices <- c()
       for (candidate in names(group_label_map)) {
@@ -205,7 +189,7 @@ heatmap_server <- function(id, selected_dataset,
       plot_source <- df[, intersect(c("gene_symbol", group_col, "log2fc"), names(df)), drop = FALSE]
       # plot_source <- df[, c("gene_symbol", group_col, "log2fc"), drop = FALSE]
       names(plot_source)[names(plot_source) == group_col] <- "group"
-      plot_source <- plot_source[!is.na(plot_source$gene_symbol) & (!is.na(plot_source$group) | plot_source$group == "GOI"), , drop = FALSE]
+      plot_source <- plot_source[!is.na(plot_source$gene_symbol) & (!is.na(plot_source$group)), , drop = FALSE]
       req(nrow(plot_source) > 0)
 
       selected_terms <- input$heatmap_terms %||% character(0)
@@ -218,9 +202,11 @@ heatmap_server <- function(id, selected_dataset,
           names_from = group,
           values_from = log2fc,
           values_fn = mean, #value
-          values_fill = 0
+          values_fill = NA_real_  #filters out genes or gene-cluster combos that have been dropped due to significance filter, shows up as a neutral gaps/transparent 
         ) |>
         tibble::column_to_rownames("gene_symbol")
+
+      req(nrow(mat_df) > 0)
 
       mat_df <- mat_df[row_order[row_order %in% rownames(mat_df)], , drop = FALSE]
 
@@ -241,7 +227,14 @@ heatmap_server <- function(id, selected_dataset,
         hovertemplate = "%{y} · %{x}<br>log2FC: %{z:.3f}<extra></extra>"
       ) |>
         plotly::layout(
-          xaxis = list(title = group_title %||% "X-axis", tickangle = -45),
+          xaxis = list(title = group_title %||% "X-axis", tickangle = -45,
+            type = "category",
+            categoryorder = "array",
+            categoryarray = stringi::stri_sort(colnames(mat)),
+            tickmode = "array",
+            tickvals = colnames(mat),
+            ticktext = colnames(mat),
+            tickangle = 45),
           yaxis = list(title = "",
                        automargin = TRUE,
                        tickmode   = "array",
