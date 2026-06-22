@@ -203,14 +203,20 @@ heatmap_server <- function(id, selected_dataset,
           values_from = log2fc,
           values_fn = mean, #value
           values_fill = NA_real_  #filters out genes or gene-cluster combos that have been dropped due to significance filter, shows up as a neutral gaps/transparent 
-        ) |>
-        tibble::column_to_rownames("gene_symbol")
+        )
 
       req(nrow(mat_df) > 0)
 
-      mat_df <- mat_df[row_order[row_order %in% rownames(mat_df)], , drop = FALSE]
-
+      # Replaces `pivot_wider |> column_to_rownames("gene_symbol")` to prevent issues with values bleeding through instead of NA_real_ on hover tip
+      gene_col <- mat_df$gene_symbol
+      mat_df$gene_symbol <- NULL
       mat <- as.matrix(mat_df)
+      rownames(mat) <- gene_col
+
+      row_idx <- match(row_order, rownames(mat))
+      row_idx <- row_idx[!is.na(row_idx)]
+      mat <- mat[row_idx, , drop = FALSE]
+
       group_title <- names(x_axis_choices())[match(group_col, unname(x_axis_choices()))]
 
       plotly::plot_ly(
@@ -218,6 +224,7 @@ heatmap_server <- function(id, selected_dataset,
         x = colnames(mat),
         y = rownames(mat),
         type = "heatmap",
+        zsmooth=FALSE, hoverongaps = FALSE,   # prevents values bleeding into hovertip instead of showing NA/null (ie 'Cluster' grouping on scrna)
         colorscale = list(
           c(0, "#2980B9"),   # blue  (down)
           c(0.5, "#FFFFFF"), # white (0)
@@ -225,6 +232,11 @@ heatmap_server <- function(id, selected_dataset,
         ),
         zmid = 0,
         hovertemplate = "%{y} · %{x}<br>log2FC: %{z:.3f}<extra></extra>"
+        # hovertemplate = ifelse(
+        #   is.na(df$condition_b),
+        #   paste0("%{y} · %{x} (vs. rest)<br>log2FC: %{z:.3f}<extra></extra>"),
+        #   paste0("%{y} · %{x} (vs. ", df$condition_b, ")<br>log2FC: %{z:.3f}<extra></extra>")
+        # )
       ) |>
         plotly::layout(
           xaxis = list(title = group_title %||% "X-axis", tickangle = -45,
