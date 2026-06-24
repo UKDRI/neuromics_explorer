@@ -12,21 +12,11 @@ umap_ui <- function(id) {
     fluidRow(
       column(
         4,
-        selectInput(
-          ns("reduction"),
-          "Embedding",
-          choices = c("UMAP" = "umap", "PCA" = "pca", "tSNE" = "tsne"),
-          selected = "umap"
-        )
+        uiOutput(ns("reduction_ui"))
       ),
       column(
         4,
-        selectInput(
-          ns("assay"),
-          "Expression assay",
-          choices = c("Logcounts" = "logcounts", "Counts" = "counts"),  #, "Expression" = "expression"
-          selected = "logcounts"
-        )
+        uiOutput(ns("assay_ui"))
       ),
       column(
         4,
@@ -142,6 +132,48 @@ umap_server <- function(id, selected_dataset) {
         }
       }
       NULL
+    })
+
+    ASSAY_LABELS     <- c(Logcounts = "logcounts", Counts = "counts", Expression = "expression")
+    REDUCTION_LABELS <- c(UMAP = "umap", PCA = "pca", TSNE = "tsne")
+
+    output$assay_ui <- renderUI({
+      ds      <- selected_dataset()
+
+      ### DEBUG
+      message("available_assays: ", paste(ds$available_assays, collapse=", "))
+      utils::str(ds$available_assays)
+      ### DEBUG
+
+      avail   <- tolower(unlist(ds$available_assays))
+      choices <- ASSAY_LABELS[ASSAY_LABELS %in% avail]
+      if (length(choices) == 0) {
+        return(tags$div(class = "alert alert-warning", "No expression assay is currently available for this dataset."))
+      }
+      # if (length(choices) == 0) choices <- c("logcounts" = "logcounts")
+      selectInput(session$ns("assay"), "Expression assay",
+        choices = choices, selected = names(choices)[1])
+    })
+
+    output$reduction_ui <- renderUI({
+      ds      <- selected_dataset()
+
+      ### DEBUG
+      message("available_reductions: ", paste(ds$available_reductions, collapse=", "))
+      utils::str(ds$available_reductions)
+      print(ds$available_reductions)
+      print("...")
+      # print()
+      ### DEBUG
+
+      avail   <- tolower(unlist(ds$available_reductions))
+      choices <- REDUCTION_LABELS[REDUCTION_LABELS %in% avail]
+      if (length(choices) == 0) {
+        return(tags$div(class = "alert alert-warning", "No embeddings currently available for this dataset."))
+      }
+      # if (length(choices) == 0) choices <- c("UMAP" = "umap")
+      selectInput(session$ns("reduction"), "Embedding",
+        choices = choices, selected = names(choices)[1])
     })
 
     output$plots_ui <- renderUI({

@@ -11,6 +11,7 @@ import re
 import sqlite3
 
 import duckdb
+import pyarrow as pa
 import pyarrow.ipc as ipc
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 
@@ -1507,6 +1508,18 @@ def metadata_options(request: Request, lab: str, study_id: int):
     with get_conn(pool) as con:
         src_view = _resolve_metadata_source_view(con, lab, study_id)
 
+        ASSAY_KEYS     = {"logcounts", "counts", "expression"}
+        REDUCTION_KEYS = {"umap", "pca", "tsne"}
+        logical_tables = {
+            row[0]
+            for row in con.execute(
+                "SELECT logical_table FROM table_mappings WHERE lab_source = ? AND study_id = ?",
+                [lab, study_id]
+            ).fetchall()
+        }
+        available_assays     = sorted(logical_tables & ASSAY_KEYS)
+        available_reductions = sorted(logical_tables & REDUCTION_KEYS)
+        
         table = con.execute(f"""
             SELECT
               LIST(DISTINCT sample_a ORDER BY sample_a) AS sample_a,
@@ -1516,7 +1529,35 @@ def metadata_options(request: Request, lab: str, study_id: int):
               LIST(DISTINCT cell_type ORDER BY cell_type) AS cell_types,
               LIST(DISTINCT tissue ORDER BY tissue) AS tissues
             FROM {src_view}
-        """).arrow()
+        """).arrow().read_all()
+
+        #DEBUG
+        print("available_assays....", available_assays)
+        print("available_reductions", available_reductions)
+        # print("num_rows =", table.read_all().num_rows)        # this actually consumes the stream object
+        # print(table.read_all().schema)
+
+        # if table.num_rows == 0:
+        #     empty_lists = pa.array([[]], type=pa.list_(pa.string()))
+        #     table = pa.table({col: empty_lists for col in table.column_names})
+
+        # table = table.append_column(
+        #     "available_assays", pa.array([available_assays] * table.read_all().num_rows)
+        # ).append_column(
+        #     "available_reductions", pa.array([available_reductions] * table.read_all().num_rows)
+        # )
+        table = (
+            table.append_column(
+                "available_assays", pa.array([available_assays], type=pa.list_(pa.string()))
+            )
+            .append_column(
+                "available_reductions", pa.array([available_reductions], type=pa.list_(pa.string()))
+            )
+        )
+
+        ### DEBUG
+        print(type(table))
+        print(table.schema)
 
     return _arrow_response(table)
 

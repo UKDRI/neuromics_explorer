@@ -52,25 +52,25 @@ gene_selector_server <- function(id, selected_dataset) {
     ns <- session$ns
 
     # Resolve cell-type choices for the active dataset so the sidebar can update immediately.
-    get_active_cell_types <- function(rows) {
-      if (nrow(rows) == 0) return(character(0))
+    # get_active_cell_types <- function(rows) {
+    #   if (nrow(rows) == 0) return(character(0))
 
-      active_row <- rows[1, , drop = FALSE]
-      opts <- tryCatch(
-        fetch_metadata_filter_options(
-          active_row$lab_source[1],
-          active_row$study_id[1]
-        ),
-        error = function(e) NULL
-      )
+    #   active_row <- rows[1, , drop = FALSE]
+    #   opts <- tryCatch(
+    #     fetch_metadata_filter_options(
+    #       active_row$lab_source[1],
+    #       active_row$study_id[1]
+    #     ),
+    #     error = function(e) NULL
+    #   )
 
-      if (is.null(opts) || !"cell_types" %in% names(opts) || length(opts$cell_types) == 0) {
-        return(character(0))
-      }
+    #   if (is.null(opts) || !"cell_types" %in% names(opts) || length(opts$cell_types) == 0) {
+    #     return(character(0))
+    #   }
 
-      cts <- opts$cell_types[[1]]
-      cts[!is.na(cts) & nzchar(cts)]
-    }
+    #   cts <- opts$cell_types[[1]]
+    #   cts[!is.na(cts) & nzchar(cts)]
+    # }
 
     # Collapse selected rows down to one row per dataset and keep the first row active.
     build_selected_payload <- function(rows, genes, proteins) {
@@ -97,15 +97,23 @@ gene_selector_server <- function(id, selected_dataset) {
         ) |>
         dplyr::arrange(lab_source, study_id)
 
+      active <- selected_rows[1, , drop = FALSE]
+      opts <- tryCatch(
+        fetch_metadata_filter_options(active$lab_source[1], active$study_id[1]),
+        error = function(e) list()
+      )
+
       list(
-        genes             = genes,
-        proteins          = proteins,
-        lab_source        = selected_rows$lab_source[1],
-        study_id          = selected_rows$study_id[1],
-        dataset_name      = selected_rows$dataset_name[1],
-        omic_type         = selected_rows$omic_type[1],
-        selected_datasets = selected_rows,
-        cell_types        = get_active_cell_types(selected_rows)
+        genes                = genes,
+        proteins             = proteins,
+        lab_source           = selected_rows$lab_source[1],
+        study_id             = selected_rows$study_id[1],
+        dataset_name         = selected_rows$dataset_name[1],
+        omic_type            = selected_rows$omic_type[1],
+        selected_datasets    = selected_rows,
+        cell_types           = opts$cell_types %||% character(0),  #get_active_cell_types(selected_rows)
+        available_assays     = opts$available_assays,
+        available_reductions = opts$available_reductions
       )
     }
 
@@ -420,6 +428,21 @@ gene_selector_server <- function(id, selected_dataset) {
       proteins <- unique(trimws(input$protein_query %||% character(0)))
       proteins <- proteins[nzchar(proteins)]
       req(length(genes) > 0 || length(proteins) > 0)
+
+      # ### DEBUG
+      # payload <- build_selected_payload(selected_rows, genes, proteins)
+
+      # message("PAYLOAD NAMES:")
+      # print(names(payload))
+
+      # message("PAYLOAD ASSAYS:")
+      # print(payload$available_assays)
+
+      # message("PAYLOAD REDUCTIONS:")
+      # print(payload$available_reductions)
+
+      # selected_dataset(payload)
+      # ### DEBUG
 
       selected_dataset(build_selected_payload(selected_rows, genes, proteins))
       removeModal()

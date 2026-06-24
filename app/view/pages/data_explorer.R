@@ -350,6 +350,17 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
 
       # Active row in dataset listings table
       active_row <- rows[1, , drop = FALSE]
+      opts <- tryCatch(
+        fetch_metadata_filter_options(active_row$lab_source[1], active_row$study_id[1]),
+        error = function(e) list()
+      )
+
+      ### DEBUG
+      cat("\nopts names:\n")
+      print(names(opts))
+      print(opts$available_assays)
+      ####
+      
       # Returns list matching shape produced by gene_dataset_selector modal
       list(
         genes             = params$genes,
@@ -359,10 +370,9 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
         dataset_name      = active_row$dataset_name[1],
         omic_type         = active_row$omic_type[1],
         selected_datasets = rows,
-        cell_types        = load_active_cell_types(
-          active_row$lab_source[1],
-          active_row$study_id[1]
-        )
+        cell_types        = opts$cell_types %||% character(0),  #load_active_cell_types(...)
+        available_assays  = opts$available_assays,
+        available_reductions = opts$available_reductions
       )
     }
 
@@ -1067,29 +1077,32 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
         )
     }
 
-    load_active_cell_types <- function(lab_source, study_id) {
-      opts <- tryCatch(
-        fetch_metadata_filter_options(lab_source, study_id),
-        error = function(e) NULL
-      )
+    # load_active_cell_types <- function(lab_source, study_id) {
+    #   opts <- tryCatch(
+    #     fetch_metadata_filter_options(lab_source, study_id),
+    #     error = function(e) NULL
+    #   )
 
-      if (is.null(opts) || !"cell_types" %in% names(opts) || length(opts$cell_types) == 0) {
-        return(character(0))
-      }
+    #   if (is.null(opts) || !"cell_types" %in% names(opts) || length(opts$cell_types) == 0) {
+    #     return(character(0))
+    #   }
 
-      cts <- opts$cell_types[[1]]
-      cts[!is.na(cts) & nzchar(cts)]
-    }
+    #   cts <- opts$cell_types[[1]]
+    #   cts[!is.na(cts) & nzchar(cts)]
+    # }
 
     set_active_dataset <- function(current_state, row) {
+      opts <- tryCatch(
+        fetch_metadata_filter_options(row$lab_source[1], row$study_id[1]),
+        error = function(e) NULL
+      )
       current_state$lab_source   <- row$lab_source[1]
       current_state$study_id     <- row$study_id[1]
       current_state$dataset_name <- row$dataset_name[1]
       current_state$omic_type    <- row$omic_type[1]
-      current_state$cell_types   <- load_active_cell_types(
-        row$lab_source[1],
-        row$study_id[1]
-      )
+      current_state$cell_types           <- opts$cell_types[[1]] %||% character(0)
+      current_state$available_assays     <- opts$available_assays %||% c("logcounts", "counts")
+      current_state$available_reductions <- opts$available_reductions %||% c("umap", "pca", "tsne")
       current_state
     }
 
@@ -1117,6 +1130,8 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
       row_selected <- as.list(row[1, , drop = FALSE])
       row_selected$genes <- ds$genes
       row_selected$proteins <- ds$proteins
+      row_selected$available_assays     <- ds$available_assays
+      row_selected$available_reductions <- ds$available_reductions
       row_selected
     })
 
