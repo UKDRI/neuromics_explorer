@@ -15,7 +15,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 box::use(
-  shiny[...],
+  shiny[..., bindCache],
   shinydashboard[valueBoxOutput, renderValueBox, valueBox],
   shinyjs[runjs],
   bslib[...],
@@ -1151,7 +1151,62 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
       ds$selected_datasets[idx, , drop = FALSE]
     })
 
-    # ── Sync URL with selected dataset (i.e. updates on every checkbox toggle in Dataset Listings) ────
+    compare_row_data_cache <- local({
+      cache <- list()
+
+      function(idx) {
+        key <- as.character(idx)
+        if (is.null(cache[[key]])) {
+          # <<- looks for cached rows in its enclosing scope (i.e. `local({})` env NOT .GlobalEnv, also new session per user due to server module's `moduleServer()`)
+          cache[[key]] <<- reactive({
+            datasets <- compare_source_rows()
+            req(datasets, nrow(datasets) >= idx)
+
+            row <- datasets[idx, , drop = FALSE]
+            req(nrow(row) > 0)
+
+            plot_type <- sidebar_vals$plot_type()
+            switch(
+              plot_type,
+              Heatmap = fetch_top_de(
+                lab_source = row$lab_source[1],
+                study_id = row$study_id[1],
+                n = 20L,
+                padj_thresh = sidebar_vals$padj_thresh(),
+                lfc_thresh = sidebar_vals$lfc_thresh_min()
+              ),
+              Violin = fetch_expression_table(
+                lab_source = row$lab_source[1],
+                study_id = row$study_id[1],
+                limit = 3000L,
+                offset = 0L,
+                sort_by = "padj",
+                sort_dir = "asc"
+              ),
+              fetch_expression_volcano(
+                lab_source = row$lab_source[1],
+                study_id = row$study_id[1],
+                limit = 20000L,
+                offset = 0L
+              )
+            )
+          }) |>
+            bindCache(
+              compare_source_rows()[idx, , drop = FALSE]$lab_source[1],
+              compare_source_rows()[idx, , drop = FALSE]$study_id[1],
+              sidebar_vals$plot_type()
+            )
+        }
+
+        cache[[key]]
+      }
+    })
+
+    get_compare_row_data <- function(idx) {
+      compare_row_data_cache(idx)
+    }
+
+    # ── Sync URL with selected dataset (i.e. updates on every checkbox toggle in Dataset Listings) for that session ────
     observe({
       ds <- selected_dataset()
       req(!is.null(ds))
@@ -1528,13 +1583,7 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
             switch(
               plot_type,
               Heatmap = render_compare_heatmap(
-                fetch_top_de(
-                  lab_source = row$lab_source[1],
-                  study_id = row$study_id[1],
-                  n = 20L,
-                  padj_thresh = sidebar_vals$padj_thresh(),
-                  lfc_thresh = sidebar_vals$lfc_thresh_min()
-                ),
+                get_compare_row_data(idx)(),
                 row,
                 row$dataset_name[1],
                 sidebar_vals$padj_thresh(),
@@ -1543,14 +1592,7 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
                 selected_terms = input$compare_heatmap_terms %||% searched_terms()
               ),
               Violin = render_compare_violin(
-                fetch_expression_table(
-                  lab_source = row$lab_source[1],
-                  study_id = row$study_id[1],
-                  limit = 3000L,
-                  offset = 0L,
-                  sort_by = "padj",
-                  sort_dir = "asc"
-                ),
+                get_compare_row_data(idx)(),
                 row$dataset_name[1],
                 sidebar_vals$padj_thresh(),
                 sidebar_vals$lfc_thresh_min(),
@@ -1577,12 +1619,7 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
                 selected_term = input$compare_umap_term %||% "metadata_overview"
               ),
               render_compare_volcano(
-                fetch_expression_volcano(
-                  lab_source = row$lab_source[1],
-                  study_id = row$study_id[1],
-                  limit = 20000L,
-                  offset = 0L
-                ),
+                get_compare_row_data(idx)(),
                 row$dataset_name[1],
                 sidebar_vals$padj_thresh(),
                 sidebar_vals$lfc_thresh_min(),

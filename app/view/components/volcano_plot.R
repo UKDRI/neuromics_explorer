@@ -19,7 +19,7 @@
 
 box::use(
   shiny[NS, moduleServer, reactive, observe, req, renderUI, uiOutput,
-        div, p, tags, tagList],
+        div, p, tags, tagList, bindCache],
   plotly[plotlyOutput, renderPlotly, plot_ly, layout, add_annotations,
          add_segments, event_data, event_register],
   dplyr[mutate, case_when, filter, arrange, desc],
@@ -83,9 +83,15 @@ volcano_server <- function(id, de_data, padj_thresh, lfc_thresh, gene = reactive
             if ("condition_a" %in% names(df)) paste0(condition_a, " vs ", condition_b) else ""
           )
         )
-    })
+    }) |>
+      bindCache(
+        de_data(),
+        padj_thresh(),
+        lfc_thresh(),
+        gene()
+      )
 
-    output$plot <- renderPlotly({
+    plot_obj <- reactive({
       df   <- plot_df()
       pt   <- padj_thresh()
       lfc  <- lfc_thresh()
@@ -177,6 +183,16 @@ volcano_server <- function(id, de_data, padj_thresh, lfc_thresh, gene = reactive
       }
       plotly::event_register(p, "plotly_click")
       p
+    }) |>
+      bindCache(
+        plot_df(),
+        padj_thresh(),
+        lfc_thresh(),
+        gene()
+      )
+
+    output$plot <- renderPlotly({
+      plot_obj()
     })
 
     # ── Click-to-inspect ──────────────────────────────────────────────────────
