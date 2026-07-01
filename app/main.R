@@ -35,7 +35,7 @@ ui <- page_navbar(
   title = div(
     style = "display: flex; align-items: center;",
     img(src = "static/images/ukdri_logo.png", height = "30px", style = "margin-right: 10px;"),
-    "NeurOmicsExplorer"
+    "NeuromicsExplorer"
   ),
   id = "main_nav",
   theme = bslib::bs_theme(
@@ -128,7 +128,7 @@ ui <- page_navbar(
         class = "container mt-4",
         style = "border: 1px solid #ddd; padding: 15px; border-radius: 8px; background: white; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin: 10px 0;",
         h2("Getting Started"),
-        p("Welcome to the NeurOmics Explorer platform."),
+        p("Welcome to the Neuromics Explorer platform."),
         p("This guide will help you navigate and make the most out of the platform."),
         tags$ol(
           tags$li(tags$b("Search genes or proteins"), " → Search for your genes or proteins of interest across all available datasets"),

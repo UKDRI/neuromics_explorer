@@ -87,7 +87,7 @@ dots_server <- function(id, selected_dataset) {
         study_id = ds$study_id,
         genes = terms$genes,
         proteins = terms$proteins,
-        assay = "counts",
+        assay = "counts", #NULL,
         limit = 300000L
       )
     })
@@ -171,7 +171,7 @@ dots_server <- function(id, selected_dataset) {
         data = df,
         x = ~group_value,
         y = ~feature_label,
-        type = "scatter",
+        type = "scattergl",
         mode = "markers",
         size = ~pct_expressing,
         color = ~Average,
@@ -229,7 +229,7 @@ dots_server <- function(id, selected_dataset) {
           plotly::add_trace(
             x = 0.5,
             y = i,
-            type = "scatter",
+            type = "scattergl",
             mode = "markers+text",
             marker = list(
               size = if (s == 0) 5 else sqrt(s / sizeref) * 1.5,

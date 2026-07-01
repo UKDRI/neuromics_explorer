@@ -152,7 +152,7 @@ violin_server <- function(id, de_data, selected_dataset, padj_thresh, lfc_thresh
         plotly::add_trace(
           x = plot_df$x_value,
           y = plot_df[[y_col]],
-          type = "scatter",
+          type = "scattergl",
           mode = "markers",
           color = plot_df$sig,
           colors = c(Up = "#C0392B", Down = "#2980B9", NS = "#BDC3C7"),
@@ -461,7 +461,7 @@ violin_server <- function(id, de_data, selected_dataset, padj_thresh, lfc_thresh
           plotly::add_trace(
             x = group_df$x_value,
             y = group_df$expression_value,
-            type = "scatter",
+            type = "scattergl",
             mode = "markers",   #mode = "markers+text"
             name = colour_name,
             legendgroup = colour_name,

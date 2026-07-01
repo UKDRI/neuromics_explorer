@@ -554,22 +554,28 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
       y_limit <- suppressWarnings(max(y_values, na.rm = TRUE))
       if (!is.finite(x_limit)) x_limit <- 1
       if (!is.finite(y_limit)) y_limit <- 1
-      hover_text <- paste0(
-        "<b>", plot_df$feature_label, "</b><br>",
-        "log2FC: ", round(x_values, 3), "<br>",
-        "padj: ", signif(plot_df$padj, 3), "<br>",
-        "pvalue: ", signif(plot_df$pvalue, 3)
-      )
+      # hover_text <- paste0(
+      #   "<b>", plot_df$feature_label, "</b><br>",
+      #   "log2FC: ", round(x_values, 3), "<br>",
+      #   "padj: ", signif(plot_df$padj, 3), "<br>",
+      #   "pvalue: ", signif(plot_df$pvalue, 3)
+      # )
 
       p <- plotly::plot_ly(
         x = x_values,
         y = y_values,
-        type = "scatter",
+        type = "scattergl",
         mode = "markers",
         color = plot_df$sig,
         colors = c(Up = "#C0392B", Down = "#2980B9", NS = "#BDC3C7"),
-        text = hover_text,
-        hoverinfo = "text",
+        # text = hover_text,
+        # hoverinfo = "text",
+          customdata = plot_df$feature_label,
+          hovertemplate = paste0(
+            "<b>%{customdata}</b><br>",
+            "log2FC: %{x:.3f}<br>",
+            "-log10(p): %{y:.3f}<extra></extra>"
+          ),
         marker = list(size = 6, opacity = 0.7)
       ) |>
         plotly::add_segments(
@@ -699,7 +705,7 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
         plotly::add_trace(
           x = plot_df$group_value,
           y = plot_df[[y_col]],
-          type = "scatter",
+          type = "scattergl",
           mode = "markers",
           color = plot_df$sig,
           colors = c(Up = "#C0392B", Down = "#2980B9", NS = "#BDC3C7"),
@@ -927,7 +933,7 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
       plotly::plot_ly(
         x = df$group_value,
         y = df$feature_label,
-        type = "scatter",
+        type = "scattergl",
         mode = "markers",
         size = pmax(df$mean_pct_expressed, 0) * 0.18 + 6,
         color = df$mean_value,
@@ -1009,7 +1015,7 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
       plotly::plot_ly(
         x = x_values,
         y = y_values,
-        type = "scatter",
+        type = "scattergl",
         mode = "markers",
         color = df$sig,
         colors = c(Up = "#C0392B", Down = "#2980B9", NS = "#BDC3C7"),
@@ -1061,7 +1067,7 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
       plotly::plot_ly(
         x = df$dim_1,
         y = df$dim_2,
-        type = "scatter",
+        type = "scattergl",
         mode = "markers",
         color = color_values,
         colors = color_scale,
@@ -1409,6 +1415,16 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
         proteins = ds$proteins
       )
     })
+    # Causes Error: object '' not found - due to lapply FUN needed on cache key
+    #  |> bindCache(
+    #         selected_dataset()$lab_source %||% "",
+    #         selected_dataset()$study_id %||% "",
+    #         paste0(dataset_key(compare_source_rows()), collapse = ","),
+    #         paste(selected_dataset()$genes %||% character(0), collapse = ","),     #ds$genes,
+    #         paste(selected_dataset()$proteins %||% character(0), collapse = ","),  #ds$proteins,
+    #         # sidebar_vals$padj_thresh(),
+    #         # sidebar_vals$lfc_thresh_min()
+    #       )
 
     # ── Plot-specific data reactives ──────────────────────────────────────
     # Volcano gets a lean payload; violin uses a wider but still paginated
@@ -1423,7 +1439,7 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
         limit = 20000L,
         offset = 0L
       )
-    })
+    }) |> bindCache(active_dataset()$lab_source %||% "", active_dataset()$study_id %||% "")
 
     violin_data <- reactive({
       ds <- active_dataset()
@@ -1437,7 +1453,7 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
         sort_by = "padj",
         sort_dir = "asc"
       )
-    })
+    }) |> bindCache(active_dataset()$lab_source %||% "", active_dataset()$study_id %||% "")
 
     compare_hist_metric_choices <- reactive({
       df <- expression_data()

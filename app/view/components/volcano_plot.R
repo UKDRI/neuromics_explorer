@@ -73,15 +73,15 @@ volcano_server <- function(id, de_data, padj_thresh, lfc_thresh, gene = reactive
             !is.na(padj) & padj < padj_thresh() & log2fc < -lfc_thresh() ~ "Down",
             TRUE ~ "NS"
           ),
-          # Hover text
-          hover_text = paste0(
-            "<b>", gene_symbol, "</b><br>",
-            "log2FC: ",  round(log2fc,  3), "<br>",
-            "padj: ",    signif(padj,  3), "<br>",
-            "pvalue: ",  signif(pvalue, 3), "<br>",
-            if ("cell_type" %in% names(df)) paste0("Cell type: ", cell_type, "<br>") else "",
-            if ("condition_a" %in% names(df)) paste0(condition_a, " vs ", condition_b) else ""
-          )
+          # # Hover text
+          # hover_text = paste0(
+          #   "<b>", gene_symbol, "</b><br>",
+          #   "log2FC: ",  round(log2fc,  3), "<br>",
+          #   "padj: ",    signif(padj,  3), "<br>",
+          #   "pvalue: ",  signif(pvalue, 3), "<br>",
+          #   if ("cell_type" %in% names(df)) paste0("Cell type: ", cell_type, "<br>") else "",
+          #   if ("condition_a" %in% names(df)) paste0(condition_a, " vs ", condition_b) else ""
+          # )
         )
     }) |>
       bindCache(
@@ -107,12 +107,18 @@ volcano_server <- function(id, de_data, padj_thresh, lfc_thresh, gene = reactive
           df,
           x          = ~log2fc,
           y          = ~neg_log10p,
-          type       = "scatter",
+          type       = "scattergl",
           mode       = "markers",
           color      = ~sig,
           colors     = c(Up = COLS$up, Down = COLS$down, NS = COLS$ns),
-          text       = ~hover_text,
-          hoverinfo  = "text",
+          # text       = ~hover_text,
+          # hoverinfo  = "text",
+          customdata = ~gene_symbol,
+          hovertemplate = paste0(
+            "<b>%{customdata}</b><br>",
+            "log2FC: %{x:.3f}<br>",
+            "-log10(p): %{y:.3f}<extra></extra>"
+          ),
           source     = "volcano",
           marker     = list(size = 6, opacity = 0.7, line = list(width = 0))
         ) |>
