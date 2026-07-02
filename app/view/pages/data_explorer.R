@@ -20,7 +20,7 @@ box::use(
   shinyjs[runjs],
   bslib[...],
   plotly[plotlyOutput, renderPlotly, plot_ly, layout, add_trace],
-  DT[DTOutput, renderDT, datatable],
+  DT[DTOutput, renderDT, datatable, dataTableProxy, selectRows],
   htmlwidgets[JS],
   app/view/components/dataset_table[dataset_table_ui, dataset_table_server],
   app/view/components/expression_heatmap[heatmap_ui, heatmap_server],
@@ -39,7 +39,7 @@ box::use(
                            fetch_expression_groups, fetch_expression_goi,
                            fetch_dataset_embeddings, fetch_top_de,
                            fetch_metadata_filter_options],
-  utils[head],
+  utils[head, tail],
 )
 
 
@@ -296,7 +296,7 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
     # bookmarking, or linking URL (e.g. neuromics-explorer.ukdri.ac.uk/?page=explore&lab=diaz&study=5&gene=GAPDH)
     build_link_selected_payload <- function(params) {
 
-      # Fetch master dataset catalogue to use as lookup table
+      # Fetch master dataset catalogue to use as lookup table (ie for dropdown filters, URL bookmarking lookup etc.)
       all_rows <- tryCatch(
         fetch_all_datasets(),
         error = function(e) data.frame()
@@ -1414,7 +1414,12 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
         genes = ds$genes,
         proteins = ds$proteins
       )
-    })
+    }) |> bindCache(
+      paste(compare_source_rows()$lab_source, collapse = ","),
+      paste(compare_source_rows()$study_id,   collapse = ","),
+      paste(selected_dataset()$genes    %||% character(0), collapse = ","),
+      paste(selected_dataset()$proteins %||% character(0), collapse = ",")
+    )
     # Causes Error: object '' not found - due to lapply FUN needed on cache key
     #  |> bindCache(
     #         selected_dataset()$lab_source %||% "",
@@ -1656,7 +1661,7 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
             class = "alert alert-info",
             role = "alert",
             tags$strong("NB: "),
-            "Once the dataset table appears below, tick one or more rows to drive the explorer. Checked rows drive the Expression and Compare tabs, and the most recently checked row becomes the active dataset for the single-dataset Plot tab."
+            "Once the dataset table appears below, select one or more rows to drive the explorer. Selected rows drive the Expression and Compare tabs, and the most recently selected row becomes the active dataset for the single-dataset Plot tab."
           )
         ))
       }
@@ -1666,19 +1671,17 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
           class = "alert alert-info",
           role = "alert",
           style = "margin-bottom: 12px;",
-          tags$strong("NB: "),
-          "Tick rows to include datasets in the explorer. The most recently ticked row drives the single-dataset Plot tab, while two or more checked rows activate Compare."
+          tags$strong("TIP: "),
+          "Select which datasets to explore in the visual explorer below. The most recently selected dataset drives the single-dataset 'Plot' tab, while two or more selected datasets activate 'Compare'."
         ),
-        uiOutput(session$ns("dataset_listing_table"))
+        DTOutput(session$ns("dataset_listing_table"))
       )
     })
 
-    output$dataset_listing_table <- renderUI({
+    output$dataset_listing_table <- renderDT({
       ds <- selected_dataset()
       req(ds, !is.null(ds$selected_datasets), nrow(ds$selected_datasets) > 0)
-
       rows <- ds$selected_datasets
-      checked_rows <- listing_selection()
       display <- rows[, intersect(
         c("lab_source", "dataset_name", "omic_type", "matched_genes", "matched_proteins",
           "total_features", "n_sig_features", "total_samples", "total_cells",
@@ -1692,38 +1695,11 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
         "Cell types", "Conditions"
       )[seq_along(display)]
 
-      tags$div(
-        style = "overflow-x: auto;",
-        tags$table(
-          class = "table table-striped table-hover align-middle",
-          style = "margin-bottom: 0;",
-          tags$thead(
-            tags$tr(
-              tags$th("Select", style = "width: 72px;"),
-              lapply(names(display), tags$th)
-            )
-          ),
-          tags$tbody(
-            lapply(seq_len(nrow(display)), function(i) {
-              tags$tr(
-                tags$td(
-                  checkboxInput(
-                    session$ns(paste0("dataset_row_", i)),
-                    label = NULL,
-                    value = i %in% listing_selection(),
-                    width = NULL
-                  ),
-                  style = "min-width: 64px;"
-                ),
-                lapply(display[i, , drop = FALSE], function(value) {
-                  tags$td(as.character(value %||% ""))
-                })
-              )
-            })
-          )
-        )
-      )
-    })
+      datatable(display, selection="multiple", rownames=FALSE,
+        class="table-sm table-hover",
+        options=list(dom="t", pageLength=20, scrollX=TRUE))
+
+    }, server=FALSE)
 
     # ── Reset checkbox state ─────────────────────────────────────────
     # Compare keys to previous dataset(s) to detect any changes in the listing whenever the search modal confirms a fresh dataset list
@@ -1735,25 +1711,16 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
       if (!identical(dataset_keys, last_dataset_keys())) {
         last_dataset_keys(dataset_keys)
         listing_selection(seq_len(nrow(ds$selected_datasets)))
+        dataTableProxy("dataset_listing_table") |> selectRows(seq_len(nrow(ds$selected_datasets)))
         active_row(1) # defaults to first row
       }
     })
 
-    # ── Checkbox drive dataset inclusion ───────────────────────────────
-    # The newest checked row becomes active for the single-dataset 'Plot' tab; all checked rows drive 'Expression' and 'Compare' tabs.
-    observe({
-      current <- selected_dataset()
-      req(current, !is.null(current$selected_datasets), nrow(current$selected_datasets) > 0)
-
-      # Determines which datasets were recently un/checked by
-      # converting datasets into a vector of selected row indices and compares to the previous selection
-      row_ids <- seq_len(nrow(current$selected_datasets))
-      if (!all(vapply(row_ids, function(i) !is.null(input[[paste0("dataset_row_", i)]]), logical(1)))) {
-        return(invisible(NULL))
-      } # guards against unchecked rows by checking before proceeding
-
-      # Selected rows in dataset listing
-      row_idx <- which(vapply(row_ids, function(i) isTRUE(input[[paste0("dataset_row_", i)]]), logical(1)))
+    # ── Table selection drives dataset inclusion ─────────────────────
+    # The newest selected row becomes active for the single-dataset 'Plot' tab; all selected rows drive 'Expression' and 'Compare' tabs.
+    observeEvent(input$dataset_listing_table_rows_selected, {
+      # Determines which datasets were recently un/checked by comparing to the previous selection
+      row_idx <- input$dataset_listing_table_rows_selected %||% integer(0)
       previous_idx <- isolate(listing_selection())
       if (identical(row_idx, previous_idx)) {
         return(invisible(NULL))
@@ -1764,15 +1731,13 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
         active_row(NULL)
         return(invisible(NULL))
       }
-
-      # Check if any new changes made (to promote to active for 'Plot' tab, or demote if an active dataset is unchecked)
       newly_checked <- setdiff(row_idx, previous_idx)
       if (length(newly_checked) > 0) {
-        active_row(utils::tail(newly_checked, 1))
+        active_row(tail(newly_checked, 1))
       } else if (is.null(active_row()) || !(active_row() %in% row_idx)) {
         active_row(row_idx[1])
       }
-    })
+    }, ignoreNULL=FALSE)
     
     # ── Results table & plot servers ──────────────────────────────────────
     results_server("results", expression_data)
