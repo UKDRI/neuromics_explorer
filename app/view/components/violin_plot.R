@@ -253,7 +253,7 @@ violin_server <- function(id, de_data, selected_dataset, padj_thresh, lfc_thresh
           genes = if (input$feature_term %in% (ds$genes %||% character(0))) input$feature_term else character(0),
           proteins = if (input$feature_term %in% (ds$proteins %||% character(0))) input$feature_term else character(0),
           assay = input$feature_assay %||% "counts",
-          limit = 100000L
+          limit = 50000L
         )
       } else {
         fetch_expression_goi(

@@ -239,6 +239,7 @@ explorer_ui <- function(id) {
 #' @export
 explorer_server <- function(id, initial_link = reactive(NULL)) {
   moduleServer(id, function(input, output, session) {
+    # ── Helpers ────────────────────────────────────────────────────────────
     dataset_key <- function(df) {
       paste(df$lab_source, df$study_id, sep = "::")
     }
@@ -266,7 +267,7 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
       utils::head(values, max_terms)
     }
 
-    # Build shareable link based on selected dataset and search terms
+    # ── Build shareable link based on selected dataset and search terms ────
     build_share_query <- function(ds) {
       if (is.null(ds)) return("?page=explore")
 
@@ -355,12 +356,6 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
         error = function(e) list()
       )
 
-      ### DEBUG
-      cat("\nopts names:\n")
-      print(names(opts))
-      print(opts$available_assays)
-      ####
-      
       # Returns list matching shape produced by gene_dataset_selector modal
       list(
         genes             = params$genes,
@@ -376,13 +371,16 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
       )
     }
 
-    has_values <- function(df, col) {
-      col %in% names(df) &&
+    # ── Helpers to create grouping labels (column names) for plots and tables ─────────────────────────
+    
+    # Checks presence of column(s) in df while checking for non-empty values
+    has_values <- function(df, col, df_names = names(df)) {
+      col %in% df_names &&
         any(!is.na(df[[col]]) & nzchar(trimws(as.character(df[[col]]))))
     }
 
-    has_multiple_values <- function(df, col) {
-      if (!has_values(df, col)) return(FALSE)
+    has_multiple_values <- function(df, col, df_names = names(df)) {
+      if (!col %in% df_names) return(FALSE)
       values <- as.character(df[[col]])
       values <- values[!is.na(values) & nzchar(trimws(values))]
       length(unique(values)) > 1
@@ -418,15 +416,16 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
       label
     }
 
-    build_de_category <- function(df, padj_thresh, lfc_thresh) {
-      if (has_values(df, "de_category")) {
+    # Builds DE category column if 'de_category' column is missing
+    build_de_category <- function(df, padj_thresh, lfc_thresh, df_names = names(df)) {
+      if (has_values(df, "de_category", df_names)) {
         values <- as.character(df$de_category)
         values[is.na(values) | !nzchar(values)] <- "unlabelled"
         return(values)
       }
 
       for (candidate in c("comparison", "DE", "category", "variable")) {
-        if (has_values(df, candidate)) {
+        if (has_values(df, candidate, df_names)) {
           values <- as.character(df[[candidate]])
           values[is.na(values) | !nzchar(values)] <- "unlabelled"
           return(values)
@@ -440,19 +439,22 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
       )
     }
 
-    compare_violin_group <- function(df, padj_thresh, lfc_thresh) {
-      if (all(c("padj", "log2fc") %in% names(df)) &&
+    # ── Vectorised choice builders ─────────────────────────────────────────────
+    
+    # Single grouping for violin if has_multiple_values fails
+    compare_violin_group <- function(df, padj_thresh, lfc_thresh, cols = names(df)) {
+      if (all(c("padj", "log2fc") %in% cols) &&
           any(!is.na(df$padj)) &&
           any(!is.na(df$log2fc))) {
         return(list(
           name = "DE category",
-          values = build_de_category(df, padj_thresh, lfc_thresh)
+          values = build_de_category(df, padj_thresh, lfc_thresh, cols)
         ))
       }
 
-      for (candidate in c("cluster_id", "cell_type", "condition_a", "condition_b",
-                          "sample_a", "sample_b", "tissue", "sex", "age", "cell_id")) {
-        if (has_values(df, candidate)) {
+      candidates <- c("cluster_id", "cell_type", "condition_a", "condition_b", "sample_a", "sample_b", "tissue", "sex", "age", "cell_id")
+      for (candidate in candidates) {
+        if (has_values(df, candidate, cols)) {
           values <- as.character(df[[candidate]])
           values[is.na(values) | !nzchar(values)] <- "unlabelled"
           return(list(name = candidate, values = values))
@@ -462,29 +464,30 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
       list(name = "dataset", values = rep("all", nrow(df)))
     }
 
-    compare_group_col <- function(df) {
-      for (candidate in c("de_category", "cell_type", "cluster_id", "condition_a", "condition_b",
-                          "sample_a", "sample_b", "tissue", "sex", "age", "cell_id")) {
-        if (has_multiple_values(df, candidate)) {
+    # Default grouping col for heatmap x-axis and umap colour if has_multiple_values fails
+    compare_group_col <- function(df, cols = names(df)) {
+      candidates <- c("cluster_id", "cell_type", "condition_a", "condition_b", "sample_a", "sample_b", "tissue", "sex", "age", "cell_id")
+      present    <- candidates[candidates %in% cols]
+      for (candidate in present) {
+        if (has_multiple_values(df, candidate, cols)) {
           return(candidate)
         }
       }
-      for (candidate in c("de_category", "cell_type", "cluster_id", "condition_a", "condition_b",
-                          "sample_a", "sample_b", "tissue", "sex", "age", "cell_id")) {
-        if (has_values(df, candidate)) {
+      for (candidate in present) {
+        if (has_values(df, candidate, cols)) {
           return(candidate)
         }
       }
-      if ("gene_symbol" %in% names(df)) {
+      if ("gene_symbol" %in% cols) {
         return("gene_symbol")
       }
-      if ("obs" %in% names(df)) {
+      if ("obs" %in% cols) {
         return("obs")
       }
-      names(df)[1]
+      cols[1] #NULL as it may fall to study_id while handling NULL with validate()
     }
 
-    compare_metric_choices <- function(df) {
+    compare_metric_choices <- function(df, cols = names(df)) {
       labels <- c(
         log2fc = "log2fc",
         pvalue = "pvalue",
@@ -496,33 +499,37 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
       )
       choices <- c()
       for (candidate in names(labels)) {
-        if (has_values(df, candidate)) {
+        if (has_values(df, candidate, cols)) {
           choices[[labels[[candidate]]]] <- candidate
         }
       }
       choices
     }
 
-    compare_group_choices <- function(df, include_none = FALSE, include_de_category = TRUE) {
+    compare_group_choices <- function(df, include_none = FALSE, include_de_category = TRUE, cols = names(df)) {
       choices <- c()
       if (include_none) choices[["None"]] <- "none"
 
       if (isTRUE(include_de_category) &&
-          (has_multiple_values(df, "de_category") ||
-           (all(c("padj", "log2fc") %in% names(df)) &&
+          (has_multiple_values(df, "de_category", cols) ||
+           (all(c("padj", "log2fc") %in% cols) &&
             any(!is.na(df$padj)) &&
             any(!is.na(df$log2fc))))) {
         choices[["DE category"]] <- "de_category"
       }
 
-      for (candidate in c("cluster_id", "cell_type", "condition_a", "condition_b",
-                          "sample_a", "sample_b", "tissue", "sex", "age", "cell_id")) {
-        if (has_multiple_values(df, candidate)) {
-          choices[[group_label(candidate)]] <- candidate
-        }
-      }
+      candidates <- c("cluster_id", "cell_type", "condition_a", "condition_b", "sample_a", "sample_b", "tissue", "sex", "age", "cell_id")
+      present    <- candidates[candidates %in% cols]
+      # Filter columns, then create a named vector of choices
+      available_choices <- present[vapply(present, function(col) has_multiple_values(df, col, cols), logical(1))]
+      c(choices, stats::setNames(available_choices, vapply(available_choices, group_label, character(1))))
+      # for (candidate in present) {
+      #   if (has_multiple_values(df, candidate, cols)) {
+      #     choices[[group_label(candidate)]] <- candidate
+      #   }
+      # }
 
-      choices
+      # choices
     }
 
     searched_terms <- reactive({
@@ -535,6 +542,8 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
       terms[nzchar(terms)]
     })
 
+    # ── Compare-tab plot helpers ─────────────────────────────────────────────
+    
     render_compare_volcano <- function(df, dataset_name, padj_thresh, lfc_thresh, gene = NULL) {
       validate(need(nrow(df) > 0, "No volcano rows are available for this dataset."))
       plot_df <- df |>
@@ -632,29 +641,30 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
                                       show_box = TRUE) {
       # If dataset doesn't contain x_axis (e.g. cell_type from a mixed modality selection), fall back gracefully
       # TODO: checks
+      cols <- names(df)
       if (!identical(x_axis, "de_category") &&
-          (!x_axis %in% names(df) || !has_multiple_values(df, x_axis))) {
+          (!x_axis %in% cols || !has_multiple_values(df, x_axis, cols))) {
         # Find best available x-axis grouping for THIS dataset (when multiple are selected)
-        grp <- compare_violin_group(df, padj_thresh, lfc_thresh)
-        x_axis <- if (has_multiple_values(df, "de_category") ||
-                      all(c("padj","log2fc") %in% names(df))) "de_category" else grp$name
+        grp <- compare_violin_group(df, padj_thresh, lfc_thresh, cols)
+        x_axis <- if (has_multiple_values(df, "de_category", cols) ||
+                      all(c("padj", "log2fc") %in% cols)) "de_category" else grp$name
       }
 
       # Validate y_col, grouping column for x_axis, of fallbacks
-      if (!y_col %in% names(df) || !any(!is.na(df[[y_col]]))) {
+      if (!y_col %in% cols || !any(!is.na(df[[y_col]]))) {
         fallback_choices <- compare_metric_choices(df)
-        y_col <- if ("log2fc" %in% names(df)) "log2fc" else unname(fallback_choices)[1]
+        y_col <- if ("log2fc" %in% cols) "log2fc" else unname(fallback_choices)[1]
         y_col <- if (length(y_col) == 0 || is.na(y_col)) "log2fc" else y_col
       }
 
       group_values <- if (identical(x_axis, "de_category")) {
-        build_de_category(df, padj_thresh, lfc_thresh)
-      } else if (x_axis %in% names(df)) {
+        build_de_category(df, padj_thresh, lfc_thresh, cols)
+      } else if (x_axis %in% cols) {
         values <- as.character(df[[x_axis]])
         values[is.na(values) | !nzchar(values)] <- "unlabelled"
         values
       } else {
-        compare_violin_group(df, padj_thresh, lfc_thresh)$values
+        compare_violin_group(df, padj_thresh, lfc_thresh, cols)$values
       }
       group_name <- if (identical(x_axis, "de_category")) "DE category" else group_label(x_axis)
 
@@ -726,7 +736,8 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
     }
 
     render_compare_heatmap <- function(df, dataset_row, dataset_name, padj_thresh, lfc_thresh,
-                                       group_col = NULL, selected_terms = character(0)) {
+                                       group_col = NULL, selected_terms = character(0),
+                                       goi_df = NULL) {
       
       # Append selected terms on heatmap where available
       ds <- selected_dataset()
@@ -736,40 +747,44 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
       df_is_empty <- nrow(df) == 0
       
       if (length(goi_terms) > 0) {
-        goi_df <- fetch_expression_goi(
-          lab_source = dataset_row$lab_source[1],
-          study_id   = dataset_row$study_id[1],
-          genes      = goi_terms,
-          limit      = 5000L
-        )
+        # Use pre-fetched goi_df if provided, otherwise fall back to direct fetch
+        if (is.null(goi_df)) {
+          goi_df <- fetch_expression_goi(
+            lab_source = dataset_row$lab_source[1],
+            study_id   = dataset_row$study_id[1],
+            genes      = goi_terms,
+            limit      = 5000L
+          )
+        }
 
         group_col <- group_col %||% compare_group_col(if (df_is_empty) goi_df else df)
+        cols <- names(df)
+        goi_cols <- names(goi_df)
         if (identical(group_col, "de_category")) {
-          if (!"de_category" %in% names(df)) {
+          if (!"de_category" %in% cols) {
             df$de_category <- build_de_category(df, padj_thresh, lfc_thresh)
           }
-          if (!"de_category" %in% names(goi_df)) {
+          if (!"de_category" %in% goi_cols) {
             goi_df$de_category <- build_de_category(goi_df, padj_thresh, lfc_thresh)
           }
         }
 
         all_groups <- unique(c(
-          if (group_col %in% names(df)) df[[group_col]] else character(0),
-          if (group_col %in% names(goi_df)) goi_df[[group_col]] else character(0)
+          if (group_col %in% cols) df[[group_col]] else character(0),
+          if (group_col %in% goi_cols) goi_df[[group_col]] else character(0)
         ))
 
         if (nrow(goi_df) > 0) {
           # Ensure grouping column exists
-
-          if (!group_col %in% names(goi_df)) {
+          if (!group_col %in% goi_cols) {
             # goi_df[[group_col]] <- df[[group_col]][1] #"GOI"  - check not forcing goi in wrong ccategory
             goi_df[[group_col]] <- goi_df[[group_col]] %||% goi_df$de_category %||% NA
           }
 
           # Align columns
-          common_cols <- union(names(df), names(goi_df))
-          for (col in setdiff(common_cols, names(df))) df[[col]] <- NA
-          for (col in setdiff(common_cols, names(goi_df))) goi_df[[col]] <- NA
+          common_cols <- union(cols, goi_cols)
+          for (col in setdiff(common_cols, cols)) df[[col]] <- NA
+          for (col in setdiff(common_cols, goi_cols)) goi_df[[col]] <- NA
 
           if (df_is_empty) {
             df <- goi_df
@@ -785,7 +800,7 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
 
       # Top genes ranking
       group_col <- group_col %||% compare_group_col(df)
-      if (!group_col %in% names(df) && !identical(group_col, "de_category")) {
+      if (!group_col %in% cols && !identical(group_col, "de_category")) {
         group_col <- compare_group_col(df)
       }
       if (identical(group_col, "de_category")) {
@@ -919,6 +934,7 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
       validate(need(row$omic_type[1] %in% c("scrna", "snrna"),
                     "Dot plot is only available for scRNA-seq and snRNA-seq datasets."))
 
+      # TODO must match dots_plot.R logic!!
       df <- fetch_expression_groups(
         lab_source = row$lab_source[1],
         study_id = row$study_id[1],
@@ -959,6 +975,7 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
       validate(need(row$omic_type[1] %in% c("scrna", "snrna"),
                     "Top features is only available for scRNA-seq and snRNA-seq datasets."))
 
+      # TODO: once live in UI make `fetch_expression_groups()` reactive as also used in `render_compare_plots()` with a toggle of top_n and selected genes/terms
       df <- fetch_expression_groups(
         lab_source = row$lab_source[1],
         study_id = row$study_id[1],
@@ -988,17 +1005,20 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
         )
     }
 
-    render_compare_feature_scatter <- function(row, current_state, padj_thresh, lfc_thresh) {
+    render_compare_feature_scatter <- function(row, current_state, padj_thresh, lfc_thresh, goi_df = NULL) {
       terms <- unique(c(current_state$genes %||% character(0), current_state$proteins %||% character(0)))
       validate(need(length(terms) > 0, "Select one or more genes or proteins in the modal to compare GOI scatter plots."))
 
-      df <- fetch_expression_goi(
-        lab_source = row$lab_source[1],
-        study_id = row$study_id[1],
-        genes = current_state$genes %||% character(0),
-        proteins = current_state$proteins %||% character(0),
-        limit = 2000L
-      )
+      df <- goi_df
+      if (is.null(df)) {
+        df <- fetch_expression_goi(
+          lab_source = row$lab_source[1],
+          study_id = row$study_id[1],
+          genes = current_state$genes %||% character(0),
+          proteins = current_state$proteins %||% character(0),
+          limit = 2000L
+        )
+      }
       validate(need(nrow(df) > 0, "No rows are available for the selected genes/proteins."))
 
       x_col <- if ("abundance_a" %in% names(df) && any(!is.na(df$abundance_a))) "abundance_a" else "log2fc"
@@ -1035,19 +1055,11 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
         )
     }
 
-    render_compare_umap <- function(row, current_state, reduction = "umap", selected_term = "metadata_overview") {
+    render_compare_umap <- function(embedding_df, row, current_state, reduction = "umap", selected_term = "metadata_overview") {
       validate(need(row$omic_type[1] %in% c("scrna", "snrna"),
                     "Embedding plots are only available for scRNA-seq and snRNA-seq datasets."))
 
-      df <- fetch_dataset_embeddings(
-        lab_source = row$lab_source[1],
-        study_id = row$study_id[1],
-        reduction = reduction,
-        assay = "logcounts",
-        genes = if (!identical(selected_term, "metadata_overview")) selected_term else current_state$genes %||% character(0),
-        proteins = if (identical(selected_term, "metadata_overview")) current_state$proteins %||% character(0) else character(0),
-        max_points = 50000L
-      )
+      df <- embedding_df
       validate(need(nrow(df) > 0, "No embedding coordinates are available for this dataset."))
 
       if (!identical(selected_term, "metadata_overview") &&
@@ -1097,23 +1109,24 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
     #   cts[!is.na(cts) & nzchar(cts)]
     # }
 
-    set_active_dataset <- function(current_state, row) {
-      opts <- tryCatch(
-        fetch_metadata_filter_options(row$lab_source[1], row$study_id[1]),
-        error = function(e) NULL
-      )
-      current_state$lab_source   <- row$lab_source[1]
-      current_state$study_id     <- row$study_id[1]
-      current_state$dataset_name <- row$dataset_name[1]
-      current_state$omic_type    <- row$omic_type[1]
-      current_state$cell_types           <- opts$cell_types[[1]] %||% character(0)
-      current_state$available_assays     <- opts$available_assays %||% c("logcounts", "counts")
-      current_state$available_reductions <- opts$available_reductions %||% c("umap", "pca", "tsne")
-      current_state
-    }
+    # set_active_dataset <- function(current_state, row) {
+    #   opts <- tryCatch(
+    #     fetch_metadata_filter_options(row$lab_source[1], row$study_id[1]),
+    #     error = function(e) NULL
+    #   )
+    #   current_state$lab_source   <- row$lab_source[1]
+    #   current_state$study_id     <- row$study_id[1]
+    #   current_state$dataset_name <- row$dataset_name[1]
+    #   current_state$omic_type    <- row$omic_type[1]
+    #   current_state$cell_types           <- opts$cell_types[[1]] %||% character(0)
+    #   current_state$available_assays     <- opts$available_assays %||% c("logcounts", "counts")
+    #   current_state$available_reductions <- opts$available_reductions %||% c("umap", "pca", "tsne")
+    #   current_state
+    # }
 
-    # ── Datasets ────────────────────────────────────────────
-    # `selected_dataset` holds all search results and searched terms: 
+    # ── Datasets and their reactive state ────────────────────────────────────────────
+    
+    # selected_dataset() holds all search results and searched terms: 
     # list(
     #   genes, lab_source, study_id, dataset_name, omic_type,
     #   selected_datasets, cell_types
@@ -1141,7 +1154,8 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
       row_selected
     })
 
-    # Reactive exposes the currently selected datasets from the Dataset Listings table for the 'Compare' tab.
+    # Reactive exposes the actively DT selected datasets from the Dataset Listings table driving the 'Compare' tab.
+    # i.e. a subset of selected_dataset()$selected_datasets, filtered by listing_selection()
     compare_source_rows <- reactive({
       ds <- selected_dataset()
       if (is.null(ds) || is.null(ds$selected_datasets) || nrow(ds$selected_datasets) == 0) {
@@ -1157,6 +1171,28 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
       ds$selected_datasets[idx, , drop = FALSE]
     })
 
+    # Only fetch when the relevant tab is selected — avoids API calls on modal confirm.
+    is_expression_tab <- reactive({
+      grepl("Expression", input$exploration_tabs %||% "Expression", ignore.case = TRUE)
+    })
+    is_plot_tab <- reactive({
+      tab <- input$exploration_tabs %||% ""
+      grepl("Plot", tab, ignore.case = TRUE) && !grepl("Compare", tab, ignore.case = TRUE)
+    })
+    is_compare_tab <- reactive({
+      grepl("Compare", input$exploration_tabs %||% "", ignore.case = TRUE)
+    })
+
+    gated_active_dataset <- function(type = NULL) {
+      reactive({
+        req(is_plot_tab())
+        if (!is.null(type)) req(identical(sidebar_vals$plot_type(), type))
+        active_dataset()
+      })
+    }
+
+    # ── Per-idx cached data reactives for Compare tab ──────────────────────────
+
     compare_row_data_cache <- local({
       cache <- list()
 
@@ -1165,6 +1201,7 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
         if (is.null(cache[[key]])) {
           # <<- looks for cached rows in its enclosing scope (i.e. `local({})` env NOT .GlobalEnv, also new session per user due to server module's `moduleServer()`)
           cache[[key]] <<- reactive({
+            req(is_compare_tab())
             datasets <- compare_source_rows()
             req(datasets, nrow(datasets) >= idx)
 
@@ -1208,8 +1245,97 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
       }
     })
 
+    # Cache fetch_expression_goi for heatmap (top-de merge & render_compare_heatmap), violin and scatter in Compare tab, keyed by idx, genes, proteins, limit
+    compare_goi_cache <- local({
+      cache <- list()
+
+      function(idx, genes, proteins, limit = 5000L) {
+        key <- paste0(
+          idx, "::",
+          compare_source_rows()[idx, , drop = FALSE]$lab_source[1], "::",
+          compare_source_rows()[idx, , drop = FALSE]$study_id[1], "::",
+          paste(genes, collapse = ","), "::",
+          paste(proteins, collapse = ","), "::",
+          limit
+        )
+        if (is.null(cache[[key]])) {
+          cache[[key]] <<- reactive({
+            req(is_compare_tab())
+            datasets <- compare_source_rows()
+            req(datasets, nrow(datasets) >= idx)
+            row <- datasets[idx, , drop = FALSE]
+            req(nrow(row) > 0, length(c(genes, proteins)) > 0)
+
+            fetch_expression_goi(
+              lab_source = row$lab_source[1],
+              study_id = row$study_id[1],
+              genes = genes,
+              proteins = proteins,
+              limit = limit
+            )
+          }) |>
+            bindCache(
+              compare_source_rows()[idx, , drop = FALSE]$lab_source[1],
+              compare_source_rows()[idx, , drop = FALSE]$study_id[1],
+              paste(genes, collapse = ","),
+              paste(proteins, collapse = ","),
+              limit
+            )
+        }
+
+        cache[[key]]
+      }
+    })
+
+    compare_embedding_cache <- local({
+      cache <- list()
+
+      function(idx) {
+        key <- as.character(idx)  #paste(idx, reduction, selected_term, sep="::")
+        if (is.null(cache[[key]])) {
+          cache[[key]] <<- reactive({
+            req(is_compare_tab(), identical(sidebar_vals$plot_type(), "UMAP"))
+            datasets <- compare_source_rows()
+            req(datasets, nrow(datasets) >= idx)
+            row <- datasets[idx, , drop = FALSE]
+            req(row$omic_type[1] %in% c("scrna", "snrna"))
+
+            selected_term <- input$compare_umap_term %||% "metadata_overview"
+            ds <- selected_dataset()
+            fetch_dataset_embeddings(
+              lab_source = row$lab_source[1],
+              study_id = row$study_id[1],
+              reduction = input$compare_umap_reduction %||% "umap",
+              assay = "logcounts",
+              genes = if (!identical(selected_term, "metadata_overview")) selected_term else ds$genes %||% character(0),
+              proteins = if (identical(selected_term, "metadata_overview")) ds$proteins %||% character(0) else character(0),  #proteins = character(0)
+              max_points = 50000L
+            )
+          }) |>
+            bindCache(
+              compare_source_rows()[idx, , drop = FALSE]$lab_source[1],
+              compare_source_rows()[idx, , drop = FALSE]$study_id[1],
+              input$compare_umap_reduction %||% "umap",
+              input$compare_umap_term %||% "metadata_overview",
+              paste(selected_dataset()$genes %||% character(0), collapse = ","),
+              paste(selected_dataset()$proteins %||% character(0), collapse = ",")
+            )
+        }
+
+        cache[[key]]
+      }
+    })
+
     get_compare_row_data <- function(idx) {
       compare_row_data_cache(idx)
+    }
+
+    get_compare_goi_data <- function(idx, genes, proteins, limit = 5000L) {
+      compare_goi_cache(idx, genes, proteins, limit)
+    }
+
+    get_compare_embedding_data <- function(idx) {
+      compare_embedding_cache(idx)
     }
 
     # ── Sync URL with selected dataset (i.e. updates on every checkbox toggle in Dataset Listings) for that session ────
@@ -1248,8 +1374,8 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
       }
     }, ignoreNULL = TRUE)
 
-    # ── Plot area UI follows the sidebar plot selector while the active dataset
-    # row in Dataset Listings controls which dataset is rendered. ────────────
+    # ── Plot tab UI controlled by sidebar selection and row selection in Dataset Listings ─────────────────
+    
     # This render block swaps the single-dataset plot module based on the
     # sidebar plot selector while keeping the active dataset row in control.
     gene_selector_server("gene_selector", selected_dataset)
@@ -1376,9 +1502,12 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
     #   )
     # })
 
-    # This reactive fetches the combined DE / expression rows for every dataset
-    # currently selected in Dataset Listings. It powers the Expression data tab.
+    # ── Tab/PlotType-gated single-dataset reactives ────────────────────────────────────────────────
+
+    # Fetches combined DE / expression rows for every dataset selected in Dataset Listings to
+    # power the 'Expression data' & 'Compare' tabs.
     expression_data <- reactive({
+      req(is_expression_tab() || is_compare_tab())
       ds <- selected_dataset()
       datasets <- compare_source_rows()
       req(ds, nrow(datasets) > 0, length(c(ds$genes, ds$proteins)) > 0)
@@ -1415,6 +1544,7 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
         proteins = ds$proteins
       )
     }) |> bindCache(
+      is_expression_tab() || is_compare_tab(),
       paste(compare_source_rows()$lab_source, collapse = ","),
       paste(compare_source_rows()$study_id,   collapse = ","),
       paste(selected_dataset()$genes    %||% character(0), collapse = ","),
@@ -1427,26 +1557,13 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
     #         paste0(dataset_key(compare_source_rows()), collapse = ","),
     #         paste(selected_dataset()$genes %||% character(0), collapse = ","),     #ds$genes,
     #         paste(selected_dataset()$proteins %||% character(0), collapse = ","),  #ds$proteins,
-    #         # sidebar_vals$padj_thresh(),
-    #         # sidebar_vals$lfc_thresh_min()
     #       )
 
-    # ── Plot-specific data reactives ──────────────────────────────────────
-    # Volcano gets a lean payload; violin uses a wider but still paginated
-    # table slice; the other plot modules fetch their own purpose-built shapes.
-    volcano_data <- reactive({
-      ds <- active_dataset()
-      req(ds)
-
-      fetch_expression_volcano(
-        lab_source = ds$lab_source,
-        study_id = ds$study_id,
-        limit = 20000L,
-        offset = 0L
-      )
-    }) |> bindCache(active_dataset()$lab_source %||% "", active_dataset()$study_id %||% "")
-
-    violin_data <- reactive({
+    # Shared slice for Violin / Histogram on the Plot tab.
+    plot_table_data <- reactive({
+      req(is_plot_tab())
+      pt <- sidebar_vals$plot_type()
+      req(pt %in% c("Violin", "Histogram"))
       ds <- active_dataset()
       req(ds)
 
@@ -1458,39 +1575,91 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
         sort_by = "padj",
         sort_dir = "asc"
       )
-    }) |> bindCache(active_dataset()$lab_source %||% "", active_dataset()$study_id %||% "")
+    }) |> bindCache(
+      is_plot_tab(),
+      sidebar_vals$plot_type(),
+      active_dataset()$lab_source %||% "",
+      active_dataset()$study_id %||% ""
+    )
 
+    volcano_data <- reactive({
+      req(is_plot_tab(), identical(sidebar_vals$plot_type(), "Volcano"))
+      ds <- active_dataset()
+      req(ds)
+
+      fetch_expression_volcano(
+        lab_source = ds$lab_source,
+        study_id = ds$study_id,
+        limit = 20000L,
+        offset = 0L
+      )
+    }) |> bindCache(
+      is_plot_tab(),
+      sidebar_vals$plot_type(),
+      active_dataset()$lab_source %||% "",
+      active_dataset()$study_id %||% ""
+    )
+
+    violin_data <- reactive({
+      req(is_plot_tab(), identical(sidebar_vals$plot_type(), "Violin"))
+      plot_table_data()
+    })
+
+    expression_data_table <- reactive({
+      req(is_expression_tab())
+      expression_data()
+    })
+
+    # ── Choice reactives for Compare controls ──────────────────────────────────
+    # TODO: perhaps add guards is_plot_tab and is_compare_tab
     compare_hist_metric_choices <- reactive({
       df <- expression_data()
       if (is.null(df) || nrow(df) == 0) return(character(0))
       compare_metric_choices(df)
-    })
+    }) |> bindCache(
+      paste(compare_source_rows()$lab_source, collapse=","),
+      paste(compare_source_rows()$study_id, collapse=",")
+    )
 
     compare_hist_group_choices <- reactive({
       df <- expression_data()
       if (is.null(df) || nrow(df) == 0) return(c("None" = "none"))
       compare_group_choices(df, include_none = TRUE, include_de_category = TRUE)
-    })
+    }) |> bindCache(
+      paste(compare_source_rows()$lab_source, collapse=","),
+      paste(compare_source_rows()$study_id, collapse=",")
+    )
 
     compare_violin_y_choices <- reactive({
       df <- expression_data()
       if (is.null(df) || nrow(df) == 0) return(character(0))
       compare_metric_choices(df)
-    })
+    }) |> bindCache(
+      paste(compare_source_rows()$lab_source, collapse=","),
+      paste(compare_source_rows()$study_id, collapse=",")
+    )
 
     compare_violin_x_choices <- reactive({
-      df <- compare_source_rows()
+      df <- expression_data()
       if (is.null(df) || nrow(df) == 0) return(character(0))
       compare_group_choices(df, include_none = FALSE, include_de_category = TRUE)
-    })
+    }) |> bindCache(
+      paste(compare_source_rows()$lab_source, collapse=","),
+      paste(compare_source_rows()$study_id, collapse=",")
+    )
 
     compare_heatmap_x_choices <- reactive({
       df <- expression_data()
       if (is.null(df) || nrow(df) == 0) return(character(0))
       compare_group_choices(df, include_none = FALSE, include_de_category = TRUE)
-    })
+    }) |> bindCache(
+      paste(compare_source_rows()$lab_source, collapse=","),
+      paste(compare_source_rows()$study_id, collapse=",")
+    )
 
+    # ── Compare tab controls and plot grid layout in UI ─────────────────────────────────────────
     output$compare_controls_ui <- renderUI({
+      req(is_compare_tab())
       datasets <- compare_source_rows()
       if (nrow(datasets) < 2) return(NULL)
 
@@ -1582,9 +1751,11 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
       )
     })
 
-    # Keep 'Compare' tab plot outputs in sync with the current dataset set and selected 
-    # plot type by binding one renderPlotly per card.
+    # ── Compare tab renderPlotly — one per card slot, and cache output ────────────────────────
+
+    # Observe block keeps Compare tab plot outputs in sync with the current dataset set and selected plot type
     observe({
+      req(is_compare_tab())
       datasets <- compare_source_rows()
       plot_type <- sidebar_vals$plot_type()
       if (nrow(datasets) < 2) {
@@ -1610,7 +1781,14 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
                 sidebar_vals$padj_thresh(),
                 sidebar_vals$lfc_thresh_min(),
                 group_col = input$compare_heatmap_x_axis %||% NULL,
-                selected_terms = input$compare_heatmap_terms %||% searched_terms()
+                selected_terms = input$compare_heatmap_terms %||% searched_terms(),
+                goi_df = if (length(searched_terms()) > 0) {
+                  get_compare_goi_data(
+                    idx,
+                    input$compare_heatmap_terms %||% searched_terms(),
+                    character(0)
+                  )()
+                } else NULL
               ),
               Violin = render_compare_violin(
                 get_compare_row_data(idx)(),
@@ -1632,9 +1810,16 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
               "Feature Scatter" = render_compare_feature_scatter(
                 row, current_state,
                 sidebar_vals$padj_thresh(),
-                sidebar_vals$lfc_thresh_min()
+                sidebar_vals$lfc_thresh_min(),
+                goi_df = get_compare_goi_data(
+                  idx,
+                  current_state$genes %||% character(0),
+                  current_state$proteins %||% character(0),
+                  limit = 2000L
+                )()
               ),
               UMAP = render_compare_umap(
+                embedding_df = get_compare_embedding_data(idx)(),
                 row, current_state,
                 reduction = input$compare_umap_reduction %||% "umap",
                 selected_term = input$compare_umap_term %||% "metadata_overview"
@@ -1647,7 +1832,23 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
                 gene = selected_dataset()$genes
               )
             )
-          })
+          }) |> bindCache(
+            compare_source_rows()[idx,,drop=FALSE]$lab_source[1],
+            compare_source_rows()[idx,,drop = FALSE]$study_id[1],
+            sidebar_vals$plot_type(),
+            input$compare_heatmap_x_axis   %||% "",
+            paste(input$compare_heatmap_terms %||% character(0), collapse = ","),
+            input$compare_violin_y_var     %||% "log2fc",
+            input$compare_violin_x_axis    %||% "de_category",
+            isTRUE(input$compare_violin_show_box),
+            input$compare_hist_metric      %||% "log2fc",
+            input$compare_hist_group_by    %||% "none",
+            input$compare_hist_bins        %||% 30L,
+            input$compare_umap_reduction   %||% "umap",
+            input$compare_umap_term        %||% "metadata_overview",
+            paste(selected_dataset()$genes %||% character(0), collapse = ","),
+            paste(selected_dataset()$proteins %||% character(0), collapse = ",")
+          )
         })
       }
     })
@@ -1740,91 +1941,96 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
     }, ignoreNULL=FALSE)
     
     # ── Results table & plot servers ──────────────────────────────────────
-    results_server("results", expression_data)
-    volcano_server("volcano",  volcano_data,
+    results_server("results", expression_data_table)
+
+    volcano_server("volcano", volcano_data,
                    padj_thresh = sidebar_vals$padj_thresh,
                    lfc_thresh  = sidebar_vals$lfc_thresh_min,
                    gene        = reactive({
-                     ds <- active_dataset()
+                     ds <- gated_active_dataset("Volcano")()
                      terms <- c(ds$genes, ds$proteins)
                      if (is.null(ds) || length(terms) == 0) return(NULL)
                      terms[nzchar(trimws(terms))]
                    }))
-    heatmap_server("heatmap",  active_dataset,
+
+    heatmap_server("heatmap", gated_active_dataset("Heatmap"),
                    padj_thresh = sidebar_vals$padj_thresh,
                    lfc_thresh  = sidebar_vals$lfc_thresh_min,
                    n_genes     = reactive(20L))
-    umap_server("umap",       active_dataset)
-    violin_server("violin",    violin_data,
-                  selected_dataset = active_dataset,
+    umap_server("umap", gated_active_dataset("UMAP"))
+
+    violin_server("violin", violin_data,
+                  selected_dataset = gated_active_dataset("Violin"),
                   padj_thresh = sidebar_vals$padj_thresh,
                   lfc_thresh  = sidebar_vals$lfc_thresh_min)
     
-    # ── New plot modules ──────────────────────────────────────────────────
-    feature_scatter_server("feature_scatter", active_dataset,
+    feature_scatter_server("feature_scatter", gated_active_dataset("Feature Scatter"),
                            padj_thresh = sidebar_vals$padj_thresh,
                            lfc_thresh = sidebar_vals$lfc_thresh_min)
-    histogram_server("histogram", active_dataset, violin_data)  #violin_data reactive as convenient source for histogram metrics/metadata to reduce fetching
-    dots_server("dots", active_dataset)
-    highest_expr_server("highest_expr", active_dataset)
+
+    histogram_server("histogram", gated_active_dataset("Histogram"), plot_table_data)
+
+    dots_server("dots", gated_active_dataset("Dots Plot"))
+
+    highest_expr_server("highest_expr", gated_active_dataset("Top Features"))
     
     # ── Value boxes (tied to dataset_stats) ─────────────────────────────
-    stats_row <- reactive({
-      rows <- compare_source_rows()
-      if (nrow(rows) == 0) return(list())
+    # stats_row <- reactive({
+    #   rows <- compare_source_rows()
+    #   if (nrow(rows) == 0) return(list())
 
-      list(
-        dataset_count = nrow(rows),
-        total_features = sum_numeric(rows$total_features),
-        n_sig_features = sum_numeric(rows$n_sig_features),
-        total_cells = sum_numeric(rows$total_cells),
-        total_samples = sum_numeric(rows$total_samples),
-        n_cell_types = length(flatten_json_values(rows$cell_types_json)),
-        n_conditions = length(flatten_json_values(rows$conditions_json))
-      )
-    })
+    #   list(
+    #     dataset_count = nrow(rows),
+    #     total_features = sum_numeric(rows$total_features),
+    #     n_sig_features = sum_numeric(rows$n_sig_features),
+    #     total_cells = sum_numeric(rows$total_cells),
+    #     total_samples = sum_numeric(rows$total_samples),
+    #     n_cell_types = length(flatten_json_values(rows$cell_types_json)),
+    #     n_conditions = length(flatten_json_values(rows$conditions_json))
+    #   )
+    # })
     
-    output$box_datasets <- renderValueBox({
-      row <- stats_row()
-      count <- if (length(row) > 0) row$dataset_count else "—"
-      valueBox(count, "Datasets selected", color = "purple")
-    })
+    # output$box_datasets <- renderValueBox({
+    #   row <- stats_row()
+    #   count <- if (length(row) > 0) row$dataset_count else "—"
+    #   valueBox(count, "Datasets selected", color = "purple")
+    # })
     
-    output$box_genes <- renderValueBox({
-      row <- stats_row()
-      val <- if (length(row) > 0) row$total_features %||% "—" else "—"
-      valueBox(val, "Total features", color = "blue")
-    })
+    # output$box_genes <- renderValueBox({
+    #   row <- stats_row()
+    #   val <- if (length(row) > 0) row$total_features %||% "—" else "—"
+    #   valueBox(val, "Total features", color = "blue")
+    # })
     
-    output$box_sig_genes <- renderValueBox({
-      row <- stats_row()
-      val <- if (length(row) > 0) row$n_sig_features %||% "—" else "—"
-      valueBox(val, "Significant (padj<0.05)", color = "red")
-    })
+    # output$box_sig_genes <- renderValueBox({
+    #   row <- stats_row()
+    #   val <- if (length(row) > 0) row$n_sig_features %||% "—" else "—"
+    #   valueBox(val, "Significant (padj<0.05)", color = "red")
+    # })
     
-    output$box_cells <- renderValueBox({
-      row <- stats_row()
-      val <- if (length(row) > 0) row$total_cells %||% "—" else "—"
-      valueBox(val, "Total cells", icon = icon("circle-nodes"), color = "teal")
-    })
+    # output$box_cells <- renderValueBox({
+    #   row <- stats_row()
+    #   val <- if (length(row) > 0) row$total_cells %||% "—" else "—"
+    #   valueBox(val, "Total cells", icon = icon("circle-nodes"), color = "teal")
+    # })
     
-    output$box_cell_types <- renderValueBox({
-      row <- stats_row()
-      val <- if (length(row) > 0) row$n_cell_types %||% "—" else "—"
-      valueBox(val, "Cell types", icon = icon("tags"), color = "olive")
-    })
+    # output$box_cell_types <- renderValueBox({
+    #   row <- stats_row()
+    #   val <- if (length(row) > 0) row$n_cell_types %||% "—" else "—"
+    #   valueBox(val, "Cell types", icon = icon("tags"), color = "olive")
+    # })
     
-    output$box_samples <- renderValueBox({
-      row <- stats_row()
-      val <- if (length(row) > 0) row$total_samples %||% "—" else "—"
-      valueBox(val, "Samples", icon = icon("vials"), color = "navy")
-    })
+    # output$box_samples <- renderValueBox({
+    #   row <- stats_row()
+    #   val <- if (length(row) > 0) row$total_samples %||% "—" else "—"
+    #   valueBox(val, "Samples", icon = icon("vials"), color = "navy")
+    # })
     
-    output$box_conditions <- renderValueBox({
-      row <- stats_row()
-      val <- if (length(row) > 0) row$n_conditions %||% "—" else "—"
-      valueBox(val, "Conditions", color = "maroon")
-    })
+    # output$box_conditions <- renderValueBox({
+    #   row <- stats_row()
+    #   val <- if (length(row) > 0) row$n_conditions %||% "—" else "—"
+    #   valueBox(val, "Conditions", color = "maroon")
+    # })
     
     # observeEvent(input$go_explore, {
     #   # example navigation

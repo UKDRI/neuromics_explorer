@@ -88,7 +88,7 @@ dots_server <- function(id, selected_dataset) {
         genes = terms$genes,
         proteins = terms$proteins,
         assay = "counts", #NULL,
-        limit = 300000L
+        limit = 10000L
       )
     })
 
