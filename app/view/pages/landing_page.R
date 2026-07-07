@@ -114,7 +114,7 @@ homepage_ui <- function(id) {
     
     # Hero section
     div(class = "hero-section",
-        h1("Welcome to the NeurOmics Explorer"),
+        h1("Welcome to the Neuromics Explorer"),
         p("Your comprehensive platform for exploring, analysing, and visualising multi-omic UK DRI datasets")
     ),
     
