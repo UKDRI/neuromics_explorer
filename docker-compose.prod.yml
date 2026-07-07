@@ -1,4 +1,11 @@
 services:
-  app:
+  backend:
     environment:
       - APP_ENV=production
+    image: shesanislandukdri/neuromics_explorer_backend:latest
+  frontend:
+    environment:
+      - APP_ENV=production
+    image: shesanislandukdri/neuromics_explorer_shiny:latest
+    ports:
+      - "3838:4848"

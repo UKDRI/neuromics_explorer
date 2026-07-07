@@ -1,4 +1,13 @@
 services:
-  app:
+  backend:
     environment:
       - APP_ENV=development
+    image: shesanislandukdri/neuromics_explorer_backend:latest-dev
+    volumes:
+      - ./data_dev:/app/data
+  frontend:
+    environment:
+      - APP_ENV=development
+    image: shesanislandukdri/neuromics_explorer_shiny:latest-dev
+    ports:
+      - "1122:4848"
