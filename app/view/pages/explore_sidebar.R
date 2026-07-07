@@ -141,12 +141,12 @@ sidebar_server <- function(id, selected_dataset) {
     observeEvent(selected_dataset(), {
       ds <- selected_dataset()
       choices <- c("Volcano", "Heatmap", "Violin", "Feature Scatter",
-                   "Histogram", "Dots Plot"
+                   "Histogram", "Dots Plot", "UMAP"
                    #, "Top Features"
                    )
-      if (!is.null(ds) && ds$omic_type %in% c("scrna", "snrna")) {
-        choices <- c(choices, "UMAP")
-      }
+      # if (!is.null(ds) && ds$omic_type %in% c("scrna", "snrna")) {
+      #   choices <- c(choices, "UMAP")
+      # }
 
       selected_plot <- input$plot_type %||% "Volcano"
       if (!selected_plot %in% choices) {

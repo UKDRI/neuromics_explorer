@@ -1,7 +1,7 @@
 # Targeted feature scatter plot for genes/proteins of interest.
 
 box::use(
-  shiny[moduleServer, NS, reactive, renderUI, req, validate, need, tagList],
+  shiny[moduleServer, NS, reactive, renderUI, req, validate, need, tagList, bindCache],
   plotly[plotlyOutput, renderPlotly, plot_ly, layout],
   bslib[card, card_body, card_header],
   dplyr[mutate, case_when],
@@ -51,7 +51,13 @@ feature_scatter_server <- function(id, selected_dataset, padj_thresh, lfc_thresh
         proteins = ds$proteins %||% character(0),
         limit = 2000L
       )
-    })
+    }) |>
+      bindCache(
+        selected_dataset()$lab_source,
+        selected_dataset()$study_id,
+        paste(selected_dataset()$genes %||% character(0), collapse = ","),
+        paste(selected_dataset()$proteins %||% character(0), collapse = ",")
+      )
 
     output$term_note <- renderUI({
       terms <- selected_terms()
@@ -107,7 +113,15 @@ feature_scatter_server <- function(id, selected_dataset, padj_thresh, lfc_thresh
           yaxis = list(title = if (identical(y_col, "pvalue")) "-log10(pvalue)" else y_col),
           legend = list(title = list(text = "Significance"), orientation = "h", y = -0.15)
         )
-    })
+    }) |>
+      bindCache(
+        selected_dataset()$lab_source,
+        selected_dataset()$study_id,
+        # padj_thresh(),
+        # lfc_thresh(),
+        paste(selected_dataset()$genes %||% character(0), collapse = ","),
+        paste(selected_dataset()$proteins %||% character(0), collapse = ",")
+      )
   })
 }
 

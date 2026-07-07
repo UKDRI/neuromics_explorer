@@ -1,8 +1,9 @@
 # Distribution of dataset-level DE metrics or per-cell gene expression values.
 
 box::use(
-  shiny[NS, moduleServer, reactive, req, tagList, selectInput, updateSelectInput,
+  shiny[bindCache, NS, moduleServer, p, reactive, req, tagList, selectInput, updateSelectInput,
         fluidRow, column, checkboxInput, validate, need, observe, observeEvent, uiOutput, renderUI],
+  shinycssloaders[withSpinner],
   plotly[plotlyOutput, renderPlotly, plot_ly, layout, add_trace],
   dplyr[mutate, case_when],
   app/logic/api/api_client[fetch_expression_feature_values, fetch_expression_goi],
@@ -22,7 +23,9 @@ violin_ui <- function(id) {
     uiOutput(ns("assay_ui")),
     uiOutput(ns("group_by_ui")),
     checkboxInput(ns("show_box"), "Show box plot overlay", value = TRUE),
-    plotlyOutput(ns("plot"), height = "480px")
+    plotlyOutput(ns("plot"), height = "480px") |> withSpinner(
+      type = 1, caption = "Loading plot...", color = "#5b5b5b"),
+    p("Violin plot showing statistical distribution of expression values across selected categories with an optional boxplot overlay.")
   )
 }
 
@@ -264,7 +267,13 @@ violin_server <- function(id, de_data, selected_dataset, padj_thresh, lfc_thresh
           limit = 5000L
         )
       }
-    })
+    }) |>
+      bindCache(
+        selected_dataset()$lab_source,
+        selected_dataset()$study_id,
+        paste(input$feature_term %||% character(0), collapse = ","),
+        if (isTRUE(selected_dataset()$omic_type %in% c("scrna", "snrna"))) input$feature_assay
+      )
 
     # Helpers for datasets that don't have exact same metadata columns (e.g. mixed modality scrna vs bulk) for the x-axis grouping
     is_single_cell_gene_mode <- reactive({
@@ -490,7 +499,15 @@ violin_server <- function(id, de_data, selected_dataset, padj_thresh, lfc_thresh
           yaxis = list(title = "Expression level"),
           showlegend = !identical(group_by, "none")
         )
-    })
+    }) |>
+      bindCache(
+        selected_dataset()$lab_source,
+        selected_dataset()$study_id,
+        paste(input$feature_term %||% character(0), collapse = ","),
+        if (isTRUE(selected_dataset()$omic_type %in% c("scrna", "snrna"))) input$feature_assay,
+        input$x_axis,
+        input$group_by
+      )
   })
 }
 

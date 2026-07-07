@@ -1,8 +1,9 @@
 # Top N DE genes across canonical metadata groupings.
 
 box::use(
-  shiny[NS, moduleServer, reactive, req, tagList, selectInput, updateSelectInput,
+  shiny[NS, bindCache, moduleServer, reactive, req, tagList, selectInput, updateSelectInput,
         observe, uiOutput, renderUI, checkboxGroupInput, tags],
+  shinycssloaders[withSpinner],
   plotly[plotlyOutput, renderPlotly, plot_ly, layout],
   stringi[stri_sort],
   tidyr[pivot_wider],
@@ -16,7 +17,8 @@ heatmap_ui <- function(id) {
   tagList(
     selectInput(ns("x_axis"), "X-axis", choices = character(0)),
     uiOutput(ns("gene_selector_ui")),
-    plotlyOutput(ns("plot"), height = "600px")
+    plotlyOutput(ns("plot"), height = "600px") |> withSpinner(
+      type = 1, caption = "Loading plot...", color = "#5b5b5b")
   )
 }
 
@@ -75,7 +77,15 @@ heatmap_server <- function(id, selected_dataset,
         lfc_thresh = lfc_thresh()
       )
       df
-    })
+    }) |>
+      bindCache(
+        selected_dataset()$lab_source,
+        selected_dataset()$study_id,
+        n_genes()
+        # ,
+        # padj_thresh(),
+        # lfc_thresh()
+      )
 
     searched_gene_terms <- reactive({
       ds <- selected_dataset()
@@ -122,7 +132,15 @@ heatmap_server <- function(id, selected_dataset,
         limit = 5000L
       )
 
-    })
+    }) |>
+      bindCache(
+        selected_dataset()$lab_source,
+        selected_dataset()$study_id,
+        n_genes(),
+        # padj_thresh(),
+        # lfc_thresh(),
+        paste(input$heatmap_terms %||% character(0), collapse = ",")
+      )
 
     x_axis_choices <- reactive({
       df <- heatmap_data()
@@ -254,7 +272,16 @@ heatmap_server <- function(id, selected_dataset,
                        ticktext   = rownames(mat),
                        tickfont   = list(size = 10))
         )
-    })
+    }) |>
+      bindCache(
+        selected_dataset()$lab_source,
+        selected_dataset()$study_id,
+        n_genes(),
+        # padj_thresh(),
+        # lfc_thresh(),
+        input$x_axis,
+        paste(input$heatmap_terms %||% character(0), collapse = ",")
+      )
   })
 }
 

@@ -1,7 +1,7 @@
 # Server-side histogram plot built from pre-binned API summaries.
 
 box::use(
-  shiny[moduleServer, NS, reactive, req, tagList, selectInput, sliderInput, fluidRow, column,
+  shiny[bindCache, moduleServer, NS, reactive, req, tagList, selectInput, sliderInput, fluidRow, column,
         uiOutput, renderUI, validate, need, observe, updateSelectInput],
   plotly[plotlyOutput, renderPlotly, plot_ly, layout, add_bars],
   app/logic/api/api_client[fetch_expression_histogram],
@@ -113,7 +113,14 @@ histogram_server <- function(id, selected_dataset, source_data) {
         bins = input$bins,
         group_by = if (identical(input$group_by %||% "none", "none")) NULL else input$group_by
       )
-    })
+    }) |>
+      bindCache(
+        selected_dataset()$lab_source,
+        selected_dataset()$study_id,
+        input$metric,
+        input$bins,
+        input$group_by %||% "none"
+      )
 
     output$histogram <- renderPlotly({
       df <- plot_data()
@@ -143,7 +150,14 @@ histogram_server <- function(id, selected_dataset, source_data) {
           xaxis = list(title = input$metric),
           yaxis = list(title = "Row count")
         )
-    })
+    }) |>
+      bindCache(
+        selected_dataset()$lab_source,
+        selected_dataset()$study_id,
+        input$metric,
+        input$bins,
+        input$group_by %||% "none"
+      )
 
     output$hist_stats <- renderUI({
       df <- plot_data()

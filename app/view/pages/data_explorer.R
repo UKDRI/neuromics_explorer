@@ -16,6 +16,7 @@
 
 box::use(
   shiny[..., bindCache],
+  shinycssloaders[withSpinner],
   shinydashboard[valueBoxOutput, renderValueBox, valueBox],
   shinyjs[runjs],
   bslib[...],
@@ -1055,20 +1056,20 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
         )
     }
 
-    render_compare_umap <- function(embedding_df, row, current_state, reduction = "umap", selected_term = "metadata_overview") {
+    render_compare_umap <- function(embedding_df, row, current_state, reduction = "umap", embedding_view = "metadata_overview") {
       validate(need(row$omic_type[1] %in% c("scrna", "snrna"),
                     "Embedding plots are only available for scRNA-seq and snRNA-seq datasets."))
 
       df <- embedding_df
       validate(need(nrow(df) > 0, "No embedding coordinates are available for this dataset."))
 
-      if (!identical(selected_term, "metadata_overview") &&
+      if (!identical(embedding_view, "metadata_overview") &&
           "term" %in% names(df) &&
-          any(df$term == selected_term, na.rm = TRUE)) {
-        df <- df[df$term == selected_term, , drop = FALSE]
+          any(df$term == embedding_view, na.rm = TRUE)) {
+        df <- df[df$term == embedding_view, , drop = FALSE]
         color_values <- log10(pmax(df$expression_value, 0) + 1)
         color_scale <- c("#F7FBFF", "#6BAED6", "#08306B")
-        color_title <- paste0("log10(", selected_term, " + 1)")
+        color_title <- paste0("log10(", embedding_view, " + 1)")
       } else {
         color_col <- compare_group_col(df)
         color_values <- as.character(df[[color_col]])
@@ -1290,8 +1291,8 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
     compare_embedding_cache <- local({
       cache <- list()
 
-      function(idx) {
-        key <- as.character(idx)  #paste(idx, reduction, selected_term, sep="::")
+      function(idx, reduction, embedding_view) {
+        key <- paste(idx, reduction, embedding_view, sep = "::")
         if (is.null(cache[[key]])) {
           cache[[key]] <<- reactive({
             req(is_compare_tab(), identical(sidebar_vals$plot_type(), "UMAP"))
@@ -1300,23 +1301,22 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
             row <- datasets[idx, , drop = FALSE]
             req(row$omic_type[1] %in% c("scrna", "snrna"))
 
-            selected_term <- input$compare_umap_term %||% "metadata_overview"
             ds <- selected_dataset()
             fetch_dataset_embeddings(
               lab_source = row$lab_source[1],
               study_id = row$study_id[1],
-              reduction = input$compare_umap_reduction %||% "umap",
-              assay = "logcounts",
-              genes = if (!identical(selected_term, "metadata_overview")) selected_term else ds$genes %||% character(0),
-              proteins = if (identical(selected_term, "metadata_overview")) ds$proteins %||% character(0) else character(0),  #proteins = character(0)
+              reduction = reduction,
+              assay = "counts", #logcounts
+              genes = if (!identical(embedding_view, "metadata_overview")) embedding_view else ds$genes %||% character(0),
+              proteins = if (identical(embedding_view, "metadata_overview")) ds$proteins %||% character(0) else character(0),  #proteins = character(0)
               max_points = 50000L
             )
           }) |>
             bindCache(
               compare_source_rows()[idx, , drop = FALSE]$lab_source[1],
               compare_source_rows()[idx, , drop = FALSE]$study_id[1],
-              input$compare_umap_reduction %||% "umap",
-              input$compare_umap_term %||% "metadata_overview",
+              reduction, #input$compare_umap_reduction %||% "umap",
+              embedding_view,
               paste(selected_dataset()$genes %||% character(0), collapse = ","),
               paste(selected_dataset()$proteins %||% character(0), collapse = ",")
             )
@@ -1334,8 +1334,8 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
       compare_goi_cache(idx, genes, proteins, limit)
     }
 
-    get_compare_embedding_data <- function(idx) {
-      compare_embedding_cache(idx)
+    get_compare_embedding_data <- function(idx, reduction, embedding_view) {
+      compare_embedding_cache(idx, reduction, embedding_view)
     }
 
     # ── Sync URL with selected dataset (i.e. updates on every checkbox toggle in Dataset Listings) for that session ────
@@ -1744,7 +1744,8 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
               paste0(row$dataset_name[1], " · ", row$omic_type[1], " · ", row$lab_source[1])
             ),
             card_body(
-              plotlyOutput(session$ns(paste0("compare_plot_", i)), height = "420px")
+              plotlyOutput(session$ns(paste0("compare_plot_", i)), height = "420px") |> withSpinner(
+                type = 1, caption = "Loading plot...", color = "#5b5b5b")
             )
           )
         })
@@ -1819,10 +1820,14 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
                 )()
               ),
               UMAP = render_compare_umap(
-                embedding_df = get_compare_embedding_data(idx)(),
+                embedding_df = get_compare_embedding_data(
+                  idx,
+                  input$compare_umap_reduction,
+                  input$compare_umap_term
+                  )(),
                 row, current_state,
                 reduction = input$compare_umap_reduction %||% "umap",
-                selected_term = input$compare_umap_term %||% "metadata_overview"
+                embedding_view = input$compare_umap_term %||% "metadata_overview"
               ),
               render_compare_volcano(
                 get_compare_row_data(idx)(),

@@ -1,6 +1,7 @@
 box::use(
-  shiny[NS, moduleServer, reactive, req, observe, tagList, fluidRow, column, selectInput,
+  shiny[NS, moduleServer, bindCache, p, reactive, req, observe, tagList, fluidRow, column, selectInput,
         checkboxInput, checkboxGroupInput, uiOutput, renderUI, validate, need, div, tags],
+  shinycssloaders[withSpinner],
   plotly[plotlyOutput, renderPlotly, plot_ly, layout, add_trace],
   app/logic/api/api_client[fetch_dataset_embeddings],
 )
@@ -28,7 +29,8 @@ umap_ui <- function(id) {
       )
     ),
     uiOutput(ns("term_selector_ui")),
-    uiOutput(ns("plots_ui"))
+    uiOutput(ns("plots_ui")),
+    p("Plot showing embedding coordinates of cells alongside gene expression levels when UMAP is selected.")
   )
 }
 
@@ -89,18 +91,29 @@ umap_server <- function(id, selected_dataset) {
       ds <- selected_dataset()
       req(ds, is_single_cell())
 
+      reduction = input$reduction %||% "umap"
+      assay     = input$assay %||% "counts"
+      req(nzchar(reduction), nzchar(assay))
+
       result <- tryCatch(fetch_dataset_embeddings(
           lab_source = ds$lab_source,
           study_id   = ds$study_id,
-          reduction  = input$reduction,
-          assay      = input$assay,
+          reduction  = reduction,
+          assay      = assay,
           genes      = input$embedding_terms %||% character(0)
         ),
           error = function(e) NULL
         )
       req(!is.null(result))
       result
-    })
+    }) |>
+      bindCache(
+        selected_dataset()$lab_source %||% "",
+        selected_dataset()$study_id %||% "",
+        input$reduction %||% "umap",
+        input$assay %||% "counts",
+        paste(input$embedding_terms %||% character(0), collapse = ",")
+      )
 
     checked_terms <- reactive({
       selected <- input$embedding_terms %||% character(0)
@@ -123,6 +136,15 @@ umap_server <- function(id, selected_dataset) {
         names(df)
       ), drop = FALSE])
     })
+    #  would this override the caching of embedding_data()??
+    # |>
+    #   bindCache(
+    #     selected_dataset()$lab_source,
+    #     selected_dataset()$study_id,
+    #     input$reduction,
+    #     input$assay,
+    #     paste(input$embedding_terms %||% character(0), collapse = ",")
+    #   )
 
     default_colour_column <- reactive({
       df <- base_embedding_df()
@@ -141,8 +163,8 @@ umap_server <- function(id, selected_dataset) {
       ds      <- selected_dataset()
 
       ### DEBUG
-      message("available_assays: ", paste(ds$available_assays, collapse=", "))
-      utils::str(ds$available_assays)
+      # message("available_assays: ", paste(ds$available_assays, collapse=", "))
+      # utils::str(ds$available_assays)
       ### DEBUG
 
       avail   <- tolower(unlist(ds$available_assays))
@@ -158,13 +180,13 @@ umap_server <- function(id, selected_dataset) {
     output$reduction_ui <- renderUI({
       ds      <- selected_dataset()
 
-      ### DEBUG
-      message("available_reductions: ", paste(ds$available_reductions, collapse=", "))
-      utils::str(ds$available_reductions)
-      print(ds$available_reductions)
-      print("...")
-      # print()
-      ### DEBUG
+      # ### DEBUG
+      # message("available_reductions: ", paste(ds$available_reductions, collapse=", "))
+      # utils::str(ds$available_reductions)
+      # print(ds$available_reductions)
+      # print("...")
+      # # print()
+      # ### DEBUG
 
       avail   <- tolower(unlist(ds$available_reductions))
       choices <- REDUCTION_LABELS[REDUCTION_LABELS %in% avail]
@@ -188,7 +210,8 @@ umap_server <- function(id, selected_dataset) {
         div(
           style = "border: 1px solid #e3e7eb; border-radius: 8px; padding: 10px; background: white;",
           tags$h5("Embedding overview", style = "margin-top: 0;"),
-          plotlyOutput(session$ns("overview_plot"), height = "420px")
+          plotlyOutput(session$ns("overview_plot"), height = "420px") |> withSpinner(
+            type = 1, caption = "Loading plot...", color = "#5b5b5b")
         )
       )
 
@@ -267,7 +290,13 @@ umap_server <- function(id, selected_dataset) {
             legend = list(title = list(text = colour_col))
           )
       }
-    })
+    }) |>
+      bindCache(
+        selected_dataset()$lab_source,
+        selected_dataset()$study_id,
+        input$reduction,
+        input$assay
+      )
 
     observe({
       df <- embedding_data()
@@ -319,7 +348,14 @@ umap_server <- function(id, selected_dataset) {
                 yaxis = list(title = paste0(toupper(input$reduction), " 2"), showgrid = FALSE, zeroline = FALSE),
                 showlegend = FALSE
               )
-          })
+          }) |>
+            bindCache(
+              selected_dataset()$lab_source,
+              selected_dataset()$study_id,
+              input$reduction,
+              input$assay,
+              term
+            )
         })
       }
     })
@@ -377,7 +413,14 @@ umap_server <- function(id, selected_dataset) {
             yaxis = list(title = paste0(toupper(input$reduction), " 2"), showgrid = FALSE, zeroline = FALSE),
             legend = list(title = list(text = "Overlay genes"))
           )
-      })
+      }) |>
+        bindCache(
+          selected_dataset()$lab_source,
+          selected_dataset()$study_id,
+          input$reduction,
+          input$assay,
+          paste(overlay_gene_terms, collapse = ",")
+        )
     })
   })
 }

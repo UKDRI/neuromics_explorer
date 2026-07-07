@@ -20,6 +20,7 @@
 box::use(
   shiny[NS, moduleServer, reactive, observe, req, renderUI, uiOutput,
         div, p, tags, tagList, bindCache],
+  shinycssloaders[withSpinner],
   plotly[plotlyOutput, renderPlotly, plot_ly, layout, add_annotations,
          add_segments, event_data, event_register],
   dplyr[mutate, case_when, filter, arrange, desc],
@@ -39,8 +40,10 @@ COLS <- list(
 volcano_ui <- function(id) {
   ns <- NS(id)
   tagList(
-    plotlyOutput(ns("plot"), height = "520px"),
-    uiOutput(ns("click_info"))
+    plotlyOutput(ns("plot"), height = "520px") |> withSpinner(
+      type = 1, caption = "Loading plot...", color = "#5b5b5b"),
+    uiOutput(ns("click_info")),
+    p("Volcano plot showing differentially expressed genes between selected conditions.")
   )
 }
 
@@ -85,10 +88,11 @@ volcano_server <- function(id, de_data, padj_thresh, lfc_thresh, gene = reactive
         )
     }) |>
       bindCache(
-        de_data(),
-        padj_thresh(),
-        lfc_thresh(),
-        gene()
+        de_data()$lab_source[1] %||% "",
+        de_data()$study_id[1] %||% "",
+        # padj_thresh(),
+        # lfc_thresh(),
+        # gene()  #since annotations added in plot_obj
       )
 
     plot_obj <- reactive({
@@ -191,10 +195,11 @@ volcano_server <- function(id, de_data, padj_thresh, lfc_thresh, gene = reactive
       p
     }) |>
       bindCache(
-        plot_df(),
-        padj_thresh(),
-        lfc_thresh(),
-        gene()
+        de_data()$lab_source[1] %||% "",
+        de_data()$study_id[1] %||% "",
+        # padj_thresh(),
+        # lfc_thresh(),
+        paste(gene() %||% character(0), collapse = ",")
       )
 
     output$plot <- renderPlotly({

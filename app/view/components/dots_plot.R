@@ -8,7 +8,8 @@
 #   - Grouping is driven by canonical metadata returned with feature-level rows
 
 box::use(
-  shiny[moduleServer, NS, reactive, req, tagList, selectInput, updateSelectInput, validate, need, observe],
+  shiny[moduleServer, NS, bindCache, reactive, req, tagList, selectInput, updateSelectInput, validate, need, observe],
+  shinycssloaders[withSpinner],
   plotly[plotlyOutput, renderPlotly, plot_ly, layout, add_trace, add_annotations, subplot],
   dplyr[mutate, summarise, group_by],
   stringi[stri_sort],
@@ -20,7 +21,8 @@ dots_ui <- function(id) {
   ns <- NS(id)
   tagList(
     selectInput(ns("group_by"), "Group by", choices = character(0)),
-    plotlyOutput(ns("dots_plot"), height = "620px")
+    plotlyOutput(ns("dots_plot"), height = "620px") |> withSpinner(
+      type = 1, caption = "Loading plot...", color = "#5b5b5b")
   )
 }
 
@@ -90,7 +92,13 @@ dots_server <- function(id, selected_dataset) {
         assay = "counts", #NULL,
         limit = 10000L
       )
-    })
+    }) |>
+      bindCache(
+        selected_dataset()$lab_source,
+        selected_dataset()$study_id,
+        paste(selected_terms()$genes, collapse = ","),
+        paste(selected_terms()$proteins, collapse = ",")
+      )
 
     group_choices <- reactive({
       df <- feature_rows()
@@ -145,7 +153,14 @@ dots_server <- function(id, selected_dataset) {
         )
 
       plot_df
-    })
+    }) |>
+      bindCache(
+        selected_dataset()$lab_source,
+        selected_dataset()$study_id,
+        input$group_by,
+        paste(selected_terms()$genes, collapse = ","),
+        paste(selected_terms()$proteins, collapse = ",")
+      )
 
     output$dots_plot <- renderPlotly({
       validate(need(is_single_cell(), "Dot plot is only available for scRNA-seq and snRNA-seq datasets."))
@@ -265,7 +280,14 @@ dots_server <- function(id, selected_dataset) {
         titleX = TRUE,
         titleY = TRUE
       )
-    })
+    }) |>
+      bindCache(
+        selected_dataset()$lab_source,
+        selected_dataset()$study_id,
+        input$group_by,
+        paste(selected_terms()$genes, collapse = ","),
+        paste(selected_terms()$proteins, collapse = ",")
+      )
   })
 }
 
