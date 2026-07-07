@@ -46,6 +46,20 @@ ui <- page_navbar(
     fg = "#333333"
   ),
   
+  # ── Google Analytics — add exactly once here ──────────────────────────
+  tags$head(
+    tags$script(
+      async = NA,
+      src   = "https://www.googletagmanager.com/gtag/js?id=G-QNFVT5KKH5"
+    ),
+    tags$script(HTML(
+      'window.dataLayer = window.dataLayer || [];
+       function gtag(){dataLayer.push(arguments);}
+       gtag("js", new Date());
+       gtag("config", "G-QNFVT5KKH5");'
+    ))
+  ),
+  
   # Custom CSS and styles
   header = tags$head(
     tags$link(rel = "stylesheet", type = "text/css", href = "static/custom.css"),
