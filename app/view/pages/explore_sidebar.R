@@ -26,7 +26,7 @@ sidebar_ui <- function(id) {
     tags$label("Plot type", style = "font-weight: 600; color: #333;"),
     selectInput(ns("plot_type"), NULL,
                 choices  = c("Volcano", "Heatmap", "Violin", "Feature Scatter",
-                             "Histogram", "Dots Plot"
+                             "Histogram", "Dots Plot", "UMAP"
                              #, "Top Features"
                             ),
                 selected = "Volcano"
