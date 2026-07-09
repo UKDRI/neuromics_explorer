@@ -517,10 +517,11 @@ sources:
           expression: "expression.parquet"
           obs_metadata: "obs_metadata.parquet"
           feature_annotations: "feature_annotations.parquet"
+          umap: "UMAP.parquet"
         feature_cols:
           - gene_name
           - ID  #ENSG ids
-          - obs #TODO: rerun conversion script and rename/remove if not present in expression.parquet
+          - obs
         metric_cols:
           - expression_log2fc
           - expression_padj
@@ -530,7 +531,7 @@ sources:
           - Condition
           - cell_id
           - Donor
-          # - obs
+          - obs
 
   # --- BOWLES LAB ---
   bowles:

@@ -601,6 +601,29 @@ fetch_dataset_embeddings <- function(lab_source, study_id,
   )
 }
 
+#' Fetch drug panel embedding
+#' @export
+fetch_drug_panel_embeddings <- function(lab_source, study_id, max_points = 5000L) {
+  fetch_dataset_embeddings(
+    lab_source, study_id,
+    reduction = "umap", assay = "counts", max_points = max_points
+  ) # cluster_id arrives automatically as an extra column per the endpoint tweak
+}
+
+#' Fetch DE rows for selected drug(s) — reuses expression/table with entity filter
+#' @export
+fetch_drug_panel_expression <- function(lab_source, study_id, drug_ids = NULL,
+                                        genes = NULL, limit = 5000L) {
+  perform_arrow_request(
+    sprintf("/datasets/%s/%s/expression/table", lab_source, study_id),
+    query = list(
+      gene = genes, entity_col = if (length(drug_ids) > 0) "drug_id" else NULL,
+      entity_values = drug_ids, limit = as.integer(limit)
+    )
+  )
+}
+
+
 #' Fetch per-observation expression values for selected genes/proteins.
 #'
 #' UI connection: used by gene-specific violin plots for sc/snRNA datasets so
@@ -770,6 +793,9 @@ fetch_metadata_filter_options <- function(lab_source, study_id) {
   perform_arrow_request(
     sprintf("/datasets/%s/%s/metadata/options", lab_source, study_id)
   )
+  # Unwrap list-type columns to plain vector
+  # lapply(df, function(col) if (is.list(col) && length(col) >= 1) col[[1]] else col)
+
 }
 
 #' Fetch full metadata rows for one dataset.

@@ -33,6 +33,7 @@ box::use(
   app/view/components/histogram_plot[histogram_ui, histogram_server],
   app/view/components/dots_plot[dots_ui, dots_server],
   app/view/components/highest_expr_plot[highest_expr_ui, highest_expr_server],
+  app/view/components/signature_explorer[signatureExplorer_ui, signatureExplorer_server],
   app/view/pages/gene_dataset_selector[gene_selector_ui, gene_selector_server, parse_json_text],
   app/view/pages/explore_sidebar[sidebar_ui, sidebar_server],
   app/logic/api/api_client[fetch_all_datasets, fetch_datasets_for_terms, fetch_expression_table, fetch_expression_volcano,
@@ -152,6 +153,13 @@ explorer_ui <- function(id) {
                   icon = icon("table-columns"),
                   uiOutput(ns("compare_controls_ui")),
                   uiOutput(ns("compare_ui"))
+                ),
+
+                nav_panel(
+                  title = "Gene-Drug Explorer",
+                  icon = icon("pills"),
+                  signatureExplorer_ui(ns("gde"),
+                  drug_panel_adapter)
                 )
               )
             )
