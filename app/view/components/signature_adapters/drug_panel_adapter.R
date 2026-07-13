@@ -3,7 +3,7 @@
 box::use(
   shiny[NS, moduleServer, reactive, reactiveVal, observeEvent, req,
         tagList, fluidRow, column, radioButtons, checkboxInput, checkboxGroupInput, sliderInput,
-        renderUI, uiOutput, textOutput, renderText, tags],
+        renderUI, uiOutput, textOutput, renderText, tags, wellPanel],
   plotly[plotlyOutput, renderPlotly, plot_ly, add_markers, add_segments, layout, event_register, event_data],
 #   DT[DTOutput, renderDT, datatable],
   app/logic/api/api_client[fetch_gene_rank, fetch_contrast_options, fetch_expression_table],
@@ -24,11 +24,16 @@ drug_rank_adapter <- list(
     tagList(
         fluidRow(
             column(3, uiOutput(ns("breadcrumb"))),
-            column(3, checkboxInput(ns("scope_to_goi"), "Show only GOI", value = TRUE)) # value = length(input$goi) > 10 - prevent too many focal plots
         ),
-        uiOutput(ns("goi_display")),     #selectizeInput(ns("goi"), "Genes of interest", choices = NULL, multiple = TRUE, options = list(create = TRUE, maxItems = 50)),
-        uiOutput(ns("contrast_filter_ui")),
-        sliderInput(ns("top_n"), "Show top N drugs", 5, 100, 25, step = 5),
+        
+        wellPanel(
+            fluidRow(
+                column(6, uiOutput(ns("contrast_filter_ui"))),
+                column(3, sliderInput(ns("top_n"), "Show top N drugs", 5, 100, 25, step = 5)),
+                column(3, checkboxInput(ns("scope_to_goi"), "Show only GOI", value = TRUE)), # value = length(input$goi) > 10 - prevent too many focal plots
+            )
+        ),
+        tags$h2("Ranking drugs affecting selected genes of interest", style="font-size:28px;font-weight:600;"),
         plotlyOutput(ns("lollipop"), height = "680px"),
         textOutput(ns("selection_summary")),
         uiOutput(ns("focal_panel"))
@@ -52,15 +57,25 @@ drug_rank_adapter <- list(
             head(terms[!is.na(terms) & nzchar(terms)], 25L)   # cap irregardless of how many were searched
         })
 
-        output$goi_display <- renderUI({
-            terms <- goi_terms()
-            req(length(terms) > 0)
-            tagList(
-                tags$label("Ranking drugs by effect on:", style = "font-weight:600;"),
-                tags$div(lapply(terms, function(t) tags$span(t, class = "badge",
-                style = "background:#667eea;color:white;margin-right:4px;padding:4px 8px;border-radius:10px;")))
-            )
-        })
+        # output$goi_display <- renderUI({
+        #     terms <- goi_terms()
+        #     req(length(terms) > 0)
+        #         # tagList(
+        #         #     tags$label("Ranking drugs by effect on:", style = "font-weight:600;"),
+        #         #     tags$div(lapply(terms, function(t) tags$span(t, class = "badge",
+        #         #     style = "background:#667eea;color:white;margin-right:4px;padding:4px 8px;border-radius:10px;")))
+        #         # )
+        #     tags$div(
+        #         style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px;",
+        #         tags$span("Ranking drugs affecting", style="font-size:28px;font-weight:600;"),
+        #         lapply(terms, function(t)
+        #             tags$span(
+        #                 t, class="badge",
+        #                 style="background:#667eea;color:white;padding:5px 10px;border-radius:12px;font-size:15px;"
+        #             )
+        #         )
+        #     )
+        # })
 
 
         # Server-side guard for "too many GOI selected" — the observer auto-enables it 
@@ -98,16 +113,15 @@ drug_rank_adapter <- list(
             tagList(
                 # radioButtons(ns("condition"), "Condition", choices = opts$conditions[[1]], inline = TRUE),
                 # radioButtons(ns("timepoint"), "Timepoint", choices = opts$timepoints[[1]], inline = TRUE)
-                tags$label("Condition (leave blank for all)", style = "font-weight:600; font-size:13px;"),
+                tags$label("Condition:", style = "font-weight:600; font-size:18px;"),
                 checkboxGroupInput(ns("condition"), label = NULL,
                     choices = opts$conditions[[1]], selected = character(0), inline = TRUE),
-                tags$label("Timepoint (leave blank for all)", style = "font-weight:600; font-size:13px;"),
+                tags$label("Timepoint:", style = "font-weight:600; font-size:18px;"),
                 checkboxGroupInput(ns("timepoint"), label = NULL,
                     choices = opts$timepoints[[1]], selected = character(0), inline = TRUE)
 
             )
         })
-
 
         output$lollipop <- renderPlotly({
             df <- ranked()
@@ -120,7 +134,7 @@ drug_rank_adapter <- list(
                 marker = list(size = 10, color = "#2980B9"), #type = "scattergl",
                 text = ~paste0(drug_name, " (", drug_class, ")<br>#GOI hit: ", n_goi_hit, "/", n_goi_total),
                 hoverinfo = "text") |>
-            layout(xaxis = list(title = "Combined |log2FC| (significant GOI)"), yaxis = list(title = ""), dragmode = "select") |>   #layout(dragmode = "lasso") 
+            layout(xaxis = list(title = "Combined signature score"), yaxis = list(title = ""), dragmode = "select") |>   #layout(dragmode = "lasso") 
             event_register("plotly_click") |> event_register("plotly_selected")
         })
 
@@ -161,7 +175,7 @@ drug_rank_adapter <- list(
             req(selected_drugs())
             tagList(
                 volcano_ui(ns("volcano")),
-                heatmap_ui(ns("heatmap")),
+                plotlyOutput(ns("heatmap")),
                 results_ui(ns("gene_table"))
             )
         })
@@ -171,11 +185,14 @@ drug_rank_adapter <- list(
             lfc_thresh  = sidebar_vals$lfc_thresh_min
         )
 
-        heatmap_server("heatmap", focal_data,
-            padj_thresh = sidebar_vals$padj_thresh,
-            lfc_thresh  = sidebar_vals$lfc_thresh_min,
-            n_genes     = reactive(20L)
-        )
+        output$heatmap <- renderPlotly({
+            df <- focal_data()
+            req(nrow(df) > 0)
+            plot_ly(df, x = ~entity_id, y = ~gene_symbol, z = ~log2fc, type = "heatmap",
+                colorscale = list(c(0,"#2980B9"), c(0.5,"#FFFFFF"), c(1,"#C0392B")), zmid = 0,
+                hovertemplate = "%{y} · %{x}<br>log2FC: %{z:.3f}<extra></extra>"
+            )
+        })
 
         results_server("gene_table", focal_data)
     })
@@ -290,7 +307,7 @@ drug_rank_adapter <- list(
 #         })
 #         output$heatmap_single <- output$heatmap_multi <- renderPlotly({
 #             d <- focal_data()
-#             plot_ly(d, x = ~drug_id, y = ~gene_symbol, z = ~log2fc, type = "heatmap")
+#             plot_ly(d, x = ~entity_id, y = ~gene_symbol, z = ~log2fc, type = "heatmap")
 #         })
 #         # upset_plot: stub — ComplexUpset/upsetjs
 #         })

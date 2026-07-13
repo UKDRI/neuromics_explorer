@@ -792,9 +792,23 @@ def expression_table(
     proteins = _clean_optional_terms(protein)
     entity_ids = _clean_optional_terms(entity_id)
     clauses, params = _expression_filters(genes, proteins, cell_type)
+    # if entity_ids:
+    #     placeholders = ",".join(["?"] * len(entity_ids))
+    #     clauses.append(f"obs IN ({placeholders})")
+    #     params.extend(entity_ids)
+    join_sql = ""
     if entity_ids:
+        pool = _require_pool(request)
+        with get_conn(pool) as con:
+            ctx = _dataset_context(con, lab, study_id)
+            contrast_table = ctx["table_map"].get("contrast_metadata")
+            if not contrast_table:
+                raise HTTPException(404, "No contrast_metadata table registered for this dataset.")
+            contrast_ref = _table_ref(ctx, contrast_table, "cm")
+
         placeholders = ",".join(["?"] * len(entity_ids))
-        clauses.append(f"obs IN ({placeholders})")  #clauses.append(f"cm.entity_id IN ({placeholders})")
+        join_sql = f"JOIN {contrast_ref} ON v.obs = cm.obs"
+        clauses.append(f"cm.drug_id IN ({placeholders})")   #TODO replace `drug_id` to `entity_id`, `drug_class` to `entity_class` etc, in .parquet to generalise
         params.extend(entity_ids)
     where_sql = _where_sql(clauses)
     sort_sql = _validated_sort_sql(sort_by, sort_dir)
@@ -810,9 +824,13 @@ def expression_table(
           sample_a, sample_b, condition_a, condition_b, de_category, cell_type,
           cluster_id, tissue, sex, age, cell_id,
           obs,
+          {"cm.drug_id AS entity_id, cm.drug_name, cm.drug_class," if entity_ids else "NULL AS entity_id, NULL AS drug_name, NULL AS drug_class,"} 
+            -- if-else for focal panel of gene-drug exploration
+            -- TODO replace `drug_id` to `entity_id`, `drug_class` to `entity_class` etc, in .parquet to generalise
           study_id,
           COUNT(*) OVER() AS total_rows
-        FROM {view}
+        FROM {view} v
+        {join_sql}
         {where_sql}
         {sort_sql}
         LIMIT ?
@@ -1304,14 +1322,17 @@ def expression_gene_rank(
             filter_params.extend(timepoint)
         filter_sql = ("AND " + " AND ".join(filter_clauses)) if filter_clauses else ""
 
-
         # params = [padj] + params + [top_n]  #params = [padj, padj] + predicate_params + [top_n]
         sql = f"""
             WITH goi_rows AS (
                 SELECT 
-                    -- v.obs AS contrast_id,
-                    cm.entity_id, cm.drug_name, cm.drug_class,
-                    {SEMANTIC_GENE_EXPR} AS gene_symbol, v.log2fc, v.padj
+                    v.obs                AS drug_contrast_id,
+                    cm.drug_id           AS entity_id,
+                    cm.drug_name,
+                    cm.drug_class,
+                    {SEMANTIC_GENE_EXPR} AS gene_symbol,
+                    v.log2fc,
+                    v.padj
                 FROM {view} v
                 JOIN {contrast_ref} ON v.obs = cm.obs
                 WHERE ({" OR ".join(predicates)}) {filter_sql}
@@ -1320,9 +1341,12 @@ def expression_gene_rank(
                 entity_id,
                 FIRST(drug_name) AS drug_name,
                 FIRST(drug_class) AS drug_class,
-                SUM(CASE WHEN padj < ? THEN ABS(log2fc) * -log10(padj) ELSE 0 END) AS sig_score,   --LOG10()
-                COUNT(DISTINCT CASE WHEN padj < ? THEN gene_symbol END) AS n_goi_hit,
+                MEAN(CASE WHEN padj < ? THEN ABS(log2fc) * -log10(padj) ELSE 0 END) AS sig_score,   -- Use mean vs sum
+                COUNT(DISTINCT CASE WHEN padj < ? THEN gene_symbol END) AS n_goi_hit,               -- STRING_AGG(DISTINCT CASE WHEN padj < ? THEN gene_symbol END, ', ') AS hit_genes
                 COUNT(DISTINCT gene_symbol) AS n_goi_total
+                -- COUNT(DISTINCT CASE WHEN padj < ? THEN gene_symbol END) / COUNT(DISTINCT gene_symbol)::DOUBLE AS goi_fraction    -- add padj to params
+                -- ARG_MAX(gene_symbol, ABS(log2fc)) AS strongest_gene
+                -- MAX(ABS(log2fc)) AS strongest_abs_lfc
             FROM goi_rows
             GROUP BY entity_id
             HAVING sig_score > 0

@@ -209,6 +209,7 @@ def create_views(
                     {get_sql_col(name_mappings, 'pct_expressed_b',   expr_cols)}    AS pct_expressed_b,
 
                     -- Sample / cell metadata (when present in expression table)
+                    {get_sql_col(name_mappings, 'obs',              expr_cols)}     AS obs,     -- AS entity,
                     {get_sql_col(name_mappings, 'sample_a',         expr_cols)}     AS sample_a,
                     {get_sql_col(name_mappings, 'sample_b',         expr_cols)}     AS sample_b,
                     {get_sql_col(name_mappings, 'condition_a',      expr_cols)}     AS condition_a,
