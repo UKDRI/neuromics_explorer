@@ -435,11 +435,14 @@ fetch_expression_table <- function(lab_source, study_id,
                                    sort_by = "padj", sort_dir = "asc",
                                    cell_type = NULL,
                                    genes = NULL,
-                                   proteins = NULL) {
+                                   proteins = NULL,
+                                   entity_id = NULL) {
   genes <- unique(trimws(genes %||% character(0)))
   genes <- genes[nzchar(genes)]
   proteins <- unique(trimws(proteins %||% character(0)))
   proteins <- proteins[nzchar(proteins)]
+  entity_id <- unique(trimws(entity_id %||% character(0)))
+  entity_id <- entity_id[nzchar(entity_id)]
 
   perform_arrow_request(
     sprintf("/datasets/%s/%s/expression/table", lab_source, study_id),
@@ -450,7 +453,8 @@ fetch_expression_table <- function(lab_source, study_id,
       sort_dir = sort_dir,
       cell_type = cell_type,
       gene = genes,
-      protein = proteins
+      protein = proteins,
+      entity_id = entity_id
     )
   )
 }
@@ -570,6 +574,36 @@ fetch_expression_goi <- function(lab_source, study_id,
   )
 }
 
+
+#' Fetch drugs ranked by combined significant effect on selected genes.
+#'
+#' UI connection: backs the ranked lollipop in the Gene-Drug Explorer.
+#' @export
+fetch_gene_rank <- function(lab_source, study_id, genes,
+                            padj_thresh = 0.05, top_n = 25L,
+                            condition = NULL, timepoint = NULL) {
+  genes <- unique(trimws(genes %||% character(0)))
+  genes <- genes[nzchar(genes)]
+  if (length(genes) == 0) return(data.frame()) # #req(length(genes) == 0)
+
+  perform_arrow_request(
+    sprintf("/datasets/%s/%s/expression/gene-rank", lab_source, study_id),
+    query = list(
+      gene  = genes,
+      padj  = padj_thresh,
+      top_n = as.integer(top_n),
+      condition = condition,
+      timepoint = timepoint
+    )
+  )
+}
+#' UI connection: shows contrast options from contrast_metadata.parquet
+#' At this moment it is specific to the drug-gene panel
+#' @export
+fetch_contrast_options <- function(lab_source, study_id) {
+  perform_arrow_request(sprintf("/datasets/%s/%s/contrast-options", lab_source, study_id))
+}
+
 #' Fetch embedding coordinates and optional selected-term expression overlays.
 #'
 #' UI connection: powers the single-cell UMAP/PCA/tSNE plot in the explorer
@@ -597,28 +631,6 @@ fetch_dataset_embeddings <- function(lab_source, study_id,
       gene = genes,
       protein = proteins,
       max_points = as.integer(max_points)
-    )
-  )
-}
-
-#' Fetch drug panel embedding
-#' @export
-fetch_drug_panel_embeddings <- function(lab_source, study_id, max_points = 5000L) {
-  fetch_dataset_embeddings(
-    lab_source, study_id,
-    reduction = "umap", assay = "counts", max_points = max_points
-  ) # cluster_id arrives automatically as an extra column per the endpoint tweak
-}
-
-#' Fetch DE rows for selected drug(s) — reuses expression/table with entity filter
-#' @export
-fetch_drug_panel_expression <- function(lab_source, study_id, drug_ids = NULL,
-                                        genes = NULL, limit = 5000L) {
-  perform_arrow_request(
-    sprintf("/datasets/%s/%s/expression/table", lab_source, study_id),
-    query = list(
-      gene = genes, entity_col = if (length(drug_ids) > 0) "drug_id" else NULL,
-      entity_values = drug_ids, limit = as.integer(limit)
     )
   )
 }

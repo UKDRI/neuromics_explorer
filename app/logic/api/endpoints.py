@@ -773,6 +773,7 @@ def expression_table(
     study_id: int,
     gene: list[str] | None = Query(None),
     protein: list[str] | None = Query(None),
+    entity_id: list[str] | None = Query(None),
     cell_type: str | None = None,
     limit: int = Query(DEFAULT_TABLE_LIMIT, ge=1, le=MAX_TABLE_LIMIT),
     offset: int = Query(0, ge=0),
@@ -789,7 +790,12 @@ def expression_table(
     view = _safe_view_name("v", lab, study_id)
     genes = _clean_optional_terms(gene)
     proteins = _clean_optional_terms(protein)
+    entity_ids = _clean_optional_terms(entity_id)
     clauses, params = _expression_filters(genes, proteins, cell_type)
+    if entity_ids:
+        placeholders = ",".join(["?"] * len(entity_ids))
+        clauses.append(f"obs IN ({placeholders})")  #clauses.append(f"cm.entity_id IN ({placeholders})")
+        params.extend(entity_ids)
     where_sql = _where_sql(clauses)
     sort_sql = _validated_sort_sql(sort_by, sort_dir)
 
@@ -803,6 +809,7 @@ def expression_table(
           pct_expressed_a, pct_expressed_b,
           sample_a, sample_b, condition_a, condition_b, de_category, cell_type,
           cluster_id, tissue, sex, age, cell_id,
+          obs,
           study_id,
           COUNT(*) OVER() AS total_rows
         FROM {view}
@@ -1247,6 +1254,107 @@ def expression_feature_values(
             OFFSET ?
         """
         return _query_arrow(request, sql, params)
+
+@router.get("/datasets/{lab}/{study_id}/expression/gene-rank")
+def expression_gene_rank(
+    request: Request,
+    lab: str,
+    study_id: int,
+    gene: list[str] = Query(...),
+    padj: float = 0.05,
+    top_n: int = Query(25, ge=1, le=500),
+    condition: list[str] | None = Query(None),
+    timepoint: list[str] | None = Query(None),
+):
+    """
+    Return drugs ranked by combined weighted significant effect across selected genes.
+
+    UI connection: powers the Gene-Drug Explorer's ranked lollipop, gene-first
+    landing view of ranking (aggregation across genes per drug).
+    """
+    pool = _require_pool(request)
+    with get_conn(pool) as con:
+        ctx = _dataset_context(con, lab, study_id)
+        contrast_table = ctx["table_map"].get("contrast_metadata")
+        if not contrast_table:
+            raise HTTPException(404, "No contrast_metadata table registered for this dataset.")
+    
+        view = _safe_view_name("v", lab, study_id)
+        genes = _clean_terms(gene)
+        predicates, params = _term_predicates(genes, [])
+
+        contrast_ref = _table_ref(ctx, contrast_table, "cm")
+        # filter_clauses = []
+        # if condition:
+        #     filter_clauses.append("cm.condition = ?")
+        #     params.append(condition)
+        # if timepoint:
+        #     filter_clauses.append("cm.timepoint = ?")
+        #     params.append(timepoint)
+        # filter_sql = ("AND " + " AND ".join(filter_clauses)) if filter_clauses else ""
+        filter_clauses = []
+        filter_params: list = []
+        if condition:
+            placeholders = ",".join(["?"] * len(condition))
+            filter_clauses.append(f"cm.condition IN ({placeholders})")
+            filter_params.extend(condition)
+        if timepoint:
+            placeholders = ",".join(["?"] * len(timepoint))
+            filter_clauses.append(f"cm.timepoint IN ({placeholders})")
+            filter_params.extend(timepoint)
+        filter_sql = ("AND " + " AND ".join(filter_clauses)) if filter_clauses else ""
+
+
+        # params = [padj] + params + [top_n]  #params = [padj, padj] + predicate_params + [top_n]
+        sql = f"""
+            WITH goi_rows AS (
+                SELECT 
+                    -- v.obs AS contrast_id,
+                    cm.entity_id, cm.drug_name, cm.drug_class,
+                    {SEMANTIC_GENE_EXPR} AS gene_symbol, v.log2fc, v.padj
+                FROM {view} v
+                JOIN {contrast_ref} ON v.obs = cm.obs
+                WHERE ({" OR ".join(predicates)}) {filter_sql}
+            )
+            SELECT
+                entity_id,
+                FIRST(drug_name) AS drug_name,
+                FIRST(drug_class) AS drug_class,
+                SUM(CASE WHEN padj < ? THEN ABS(log2fc) * -log10(padj) ELSE 0 END) AS sig_score,   --LOG10()
+                COUNT(DISTINCT CASE WHEN padj < ? THEN gene_symbol END) AS n_goi_hit,
+                COUNT(DISTINCT gene_symbol) AS n_goi_total
+            FROM goi_rows
+            GROUP BY entity_id
+            HAVING sig_score > 0
+            ORDER BY sig_score DESC
+            LIMIT ?
+        """
+        # NB: padj bound twice (sig_score CASE + n_goi_hit CASE) — adjust params
+        # order to [padj, padj, *predicate_params, top_n] to match both usages.
+        # return _query_arrow(request, sql, [padj, padj] + params[1:])
+        final_params = params + filter_params + [padj, padj, top_n]     # final_params = params[:len(predicates)] + [padj, padj] + params[len(predicates):] + [top_n]
+        table = con.execute(sql, final_params).arrow()
+    return _arrow_response(table)
+
+@router.get("/datasets/{lab}/{study_id}/contrast-options")
+def contrast_options(request: Request, lab: str, study_id: int):
+    """
+    Return condition/timepoint filter options from contrast_metadata
+    """
+    pool = _require_pool(request)
+    with get_conn(pool) as con:
+        ctx = _dataset_context(con, lab, study_id)
+        contrast_table = ctx["table_map"].get("contrast_metadata")
+        if not contrast_table:
+            raise HTTPException(404, "No contrast_metadata table registered.")
+        ref = _table_ref(ctx, contrast_table)
+        table = con.execute(f"""
+            SELECT 
+                LIST(DISTINCT condition) AS conditions,
+                LIST(DISTINCT timepoint) AS timepoints
+            FROM {ref}
+        """).arrow()
+    return _arrow_response(table)
 
 
 @router.get("/datasets/{lab}/{study_id}/embeddings")

@@ -33,7 +33,8 @@ box::use(
   app/view/components/histogram_plot[histogram_ui, histogram_server],
   app/view/components/dots_plot[dots_ui, dots_server],
   app/view/components/highest_expr_plot[highest_expr_ui, highest_expr_server],
-  app/view/components/signature_explorer[signatureExplorer_ui, signatureExplorer_server],
+  app/view/components/signature_explorer[signature_explorer_ui, signature_explorer_server],
+  app/view/components/signature_adapters/drug_panel_adapter[drug_rank_adapter],
   app/view/pages/gene_dataset_selector[gene_selector_ui, gene_selector_server, parse_json_text],
   app/view/pages/explore_sidebar[sidebar_ui, sidebar_server],
   app/logic/api/api_client[fetch_all_datasets, fetch_datasets_for_terms, fetch_expression_table, fetch_expression_volcano,
@@ -158,8 +159,8 @@ explorer_ui <- function(id) {
                 nav_panel(
                   title = "Gene-Drug Explorer",
                   icon = icon("pills"),
-                  signatureExplorer_ui(ns("gde"),
-                  drug_panel_adapter)
+                  signature_explorer_ui(ns("gde"),
+                  drug_rank_adapter)
                 )
               )
             )
@@ -1191,6 +1192,9 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
     is_compare_tab <- reactive({
       grepl("Compare", input$exploration_tabs %||% "", ignore.case = TRUE)
     })
+    is_gene_drug_tab <- reactive({
+      grepl("Gene-Drug", input$exploration_tabs %||% "", ignore.case = TRUE)
+    })
 
     gated_active_dataset <- function(type = NULL) {
       reactive({
@@ -1199,6 +1203,10 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
         active_dataset()
       })
     }
+    gated_gene_drug_dataset <- reactive({
+      req(is_gene_drug_tab())
+      active_dataset()
+    })
 
     # ── Per-idx cached data reactives for Compare tab ──────────────────────────
 
@@ -1300,6 +1308,8 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
       cache <- list()
 
       function(idx, reduction, embedding_view) {
+        reduction <- reduction %||% "umap"
+        embedding_view <- embedding_view %||% "metadata_overview"
         key <- paste(idx, reduction, embedding_view, sep = "::")
         if (is.null(cache[[key]])) {
           cache[[key]] <<- reactive({
@@ -1986,6 +1996,9 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
     dots_server("dots", gated_active_dataset("Dots Plot"))
 
     highest_expr_server("highest_expr", gated_active_dataset("Top Features"))
+
+    signature_explorer_server("gde", drug_rank_adapter, gated_gene_drug_dataset,
+                             sidebar_vals = sidebar_vals)
     
     # ── Value boxes (tied to dataset_stats) ─────────────────────────────
     # stats_row <- reactive({

@@ -517,7 +517,8 @@ sources:
           expression: "expression.parquet"
           obs_metadata: "obs_metadata.parquet"
           feature_annotations: "feature_annotations.parquet"
-          umap: "UMAP.parquet"
+          # umap: "UMAP.parquet"
+          contrast_metadata: "contrast_metadata.parquet"
         feature_cols:
           - gene_name
           - ID  #ENSG ids
