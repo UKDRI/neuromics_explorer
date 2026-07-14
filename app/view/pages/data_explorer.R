@@ -495,6 +495,7 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
         return("obs")
       }
       cols[1] #NULL as it may fall to study_id while handling NULL with validate()
+      # NA_character_ # no grouping 
     }
 
     compare_metric_choices <- function(df, cols = names(df)) {
@@ -1076,32 +1077,51 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
           "term" %in% names(df) &&
           any(df$term == embedding_view, na.rm = TRUE)) {
         df <- df[df$term == embedding_view, , drop = FALSE]
-        color_values <- log10(pmax(df$expression_value, 0) + 1)
-        color_scale <- c("#F7FBFF", "#6BAED6", "#08306B")
-        color_title <- paste0("log10(", embedding_view, " + 1)")
+        colour_values <- log10(pmax(df$expression_value, 0) + 1)
+        colour_scale <- c("#F7FBFF", "#6BAED6", "#08306B")
+        colour_title <- paste0("log10(", embedding_view, " + 1)")
       } else {
-        color_col <- compare_group_col(df)
-        color_values <- as.character(df[[color_col]])
-        color_scale <- NULL
-        color_title <- color_col
+        colour_col <- compare_group_col(df)
+
+        # Guard for no valid grouping/ colour column such as cell types or cluster, or if column selected has too many levels (ie cell id/obs would blow up into thousands of traces/colours)
+        n_levels <- if (!is.na(colour_col) && colour_col %in% names(df)) length(unique(as.character(df[[colour_col]]))) else 0
+        if (is.na(colour_col) || identical(colour_col, "obs") || n_levels <= 1 || n_levels > 40) {
+          colour_values <- NULL
+          colour_scale  <- NULL
+          colour_title  <- "All cells"
+        } else {
+          colour_values <- as.character(df[[colour_col]])
+          colour_scale <- NULL
+          colour_title <- colour_col
+        }
       }
+
+      # ### DEBUG
+      # message("Rows: ", nrow(df))
+      # message("Columns: ", paste(names(df), collapse = ", "))
+      # message("Colour: ", colour_col)
+      # message("Unique colour values: ", length(unique(df[[colour_col]])))
+
+      # validate(need(any(!is.na(df[[colour_col]])), "No clustering variable."))
 
       plotly::plot_ly(
         x = df$dim_1,
         y = df$dim_2,
         type = "scattergl",
         mode = "markers",
-        color = color_values,
-        colors = color_scale,
+        color = colour_values,
+        colors = colour_scale,
         marker = list(size = 4, opacity = 0.7),
         text = paste0("obs: ", df$obs),
         hoverinfo = "text"
       ) |>
         plotly::layout(
-          title = list(text = paste(row$dataset_name[1], "·", color_title), x = 0.02),
+          title = list(text = colour_title, x = 1, xanchor = "right"),
           xaxis = list(title = paste0(toupper(reduction), " 1")),
           yaxis = list(title = paste0(toupper(reduction), " 2")),
           margin = list(t = 50)
+          #, legend = list(title = list(text = colour_title)) # doesnt show
+
         )
     }
 
@@ -1318,6 +1338,10 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
             req(datasets, nrow(datasets) >= idx)
             row <- datasets[idx, , drop = FALSE]
             req(row$omic_type[1] %in% c("scrna", "snrna"))
+            # # if (!row$omic_type[1] %in% c("scrna", "snrna")) return(data.frame()) 
+            # if (!isTRUE(row$omic_type[1] %in% c("scrna", "snrna"))) {
+            #   return(data.frame())   # CHANGED: was req(...) — resolves the reactive instead of suspending it forever
+            # }
 
             ds <- selected_dataset()
             fetch_dataset_embeddings(
@@ -1325,19 +1349,24 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
               study_id = row$study_id[1],
               reduction = reduction,
               assay = "counts", #logcounts
-              genes = if (!identical(embedding_view, "metadata_overview")) embedding_view else ds$genes %||% character(0),
-              proteins = if (identical(embedding_view, "metadata_overview")) ds$proteins %||% character(0) else character(0),  #proteins = character(0)
+              # genes = if (!identical(embedding_view, "metadata_overview")) embedding_view else ds$genes %||% character(0),
+              # proteins = if (identical(embedding_view, "metadata_overview")) ds$proteins %||% character(0) else character(0),  #proteins = character(0)
+              genes = if (!identical(embedding_view, "metadata_overview")) embedding_view else character(0),
+              proteins = character(0),
               max_points = 50000L
             )
           }) |>
             bindCache(
-              compare_source_rows()[idx, , drop = FALSE]$lab_source[1],
-              compare_source_rows()[idx, , drop = FALSE]$study_id[1],
+              is_compare_tab(),
+              paste(compare_source_rows()[idx, , drop = FALSE]$lab_source, collapse = ","),
+              paste(compare_source_rows()[idx, , drop = FALSE]$study_id,   collapse = ","),
+              # compare_source_rows()[idx, , drop = FALSE]$lab_source[1],
+              # compare_source_rows()[idx, , drop = FALSE]$study_id[1],
               reduction, #input$compare_umap_reduction %||% "umap",
               embedding_view,
               paste(selected_dataset()$genes %||% character(0), collapse = ","),
               paste(selected_dataset()$proteins %||% character(0), collapse = ",")
-            )
+            ) # Using just `compare_source_rows()[idx, , drop = FALSE]$lab_source[1]` causes : Error: object '' not found - due to lapply FUN needed on cache key
         }
 
         cache[[key]]
@@ -1787,7 +1816,16 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
           row <- datasets[idx, , drop = FALSE]
           output_id <- paste0("compare_plot_", idx)
 
+          #### DEBUG
+          message("Attempting to build idx=", idx)
+          ####
+
           output[[output_id]] <- renderPlotly({
+            
+            #### DEBUG
+            message("rendering idx=", idx, " plot_type=", plot_type)
+            ####
+
             current_state <- selected_dataset()
             req(current_state)
 

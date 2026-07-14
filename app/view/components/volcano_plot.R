@@ -18,8 +18,8 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 box::use(
-  shiny[NS, moduleServer, reactive, observe, req, renderUI, uiOutput,
-        div, p, tags, tagList, bindCache],
+  shiny[NS, moduleServer, need, reactive, observe, req, renderUI, uiOutput,
+        div, p, tags, tagList, bindCache, validate],
   shinycssloaders[withSpinner],
   plotly[plotlyOutput, renderPlotly, plot_ly, layout, add_annotations,
          add_segments, event_data, event_register],
@@ -86,14 +86,15 @@ volcano_server <- function(id, de_data, padj_thresh, lfc_thresh, gene = reactive
           #   if ("condition_a" %in% names(df)) paste0(condition_a, " vs ", condition_b) else ""
           # )
         )
-    }) |>
-      bindCache(
-        de_data()$lab_source[1] %||% "",
-        de_data()$study_id[1] %||% "",
-        # padj_thresh(),
-        # lfc_thresh(),
-        # gene()  #since annotations added in plot_obj
-      )
+    }) 
+    # |>
+    #   bindCache(
+    #     paste(de_data()$lab_source[1] %||% "", collapse = ","),
+    #     paste(de_data()$study_id[1] %||% "", collapse = ","),
+    #     # padj_thresh(),
+    #     # lfc_thresh(),
+    #     # gene()  #since annotations added in plot_obj
+    #   )
 
     plot_obj <- reactive({
       df   <- plot_df()
@@ -195,8 +196,8 @@ volcano_server <- function(id, de_data, padj_thresh, lfc_thresh, gene = reactive
       p
     }) |>
       bindCache(
-        de_data()$lab_source[1] %||% "",
-        de_data()$study_id[1] %||% "",
+        paste(de_data()$lab_source[1] %||% "", collapse = ","),
+        paste(de_data()$study_id[1] %||% "", collapse = ","),
         # padj_thresh(),
         # lfc_thresh(),
         paste(gene() %||% character(0), collapse = ",")

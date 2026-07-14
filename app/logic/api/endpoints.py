@@ -823,7 +823,7 @@ def expression_table(
           pct_expressed_a, pct_expressed_b,
           sample_a, sample_b, condition_a, condition_b, de_category, cell_type,
           cluster_id, tissue, sex, age, cell_id,
-          obs,
+          v.obs,
           {"cm.drug_id AS entity_id, cm.drug_name, cm.drug_class," if entity_ids else "NULL AS entity_id, NULL AS drug_name, NULL AS drug_class,"} 
             -- if-else for focal panel of gene-drug exploration
             -- TODO replace `drug_id` to `entity_id`, `drug_class` to `entity_class` etc, in .parquet to generalise

@@ -2,7 +2,7 @@
 
 box::use(
   shiny[NS, moduleServer, reactive, reactiveVal, observeEvent, req,
-        tagList, fluidRow, column, radioButtons, checkboxInput, checkboxGroupInput, sliderInput,
+        tagList, fluidRow, column, radioButtons, checkboxInput, checkboxGroupInput, sliderInput, selectizeInput,
         renderUI, uiOutput, textOutput, renderText, tags, wellPanel],
   plotly[plotlyOutput, renderPlotly, plot_ly, add_markers, add_segments, layout, event_register, event_data],
 #   DT[DTOutput, renderDT, datatable],
@@ -29,8 +29,9 @@ drug_rank_adapter <- list(
         wellPanel(
             fluidRow(
                 column(6, uiOutput(ns("contrast_filter_ui"))),
-                column(3, sliderInput(ns("top_n"), "Show top N drugs", 5, 100, 25, step = 5)),
-                column(3, checkboxInput(ns("scope_to_goi"), "Show only GOI", value = TRUE)), # value = length(input$goi) > 10 - prevent too many focal plots
+                    # column(3, sliderInput(ns("top_n"), "Show top N drugs", 5, 100, 25, step = 5)),
+                column(3, selectizeInput(ns("drug_search"), "Search drug", choices = NULL, multiple = FALSE, options = list(placeholder="Type drug..."))),
+                column(3, checkboxInput(ns("scope_to_goi"), "Show only GOI", value = TRUE)), # TODO:CHECK REDUNDANT? # value = length(input$goi) > 10 - prevent too many focal plots
             )
         ),
         tags$h2("Ranking drugs affecting selected genes of interest", style="font-size:28px;font-weight:600;"),
@@ -56,27 +57,6 @@ drug_rank_adapter <- list(
             terms <- trimws(as.character(terms))
             head(terms[!is.na(terms) & nzchar(terms)], 25L)   # cap irregardless of how many were searched
         })
-
-        # output$goi_display <- renderUI({
-        #     terms <- goi_terms()
-        #     req(length(terms) > 0)
-        #         # tagList(
-        #         #     tags$label("Ranking drugs by effect on:", style = "font-weight:600;"),
-        #         #     tags$div(lapply(terms, function(t) tags$span(t, class = "badge",
-        #         #     style = "background:#667eea;color:white;margin-right:4px;padding:4px 8px;border-radius:10px;")))
-        #         # )
-        #     tags$div(
-        #         style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px;",
-        #         tags$span("Ranking drugs affecting", style="font-size:28px;font-weight:600;"),
-        #         lapply(terms, function(t)
-        #             tags$span(
-        #                 t, class="badge",
-        #                 style="background:#667eea;color:white;padding:5px 10px;border-radius:12px;font-size:15px;"
-        #             )
-        #         )
-        #     )
-        # })
-
 
         # Server-side guard for "too many GOI selected" — the observer auto-enables it 
         # once GOI count crosses the threshold
@@ -127,14 +107,29 @@ drug_rank_adapter <- list(
             df <- ranked()
             req(nrow(df) > 0)
             df$entity_id <- factor(df$entity_id, levels = rev(df$entity_id))  # preserve server-side rank order, reverse orientation so top-ranked drug at the top 
+            df$hit_frac  <- df$n_goi_hit / pmax(df$n_goi_total, 1)
+            
             plot_ly(source = "generank") |>
             add_segments(data = df, x = 0, xend = ~sig_score, y = ~entity_id, yend = ~entity_id,
-                line = list(color = "#BDC3C7"), showlegend = FALSE, hoverinfo = "skip") |>
+                line = list(color = "#D8DEE6", width = 2), showlegend = FALSE, hoverinfo = "skip") |>
             add_markers(data = df, x = ~sig_score, y = ~entity_id,
-                marker = list(size = 10, color = "#2980B9"), #type = "scattergl",
-                text = ~paste0(drug_name, " (", drug_class, ")<br>#GOI hit: ", n_goi_hit, "/", n_goi_total),
+                marker = list(
+                    size        = ~pmax(n_goi_hit * 2, 10), #*6 #???
+                    color       = ~hit_frac,
+                    colorscale  = list(c(0,"#AEC6E8"), c(1,"#1F4E96")),
+                    showscale   = TRUE,
+                    colorbar    = list(title = "% GOI hit", tickformat = ".0%"),
+                    line        = list(color = "#FFFFFF", width = 1)
+                ), #type = "scattergl",
+                text = ~paste0(
+                    "<b>", drug_name, "</b> (", drug_class, ")<br>",
+                    "Score: ", round(sig_score, 2), "<br>",
+                    "Hits: ", n_goi_hit, "/", n_goi_total, "<br>"
+                    # "Genes: ", hit_genes  
+                    # TODO: hit_genes added to sql endpoint 'expression/gene-rank'
+                ),
                 hoverinfo = "text") |>
-            layout(xaxis = list(title = "Combined signature score"), yaxis = list(title = ""), dragmode = "select") |>   #layout(dragmode = "lasso") 
+            layout(xaxis = list(title = "Signature score"), yaxis = list(title = ""), dragmode = "select", margin = list(l = 140)) |>   #layout(dragmode = "lasso") 
             event_register("plotly_click") |> event_register("plotly_selected")
         })
 
@@ -163,12 +158,15 @@ drug_rank_adapter <- list(
             req(length(selected_drugs()) > 0)
             ds <- dataset()
             goi <- goi_terms()
-            fetch_expression_table(
+            df <- fetch_expression_table(
                 lab_source = ds$lab_source, study_id = ds$study_id,
                 entity_id = selected_drugs(),
                 genes = if (isTRUE(input$scope_to_goi)) goi else NULL,  # NULL = all genes for this drug
                 limit = 5000L
             )
+            df$lab_source <- ds$lab_source %||% "unknown" #NA_character_   # volcano_server's bindCache needs these to prevent Error: object '' not found
+            df$study_id   <- ds$study_id %||% NA_integer_ # NA_character_
+            df
         })
 
         output$focal_panel <- renderUI({
@@ -190,7 +188,7 @@ drug_rank_adapter <- list(
             req(nrow(df) > 0)
             plot_ly(df, x = ~entity_id, y = ~gene_symbol, z = ~log2fc, type = "heatmap",
                 colorscale = list(c(0,"#2980B9"), c(0.5,"#FFFFFF"), c(1,"#C0392B")), zmid = 0,
-                hovertemplate = "%{y} · %{x}<br>log2FC: %{z:.3f}<extra></extra>"
+                hovertemplate = "%{y} · %{x}<br>log2FC: %{z:.3f}<br>padj: %{customdata:.2e}<extra></extra>"
             )
         })
 
