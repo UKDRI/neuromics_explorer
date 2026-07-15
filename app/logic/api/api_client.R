@@ -616,7 +616,7 @@ fetch_gene_drug_summary <- function(lab_source, study_id, genes, padj_thresh = 0
 }
 #' For DT of expression for gene-drug-pairs under main 'Gene-Drug Explorer' overview
 #' @export
-fetch_gene_drug_pairs <- function(lab_source, study_id, genes, condition = NULL, timepoint = NULL, limit = 20000L) {
+fetch_gene_drug_pairs <- function(lab_source, study_id, genes, padj_thresh = 0.05, condition = NULL, timepoint = NULL, limit = 20000L) {
   # genes <- unique(trimws(genes %||% character(0)))
   # genes <- genes[nzchar(genes)]
   if (length(genes) == 0) return(data.frame())
@@ -624,6 +624,7 @@ fetch_gene_drug_pairs <- function(lab_source, study_id, genes, condition = NULL,
     sprintf("/datasets/%s/%s/expression/gene-drug-pairs", lab_source, study_id),
     query = list(
       gene      = genes,
+      padj      = padj_thresh,
       condition = condition,
       timepoint = timepoint,
       limit     = as.integer(limit)

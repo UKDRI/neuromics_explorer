@@ -1392,18 +1392,20 @@ def gene_drug_summary(
             WITH {sql_join}
             SELECT
                 gene_symbol,
+                    -- padj, error due to gene_symbol grouping
                 COUNT(DISTINCT entity_id) AS n_drugs_tested,
                 COUNT(DISTINCT CASE WHEN padj < ? THEN entity_id END) AS n_drugs_sig,
                 SUM(CASE WHEN padj < ? AND log2fc > 0 THEN 1 ELSE 0 END) AS n_up,
-                SUM(CASE WHEN padj < ? AND log2fc < 0 THEN 1 ELSE 0 END) AS n_down
+                SUM(CASE WHEN padj < ? AND log2fc < 0 THEN 1 ELSE 0 END) AS n_down,
                 (COUNT(DISTINCT CASE WHEN padj < ? THEN entity_id END)::DOUBLE
                     / NULLIF(COUNT(DISTINCT entity_id), 0)) AS frac_sig,    -- n_drugs_sig/n_drugs_tested
-                -- (COUNT(DISTINCT CASE WHEN padj < ? AND log2fc > 0 THEN entity_id END) - COUNT(DISTINCT CASE WHEN padj < ? AND log2fc < 0 THEN entity_id END)) AS net_bias --colouring bubble fo net direction up/down
+                (COUNT(DISTINCT CASE WHEN padj < ? AND log2fc > 0 THEN entity_id END) 
+                    - COUNT(DISTINCT CASE WHEN padj < ? AND log2fc < 0 THEN entity_id END)) AS net_change     --colouring bubble fo net direction up/down
             FROM goi_rows
             GROUP BY gene_symbol
             ORDER BY n_drugs_sig DESC   -- TODO possibly change??
         """
-        final_params = join_params + [padj]*4
+        final_params = join_params + [padj]*6
         table = con.execute(sql, final_params).arrow()
     return _arrow_response(table)
 
@@ -1425,7 +1427,6 @@ def gene_drug_pairs(
         ctx = _dataset_context(con, lab, study_id)
         view = _safe_view_name("v", lab, study_id)
         genes = _clean_terms(gene)
-        predicates, params = _term_predicates(genes, [])
         sql_join, join_params = _build_gene_entity_join(con, ctx, view, genes, condition, timepoint)
 
         sql = f"""
@@ -1440,7 +1441,7 @@ def gene_drug_pairs(
             FROM goi_rows
             ORDER BY ABS(log2fc) DESC      -- padj ASC NULLS LAST
         """
-        table = con.execute(sql, [padj, padj] + params).arrow()
+        table = con.execute(sql, [padj, padj] + join_params).arrow()
     return _arrow_response(table)
 
 
