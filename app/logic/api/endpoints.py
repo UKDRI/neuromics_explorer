@@ -1302,14 +1302,6 @@ def expression_gene_rank(
         predicates, params = _term_predicates(genes, [])
 
         contrast_ref = _table_ref(ctx, contrast_table, "cm")
-        # filter_clauses = []
-        # if condition:
-        #     filter_clauses.append("cm.condition = ?")
-        #     params.append(condition)
-        # if timepoint:
-        #     filter_clauses.append("cm.timepoint = ?")
-        #     params.append(timepoint)
-        # filter_sql = ("AND " + " AND ".join(filter_clauses)) if filter_clauses else ""
         filter_clauses = []
         filter_params: list = []
         if condition:
@@ -1341,7 +1333,7 @@ def expression_gene_rank(
                 entity_id,
                 FIRST(drug_name) AS drug_name,
                 FIRST(drug_class) AS drug_class,
-                MEAN(CASE WHEN padj < ? THEN ABS(log2fc) * -log10(padj) ELSE 0 END) AS sig_score,   -- Use mean vs sum
+                MEAN(CASE WHEN padj < ? THEN ABS(log2fc) * -log10(padj) ELSE 0 END) AS sig_score,
                 COUNT(DISTINCT CASE WHEN padj < ? THEN gene_symbol END) AS n_goi_hit,               -- STRING_AGG(DISTINCT CASE WHEN padj < ? THEN gene_symbol END, ', ') AS hit_genes
                 COUNT(DISTINCT gene_symbol) AS n_goi_total
                 -- COUNT(DISTINCT CASE WHEN padj < ? THEN gene_symbol END) / COUNT(DISTINCT gene_symbol)::DOUBLE AS goi_fraction    -- add padj to params
@@ -1353,11 +1345,50 @@ def expression_gene_rank(
             ORDER BY sig_score DESC
             LIMIT ?
         """
-        # NB: padj bound twice (sig_score CASE + n_goi_hit CASE) — adjust params
-        # order to [padj, padj, *predicate_params, top_n] to match both usages.
-        # return _query_arrow(request, sql, [padj, padj] + params[1:])
+        # NB: padj bound twice (sig_score CASE + n_goi_hit CASE)
         final_params = params + filter_params + [padj, padj, top_n]     # final_params = params[:len(predicates)] + [padj, padj] + params[len(predicates):] + [top_n]
         table = con.execute(sql, final_params).arrow()
+    return _arrow_response(table)
+
+
+@router.get("/datasets/{lab}/{study_id}/expression/signature")
+def expression_signature(
+    request: Request, lab: str, study_id: int,
+    entity_id: list[str] = Query(...),
+    limit: int = Query(20000, ge=100, le=100000),
+):
+    """Full gene signature (ALL genes, not GOI-scoped) for selected entities — ie drive drug-panel volcano."""
+    pool = _require_pool(request)
+    with get_conn(pool) as con:
+        ctx = _dataset_context(con, lab, study_id)
+        contrast_table = ctx["table_map"].get("contrast_metadata")
+        if not contrast_table:
+            raise HTTPException(404, "No contrast_metadata table registered for this dataset.")
+        view = _safe_view_name("v", lab, study_id)
+        contrast_ref = _table_ref(ctx, contrast_table, "cm")
+        entity_ids = _clean_terms(entity_id)
+        placeholders = ",".join(["?"] * len(entity_ids))
+        sql = f"""
+            SELECT
+              {SEMANTIC_GENE_EXPR} AS gene_symbol,
+              human_gene,
+              protein_id,
+              v.log2fc,
+              v.pvalue,
+              v.padj,
+              cm.drug_id AS entity_id,
+              cm.drug_name,
+              cm.drug_class,
+              {study_id} AS study_id
+            FROM {view} v
+            JOIN {contrast_ref} ON v.obs = cm.obs
+            WHERE cm.drug_id IN ({placeholders})
+              AND v.log2fc IS NOT NULL
+              AND (v.padj IS NOT NULL OR v.pvalue IS NOT NULL)
+            ORDER BY v.log2fc DESC      -- ORDER BY v.padj ASC NULLS LAST 
+            LIMIT ?
+        """
+        table = con.execute(sql, entity_ids + [limit]).arrow()
     return _arrow_response(table)
 
 @router.get("/datasets/{lab}/{study_id}/contrast-options")

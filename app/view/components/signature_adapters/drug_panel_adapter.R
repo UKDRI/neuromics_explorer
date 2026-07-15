@@ -6,7 +6,7 @@ box::use(
         renderUI, uiOutput, textOutput, renderText, tags, wellPanel],
   plotly[plotlyOutput, renderPlotly, plot_ly, add_markers, add_segments, layout, event_register, event_data],
 #   DT[DTOutput, renderDT, datatable],
-  app/logic/api/api_client[fetch_gene_rank, fetch_contrast_options, fetch_expression_table],
+  app/logic/api/api_client[fetch_gene_rank, fetch_contrast_options, fetch_expression_signature, fetch_expression_table],
   app/view/components/helpers/explorer_helpers[breadcrumb_ui, selection_count_text],
   app/view/components/expression_heatmap[heatmap_ui, heatmap_server],
   app/view/components/results_table[results_ui, results_server],
@@ -22,19 +22,18 @@ drug_rank_adapter <- list(
   ui = function(id) {
     ns <- NS(id)
     tagList(
-        fluidRow(
-            column(3, uiOutput(ns("breadcrumb"))),
-        ),
-        
         wellPanel(
             fluidRow(
                 column(6, uiOutput(ns("contrast_filter_ui"))),
                     # column(3, sliderInput(ns("top_n"), "Show top N drugs", 5, 100, 25, step = 5)),
-                column(3, selectizeInput(ns("drug_search"), "Search drug", choices = NULL, multiple = FALSE, options = list(placeholder="Type drug..."))),
+                column(3, selectizeInput(ns("drug_search"), "Search drug", choices = NULL, multiple = TRUE, options = list(placeholder = "e.g. imatinib..."))),
                 column(3, checkboxInput(ns("scope_to_goi"), "Show only GOI", value = TRUE)), # TODO:CHECK REDUNDANT? # value = length(input$goi) > 10 - prevent too many focal plots
             )
         ),
         tags$h2("Ranking drugs affecting selected genes of interest", style="font-size:28px;font-weight:600;"),
+        fluidRow(
+            column(3, uiOutput(ns("breadcrumb"))),
+        ),
         plotlyOutput(ns("lollipop"), height = "680px"),
         textOutput(ns("selection_summary")),
         uiOutput(ns("focal_panel"))
@@ -145,7 +144,7 @@ drug_rank_adapter <- list(
             selected_drugs(unique(sel$y))   # box-select on a categorical y axis extracts multiple drug ids
         })
 
-        output$selection_summary <- renderText(selection_count_text(length(selected_drugs()), "drug(s)"))
+        output$selection_summary <- renderText(selection_count_text(length(selected_drugs()), "drug"))
 
         output$breadcrumb <- renderUI({
             req(length(selected_drugs()) > 0)
@@ -153,7 +152,7 @@ drug_rank_adapter <- list(
         })
         observeEvent(input$back_to_landscape, selected_drugs(character(0))) #NULL
 
-        # entity_col/ entity_values filters expression/table to just the clicked drug
+        # Drives heatmaps etc - entity_id filters GOI-scoped 'expression/table' to just the clicked entity and its GOI 
         focal_data <- reactive({
             req(length(selected_drugs()) > 0)
             ds <- dataset()
@@ -164,8 +163,18 @@ drug_rank_adapter <- list(
                 genes = if (isTRUE(input$scope_to_goi)) goi else NULL,  # NULL = all genes for this drug
                 limit = 5000L
             )
-            df$lab_source <- ds$lab_source %||% "unknown" #NA_character_   # volcano_server's bindCache needs these to prevent Error: object '' not found
+            df$lab_source <- ds$lab_source %||% "unknown" #NA_character_ 
             df$study_id   <- ds$study_id %||% NA_integer_ # NA_character_
+            df
+        })
+
+        # Drives full data plots (eg volcano) requiring all genes for selected entities
+        full_data <- reactive({
+            req(length(selected_drugs()) > 0)
+            ds <- dataset()
+            df <- fetch_expression_signature(ds$lab_source, ds$study_id, selected_drugs())
+            df$lab_source <- ds$lab_source %||% "unknown"   # volcano_server's bindCache needs these to prevent Error: object '' not found
+            df$study_id   <- ds$study_id %||% NA_integer_
             df
         })
 
@@ -178,7 +187,7 @@ drug_rank_adapter <- list(
             )
         })
 
-        volcano_server("volcano", focal_data,
+        volcano_server("volcano", full_data,
             padj_thresh = sidebar_vals$padj_thresh,
             lfc_thresh  = sidebar_vals$lfc_thresh_min
         )
