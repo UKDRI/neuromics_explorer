@@ -597,6 +597,7 @@ fetch_gene_rank <- function(lab_source, study_id, genes,
     )
   )
 }
+#' Fetches gene-level aggregates for all entities to drive the main 'Gene-Drug Explorer' overview
 #' @export
 fetch_gene_drug_summary <- function(lab_source, study_id, genes, padj_thresh = 0.05,
                                     condition = NULL, timepoint = NULL) {
@@ -613,6 +614,7 @@ fetch_gene_drug_summary <- function(lab_source, study_id, genes, padj_thresh = 0
     )
   )
 }
+#' For DT of expression for gene-drug-pairs under main 'Gene-Drug Explorer' overview
 #' @export
 fetch_gene_drug_pairs <- function(lab_source, study_id, genes, condition = NULL, timepoint = NULL, limit = 20000L) {
   # genes <- unique(trimws(genes %||% character(0)))
@@ -628,6 +630,7 @@ fetch_gene_drug_pairs <- function(lab_source, study_id, genes, condition = NULL,
     )
   )
 }
+#' Fetches all genes and their expression, signatures, etc. for selected entities to drive focal plots like drug-panel volcano
 #' @export
 fetch_expression_signature <- function(lab_source, study_id, entity_id, condition = NULL, timepoint = NULL, limit = 20000L) {
   perform_arrow_request(
