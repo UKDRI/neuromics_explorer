@@ -597,6 +597,49 @@ fetch_gene_rank <- function(lab_source, study_id, genes,
     )
   )
 }
+#' @export
+fetch_gene_drug_summary <- function(lab_source, study_id, genes, padj_thresh = 0.05,
+                                    condition = NULL, timepoint = NULL) {
+  # genes <- unique(trimws(genes %||% character(0)))
+  # genes <- genes[nzchar(genes)]
+  if (length(genes) == 0) return(data.frame())
+  perform_arrow_request(
+    sprintf("/datasets/%s/%s/expression/gene-drug-summary", lab_source, study_id),
+    query = list(
+      gene      = genes,
+      padj      = padj_thresh,
+      condition = condition,
+      timepoint = timepoint
+    )
+  )
+}
+#' @export
+fetch_gene_drug_pairs <- function(lab_source, study_id, genes, condition = NULL, timepoint = NULL, limit = 20000L) {
+  # genes <- unique(trimws(genes %||% character(0)))
+  # genes <- genes[nzchar(genes)]
+  if (length(genes) == 0) return(data.frame())
+  perform_arrow_request(
+    sprintf("/datasets/%s/%s/expression/gene-drug-pairs", lab_source, study_id),
+    query = list(
+      gene      = genes,
+      condition = condition,
+      timepoint = timepoint,
+      limit     = as.integer(limit)
+    )
+  )
+}
+#' @export
+fetch_expression_signature <- function(lab_source, study_id, entity_id, condition = NULL, timepoint = NULL, limit = 20000L) {
+  perform_arrow_request(
+    sprintf("/datasets/%s/%s/expression/all-signatures", lab_source, study_id),
+    query = list(
+      entity_id = entity_id,
+      condition = condition,
+      timepoint = timepoint,
+      limit     = as.integer(limit)
+    )
+  )
+}
 #' UI connection: shows contrast options from contrast_metadata.parquet
 #' At this moment it is specific to the drug-gene panel
 #' @export
@@ -605,11 +648,11 @@ fetch_contrast_options <- function(lab_source, study_id) {
 }
 
 #' @export
-fetch_expression_signature <- function(lab_source, study_id, entity_id, limit = 20000L) {
+fetch_expression_signatures <- function(lab_source, study_id, entity_id, limit = 20000L) {
   entity_id <- unique(trimws(entity_id %||% character(0)))
   entity_id <- entity_id[nzchar(entity_id)]
   perform_arrow_request(
-    sprintf("/datasets/%s/%s/expression/signature", lab_source, study_id),
+    sprintf("/datasets/%s/%s/expression/all-signatures", lab_source, study_id),
     query = list(entity_id = entity_id, limit = as.integer(limit))
   )
 }

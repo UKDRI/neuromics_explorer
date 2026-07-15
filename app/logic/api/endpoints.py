@@ -1273,6 +1273,59 @@ def expression_feature_values(
         """
         return _query_arrow(request, sql, params)
 
+
+def _build_gene_entity_join(
+    con, dataset_ctx: dict, 
+    view: str,
+    genes: list[str],
+    condition: list[str] | None,
+    timepoint: list[str] | None,
+) -> tuple[str, list]:
+    """
+    Shared row-level gene x entity join (ie expression, contrast and metadata) for GOI terms. 
+    Used by '/expression/gene-rank' (drug-level aggregation e.g. lollipop plot), '/expression/gene-drug-summary' (gene-level aggregation e.g. bubble plot),
+    and '/expression/gene-drug-pairs' (for DT). Returns (sql_fragment, params).
+    """
+    contrast_table = dataset_ctx["table_map"].get("contrast_metadata")
+    if not contrast_table:
+        raise HTTPException(404, "No contrast_metadata table registered for this dataset.")
+
+    contrast_ref = _table_ref(dataset_ctx, contrast_table, "cm")
+    predicates, params = _term_predicates(genes, [])
+
+    filter_clauses, filter_params = [], []
+    if condition:
+        placeholders = ",".join(["?"] * len(condition))
+        filter_clauses.append(f"cm.condition IN ({placeholders})")
+        filter_params += condition  #or filter_params.extend(condition)
+    if timepoint:
+        placeholders = ",".join(["?"] * len(timepoint))
+        filter_clauses.append(f"cm.timepoint IN ({placeholders})")
+        filter_params += timepoint  #or filter_params.extend(timepoint)
+    filter_sql = ("AND " + " AND ".join(filter_clauses)) if filter_clauses else ""
+
+    sql_join = f"""
+        goi_rows AS (
+            SELECT
+                v.obs                AS drug_contrast_id,
+                cm.drug_id           AS entity_id,
+                cm.drug_name,
+                cm.drug_class,
+                {SEMANTIC_GENE_EXPR} AS gene_symbol,
+                v.human_gene, -- remove v.?
+                v.protein_id,
+                v.log2fc,
+                v.padj
+            FROM {view} v
+            JOIN {contrast_ref} ON v.obs = cm.obs
+            WHERE ({' OR '.join(predicates)}) {filter_sql}
+                --AND v.log2fc IS NOT NULL
+                --AND (v.padj IS NOT NULL OR v.pvalue IS NOT NULL)
+        )
+    """
+    return sql_join, params + filter_params
+
+
 @router.get("/datasets/{lab}/{study_id}/expression/gene-rank")
 def expression_gene_rank(
     request: Request,
@@ -1293,42 +1346,12 @@ def expression_gene_rank(
     pool = _require_pool(request)
     with get_conn(pool) as con:
         ctx = _dataset_context(con, lab, study_id)
-        contrast_table = ctx["table_map"].get("contrast_metadata")
-        if not contrast_table:
-            raise HTTPException(404, "No contrast_metadata table registered for this dataset.")
-    
         view = _safe_view_name("v", lab, study_id)
         genes = _clean_terms(gene)
-        predicates, params = _term_predicates(genes, [])
+        sql_join, join_params = _build_gene_entity_join(con, ctx, view, genes, condition, timepoint)
 
-        contrast_ref = _table_ref(ctx, contrast_table, "cm")
-        filter_clauses = []
-        filter_params: list = []
-        if condition:
-            placeholders = ",".join(["?"] * len(condition))
-            filter_clauses.append(f"cm.condition IN ({placeholders})")
-            filter_params.extend(condition)
-        if timepoint:
-            placeholders = ",".join(["?"] * len(timepoint))
-            filter_clauses.append(f"cm.timepoint IN ({placeholders})")
-            filter_params.extend(timepoint)
-        filter_sql = ("AND " + " AND ".join(filter_clauses)) if filter_clauses else ""
-
-        # params = [padj] + params + [top_n]  #params = [padj, padj] + predicate_params + [top_n]
         sql = f"""
-            WITH goi_rows AS (
-                SELECT 
-                    v.obs                AS drug_contrast_id,
-                    cm.drug_id           AS entity_id,
-                    cm.drug_name,
-                    cm.drug_class,
-                    {SEMANTIC_GENE_EXPR} AS gene_symbol,
-                    v.log2fc,
-                    v.padj
-                FROM {view} v
-                JOIN {contrast_ref} ON v.obs = cm.obs
-                WHERE ({" OR ".join(predicates)}) {filter_sql}
-            )
+            WITH {sql_join}
             SELECT
                 entity_id,
                 FIRST(drug_name) AS drug_name,
@@ -1345,8 +1368,7 @@ def expression_gene_rank(
             ORDER BY sig_score DESC
             LIMIT ?
         """
-        # NB: padj bound twice (sig_score CASE + n_goi_hit CASE)
-        final_params = params + filter_params + [padj, padj, top_n]     # final_params = params[:len(predicates)] + [padj, padj] + params[len(predicates):] + [top_n]
+        final_params = join_params + [padj, padj, top_n]     # final_params = params[:len(predicates)] + [padj, padj] + params[len(predicates):] + [top_n]
         table = con.execute(sql, final_params).arrow()
     return _arrow_response(table)
 
@@ -1355,30 +1377,19 @@ def expression_gene_rank(
 def gene_drug_summary(
     request: Request, lab: str, study_id: int,
     gene: list[str] = Query(...), padj: float = 0.05,
+    condition: list[str] | None = Query(None),
+    timepoint: list[str] | None = Query(None),
 ):
     """Per-gene aggregate across ALL tested drugs of selected GOIs — powers the gene-drug bubble overview."""
     pool = _require_pool(request)
     with get_conn(pool) as con:
         ctx = _dataset_context(con, lab, study_id)
-        contrast_table = ctx["table_map"].get("contrast_metadata")
-        if not contrast_table:
-            raise HTTPException(404, "No contrast_metadata table registered for this dataset.")
         view = _safe_view_name("v", lab, study_id)
-        contrast_ref = _table_ref(ctx, contrast_table, "cm")
         genes = _clean_terms(gene)
-        predicates, params = _term_predicates(genes, [])
+        sql_join, join_params = _build_gene_entity_join(con, ctx, view, genes, condition, timepoint)
 
         sql = f"""
-            WITH goi_rows AS (
-                SELECT 
-                    v.obs                AS drug_contrast_id,
-                    cm.drug_id           AS entity_id,
-                    {SEMANTIC_GENE_EXPR} AS gene_symbol,
-                    v.log2fc,
-                    v.padj
-                FROM {view} v JOIN {contrast_ref} ON v.obs = cm.obs
-                WHERE {" OR ".join(predicates)}
-            )
+            WITH {sql_join}
             SELECT
                 gene_symbol,
                 COUNT(DISTINCT entity_id) AS n_drugs_tested,
@@ -1390,8 +1401,10 @@ def gene_drug_summary(
                 -- (COUNT(DISTINCT CASE WHEN padj < ? AND log2fc > 0 THEN entity_id END) - COUNT(DISTINCT CASE WHEN padj < ? AND log2fc < 0 THEN entity_id END)) AS net_bias --colouring bubble fo net direction up/down
             FROM goi_rows
             GROUP BY gene_symbol
+            ORDER BY n_drugs_sig DESC   -- TODO possibly change??
         """
-        table = con.execute(sql, params + [padj, padj, padj]).arrow()
+        final_params = join_params + [padj]*4
+        table = con.execute(sql, final_params).arrow()
     return _arrow_response(table)
 
 
@@ -1399,7 +1412,8 @@ def gene_drug_summary(
 def gene_drug_pairs(
     request: Request, lab: str, study_id: int,
     gene: list[str] = Query(...), padj: float = 0.05,
-    condition: list[str] | None = Query(None), timepoint: list[str] | None = Query(None),
+    condition: list[str] | None = Query(None),
+    timepoint: list[str] | None = Query(None),
     limit: int = Query(20000, ge=100, le=100000),
 ):
     """
@@ -1409,79 +1423,59 @@ def gene_drug_pairs(
     pool = _require_pool(request)
     with get_conn(pool) as con:
         ctx = _dataset_context(con, lab, study_id)
-        contrast_table = ctx["table_map"].get("contrast_metadata")
-        if not contrast_table:
-            raise HTTPException(404, "No contrast_metadata table registered for this dataset.")
         view = _safe_view_name("v", lab, study_id)
-        contrast_ref = _table_ref(ctx, contrast_table, "cm")
         genes = _clean_terms(gene)
         predicates, params = _term_predicates(genes, [])
+        sql_join, join_params = _build_gene_entity_join(con, ctx, view, genes, condition, timepoint)
 
         sql = f"""
+            WITH {sql_join}
             SELECT
-                v.obs       AS drug_contrast_id,
-                cm.drug_id  AS entity_id,
-                cm.drug_name,
-                cm.drug_class,
-                {SEMANTIC_GENE_EXPR} AS gene_symbol,
-                v.log2fc,
-                v.padj,
-                CASE WHEN v.padj < ? AND v.log2fc > 0 THEN 'Up'
-                     WHEN v.padj < ? AND v.log2fc < 0 THEN 'Down'
-                     ELSE 'NS' END AS direction
-            FROM {view} v
-            JOIN {contrast_ref} ON v.obs = cm.obs
-            WHERE {" OR ".join(predicates)}     -- {filter_sql}
-            ORDER BY v.log2fc DESC      -- v.padj ASC NULLS LAST
+                gene_symbol, drug_name, entity_id, drug_class, log2fc, padj,
+                {lab} AS lab,
+                {study_id} AS study_id,
+                CASE WHEN padj < ? AND log2fc > 0 THEN 'Up'
+                     WHEN padj < ? AND log2fc < 0 THEN 'Down'
+                     ELSE 'No Change' END AS direction
+            FROM goi_rows
+            ORDER BY ABS(log2fc) DESC      -- padj ASC NULLS LAST
         """
         table = con.execute(sql, [padj, padj] + params).arrow()
     return _arrow_response(table)
 
 
-@router.get("/datasets/{lab}/{study_id}/expression/signature")
+@router.get("/datasets/{lab}/{study_id}/expression/all-signatures")
 def expression_signature(
     request: Request, lab: str, study_id: int,
     entity_id: list[str] = Query(...),
+    condition: list[str] | None = Query(None),
+    timepoint: list[str] | None= Query(None),
     limit: int = Query(20000, ge=100, le=100000),
 ):
     """Full gene signature (ALL genes, not GOI-scoped) for selected entities — ie drive drug-panel volcano."""
     pool = _require_pool(request)
     with get_conn(pool) as con:
         ctx = _dataset_context(con, lab, study_id)
-        contrast_table = ctx["table_map"].get("contrast_metadata")
-        if not contrast_table:
-            raise HTTPException(404, "No contrast_metadata table registered for this dataset.")
         view = _safe_view_name("v", lab, study_id)
-        contrast_ref = _table_ref(ctx, contrast_table, "cm")
         entity_ids = _clean_terms(entity_id)
-        placeholders = ",".join(["?"] * len(entity_ids))
+        sql_join, join_params = _build_gene_entity_join(con, ctx, view, entity_ids, condition, timepoint)
+        
         sql = f"""
+            WITH {sql_join}
             SELECT
-              {SEMANTIC_GENE_EXPR} AS gene_symbol,
-              human_gene,
-              protein_id,
-              v.log2fc,
-              v.pvalue,
-              v.padj,
-              cm.drug_id AS entity_id,
-              cm.drug_name,
-              cm.drug_class,
-              {study_id} AS study_id
-            FROM {view} v
-            JOIN {contrast_ref} ON v.obs = cm.obs
-            WHERE cm.drug_id IN ({placeholders})
-              AND v.log2fc IS NOT NULL
-              AND (v.padj IS NOT NULL OR v.pvalue IS NOT NULL)
-            ORDER BY v.log2fc DESC      -- ORDER BY v.padj ASC NULLS LAST 
+              gene_symbol, log2fc, padj, entity_id, drug_name, drug_class, {lab} AS lab, {study_id} AS study_id
+            FROM goi_rows
+            ORDER BY log2fc DESC      -- or padj ASC NULLS LAST 
             LIMIT ?
         """
-        table = con.execute(sql, entity_ids + [limit]).arrow()
+        final_params = join_params
+        table = con.execute(sql, final_params).arrow()
     return _arrow_response(table)
 
 @router.get("/datasets/{lab}/{study_id}/contrast-options")
 def contrast_options(request: Request, lab: str, study_id: int):
     """
-    Return condition/timepoint filter options from contrast_metadata
+    Return condition/timepoint filter options from contrast_metadata for user-input options
     """
     pool = _require_pool(request)
     with get_conn(pool) as con:
