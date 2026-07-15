@@ -1351,6 +1351,93 @@ def expression_gene_rank(
     return _arrow_response(table)
 
 
+@router.get("/datasets/{lab}/{study_id}/expression/gene-drug-summary")
+def gene_drug_summary(
+    request: Request, lab: str, study_id: int,
+    gene: list[str] = Query(...), padj: float = 0.05,
+):
+    """Per-gene aggregate across ALL tested drugs of selected GOIs — powers the gene-drug bubble overview."""
+    pool = _require_pool(request)
+    with get_conn(pool) as con:
+        ctx = _dataset_context(con, lab, study_id)
+        contrast_table = ctx["table_map"].get("contrast_metadata")
+        if not contrast_table:
+            raise HTTPException(404, "No contrast_metadata table registered for this dataset.")
+        view = _safe_view_name("v", lab, study_id)
+        contrast_ref = _table_ref(ctx, contrast_table, "cm")
+        genes = _clean_terms(gene)
+        predicates, params = _term_predicates(genes, [])
+
+        sql = f"""
+            WITH goi_rows AS (
+                SELECT 
+                    v.obs                AS drug_contrast_id,
+                    cm.drug_id           AS entity_id,
+                    {SEMANTIC_GENE_EXPR} AS gene_symbol,
+                    v.log2fc,
+                    v.padj
+                FROM {view} v JOIN {contrast_ref} ON v.obs = cm.obs
+                WHERE {" OR ".join(predicates)}
+            )
+            SELECT
+                gene_symbol,
+                COUNT(DISTINCT entity_id) AS n_drugs_tested,
+                COUNT(DISTINCT CASE WHEN padj < ? THEN entity_id END) AS n_drugs_sig,
+                SUM(CASE WHEN padj < ? AND log2fc > 0 THEN 1 ELSE 0 END) AS n_up,
+                SUM(CASE WHEN padj < ? AND log2fc < 0 THEN 1 ELSE 0 END) AS n_down
+                (COUNT(DISTINCT CASE WHEN padj < ? THEN entity_id END)::DOUBLE
+                    / NULLIF(COUNT(DISTINCT entity_id), 0)) AS frac_sig,    -- n_drugs_sig/n_drugs_tested
+                -- (COUNT(DISTINCT CASE WHEN padj < ? AND log2fc > 0 THEN entity_id END) - COUNT(DISTINCT CASE WHEN padj < ? AND log2fc < 0 THEN entity_id END)) AS net_bias --colouring bubble fo net direction up/down
+            FROM goi_rows
+            GROUP BY gene_symbol
+        """
+        table = con.execute(sql, params + [padj, padj, padj]).arrow()
+    return _arrow_response(table)
+
+
+@router.get("/datasets/{lab}/{study_id}/expression/gene-drug-pairs")
+def gene_drug_pairs(
+    request: Request, lab: str, study_id: int,
+    gene: list[str] = Query(...), padj: float = 0.05,
+    condition: list[str] | None = Query(None), timepoint: list[str] | None = Query(None),
+    limit: int = Query(20000, ge=100, le=100000),
+):
+    """
+    Row-per-(drug, gene) powers the selectable DT table under the bubble plot following gene selection.
+    Also powers the drug selection dropdown options.
+    """
+    pool = _require_pool(request)
+    with get_conn(pool) as con:
+        ctx = _dataset_context(con, lab, study_id)
+        contrast_table = ctx["table_map"].get("contrast_metadata")
+        if not contrast_table:
+            raise HTTPException(404, "No contrast_metadata table registered for this dataset.")
+        view = _safe_view_name("v", lab, study_id)
+        contrast_ref = _table_ref(ctx, contrast_table, "cm")
+        genes = _clean_terms(gene)
+        predicates, params = _term_predicates(genes, [])
+
+        sql = f"""
+            SELECT
+                v.obs       AS drug_contrast_id,
+                cm.drug_id  AS entity_id,
+                cm.drug_name,
+                cm.drug_class,
+                {SEMANTIC_GENE_EXPR} AS gene_symbol,
+                v.log2fc,
+                v.padj,
+                CASE WHEN v.padj < ? AND v.log2fc > 0 THEN 'Up'
+                     WHEN v.padj < ? AND v.log2fc < 0 THEN 'Down'
+                     ELSE 'NS' END AS direction
+            FROM {view} v
+            JOIN {contrast_ref} ON v.obs = cm.obs
+            WHERE {" OR ".join(predicates)}     -- {filter_sql}
+            ORDER BY v.log2fc DESC      -- v.padj ASC NULLS LAST
+        """
+        table = con.execute(sql, [padj, padj] + params).arrow()
+    return _arrow_response(table)
+
+
 @router.get("/datasets/{lab}/{study_id}/expression/signature")
 def expression_signature(
     request: Request, lab: str, study_id: int,
