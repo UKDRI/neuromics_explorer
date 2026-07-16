@@ -1,10 +1,11 @@
 # adapters/adapter_drug_panel.R — owns data loading, plotly_click, lasso, focal-views plot builders
 
 box::use(
-  shiny[NS, moduleServer, bindCache, reactive, reactiveVal, observeEvent, req,
+  shiny[NS, moduleServer, bindCache, reactive, reactiveVal, observe, observeEvent, req,
         tagList, fluidRow, column, checkboxInput, checkboxGroupInput, selectizeInput,
         renderUI, uiOutput, textOutput, renderText, tags, updateSelectizeInput, wellPanel, validate, need],
   plotly[plotlyOutput, renderPlotly, plot_ly, layout, event_register, event_data],
+  shinycssloaders[withSpinner],
   DT[DTOutput, renderDT, datatable, dataTableProxy, selectRows],
   app/logic/api/api_client[fetch_contrast_options, fetch_gene_drug_summary, fetch_gene_drug_pairs, fetch_expression_signatures, fetch_expression_table],
   app/view/components/helpers/explorer_helpers[breadcrumb_ui, selection_count_text],
@@ -35,7 +36,8 @@ drug_rank_adapter <- list(
         fluidRow(
             column(3, uiOutput(ns("breadcrumb"))),
         ),
-        plotlyOutput(ns("bubble_overview"), height = "680px"),
+        plotlyOutput(ns("bubble_overview"), height = "680px") |> withSpinner(
+            type = 1, caption = "Loading plot...", color = "#5b5b5b"),
         textOutput(ns("selection_summary")),
         tags$h5("Drugs tested against selected gene(s)", style = "margin-top:20px;font-size:24px;font-weight:600;"),
         DTOutput(ns("gene_drug_table")),
@@ -176,7 +178,6 @@ drug_rank_adapter <- list(
                 "Net direction: ", ifelse(df$net_change > 0, paste0("+", df$net_change, " up-leaning"),
                     ifelse(df$net_change < 0, paste0(df$net_change, " down-leaning"), "balanced"))
             )
-            message(names(df))
 
             plot_ly(df, x = ~gene_symbol, y = ~frac_sig, size = ~n_drugs_tested, color = ~net_change, colors = c("#398cc4", "#F5F5F5", "#bd594e"),
                 type = "scattergl", mode = "markers", 
@@ -202,7 +203,7 @@ drug_rank_adapter <- list(
         observeEvent(event_data("plotly_click", source = "genebubble"), {
             click <- event_data("plotly_click", source = "genebubble")
             req(click)
-            active_goi(click$y)  # extracts y axis value (drug id - factor label)
+            active_goi(click$x)  # extracts x axis value (genes - factor label)
         })
         observeEvent(event_data("plotly_selected", source = "genebubble"), {
             sel <- event_data("plotly_selected", source = "genebubble")
@@ -224,8 +225,8 @@ drug_rank_adapter <- list(
         observeEvent(gene_drug_paired_data(), {
             df <- gene_drug_paired_data()
             if (is.null(df) || nrow(df) == 0 || !"drug_name" %in% names(df)) return(invisible(NULL))
-            drugs_df <- unique(df[!is.na(df$drug_name) & nzchar(df$entity_id), c("entity_id", "drug_name", "drug_class")])
-            choices <- stats::setNames(drugs_df$drug_id, paste0(drugs_df$drug_name, " (", drugs_df$drug_class, ")"))
+            drugs_df <- unique(df[!is.na(df$entity_id) & nzchar(df$entity_id), c("entity_id", "drug_name", "drug_class")])
+            choices <- stats::setNames(drugs_df$entity_id, paste0(drugs_df$drug_name, " (", drugs_df$drug_class, ")"))
             updateSelectizeInput(session, "drug_search", choices = choices, server = TRUE)
         })
 
@@ -234,7 +235,7 @@ drug_rank_adapter <- list(
         gene_drug_paired_data <- reactive({
             g <- active_goi(); req(length(g) > 0)
             ds <- dataset(); req(ds)
-            fetch_gene_drug_pairs(ds$lab_source, ds$study_id, genes = g, input$padj_thresh, input$condition, input$timepoint)
+            fetch_gene_drug_pairs(ds$lab_source, ds$study_id, genes = g, sidebar_vals$padj_thresh(), input$condition, input$timepoint)
         }) |> bindCache(
             dataset()$lab_source %||% "none",
             dataset()$study_id %||% "none",
@@ -246,6 +247,7 @@ drug_rank_adapter <- list(
         output$gene_drug_table <- renderDT({
             df <- gene_drug_paired_data()
             validate(need(nrow(df) > 0, "No rows match the current gene or drug filters."))
+            # Keep entity_id as reference for selection, but display as Drug ID#
             display <- df[, c("gene_symbol", "drug_name", "drug_class", "log2fc", "padj", "entity_id")]
             display$log2fc <- round(display$log2fc, 3)
             display$padj <- signif(display$padj, 3)
@@ -259,18 +261,20 @@ drug_rank_adapter <- list(
         observeEvent(input$gene_drug_table_rows_selected, {
             df <- gene_drug_paired_data()
             rows <- input$gene_drug_table_rows_selected
-            selected_drugs(unique(df$drug_name[rows]))
+            selected_drugs(unique(df$entity_id[rows]))
         })
 
-        output$selection_summary <- renderText(selection_count_text(length(selected_drugs()), "drug"))
-        output$breadcrumb <- renderUI({
-            req(length(selected_drugs()) > 0)
-            breadcrumb_ui(ns)
-        })
+        # output$selection_summary <- renderText(selection_count_text(length(selected_drugs()), "drug"))
+        # output$breadcrumb <- renderUI({
+        #     req(length(selected_drugs()) > 0)
+        #     breadcrumb_ui(ns)
+        # })
 
         observeEvent(input$back_to_landscape, {
             dataTableProxy("gene_drug_table") |> selectRows(NULL)
-        }) #observeEvent(input$back_to_landscape, selected_drugs(character(0))) 
+        }) #observeEvent(input$back_to_landscape, selected_drugs(character(0)))
+
+        # TODO when genes in plot is reselected, reset, the gene-drug table AND close focal plots to get ready for a refresh
 
 
         # ── Focal panel: volcano (single drug only) + heatmap (any number) ────────────────
@@ -293,8 +297,9 @@ drug_rank_adapter <- list(
 
         output$heatmap <- renderPlotly({
             df <- focal_data()
-            req(nrow(df) > 0)
-            plot_ly(df, x = ~entity_id, y = ~gene_symbol, z = ~log2fc, type = "heatmap",
+            validate(need(nrow(df) > 0, "No expression data available."))
+            plot_ly(df, x = ~drug_name, y = ~gene_symbol, z = ~log2fc, type = "heatmap",
+                customdata = ~padj,
                 colorscale = list(c(0,"#2980B9"), c(0.5,"#FFFFFF"), c(1,"#C0392B")), zmid = 0,
                 hovertemplate = "%{y} · %{x}<br>log2FC: %{z:.3f}<br>padj: %{customdata:.2e}<extra></extra>"
             )
@@ -305,11 +310,19 @@ drug_rank_adapter <- list(
             req(length(selected_drugs()) > 0)
             ds <- dataset()
             df <- fetch_expression_signatures(ds$lab_source, ds$study_id, selected_drugs())
-            # ??
+            validate(need(nrow(df) > 0, "No expression data available."))
             df$lab_source <- ds$lab_source %||% "unknown"   # volcano_server's bindCache needs these to prevent Error: object '' not found
             df$study_id   <- ds$study_id %||% NA_integer_
             df
         })
+
+        observe({
+            df <- full_data()
+            message("volcano rows = ", nrow(df))
+        })
+        observe({
+            print(selected_drugs())
+        }) #[1] "ID_1501198"
 
         volcano_server("volcano", full_data,
             padj_thresh = sidebar_vals$padj_thresh,
@@ -334,9 +347,9 @@ drug_rank_adapter <- list(
 # upset, heatmap w dendrograms
 
 
-# # This is the drug-first route to visualise the panel as a clustered scatter
+# # This is the drug-first route to visualise the panel as a clustered drug scatter
 # drug_panel_adapter <- list(
-#   entity_name   = "Drug",                     # used in UI labels: "Selected: N drugs"
+#   entity_name   = "Drug Clusters",                     # used in UI labels: "Selected: N drugs"
 #   ui = function(id) {
 #     ns <- NS(id)
 #     tagList(

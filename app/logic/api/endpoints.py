@@ -1277,9 +1277,10 @@ def expression_feature_values(
 def _build_gene_entity_join(
     con, dataset_ctx: dict, 
     view: str,
-    genes: list[str],
+    terms: list[str],
     condition: list[str] | None,
     timepoint: list[str] | None,
+    filter_on: str = "gene",   # "gene" | "entity"
 ) -> tuple[str, list]:
     """
     Shared row-level gene x entity join (ie expression, contrast and metadata) for GOI terms. 
@@ -1291,7 +1292,15 @@ def _build_gene_entity_join(
         raise HTTPException(404, "No contrast_metadata table registered for this dataset.")
 
     contrast_ref = _table_ref(dataset_ctx, contrast_table, "cm")
-    predicates, params = _term_predicates(genes, [])
+
+    # For entity-focal plots like volcano
+    if filter_on == "entity":
+        placeholders = ",".join(["?"] * len(terms))
+        predicates = [f"cm.drug_id IN ({placeholders})"]
+        params = list(terms)
+    else:
+        # For overviews and goi-focal plots like heatmap
+        predicates, params = _term_predicates(terms, [])
 
     filter_clauses, filter_params = [], []
     if condition:
@@ -1433,7 +1442,7 @@ def gene_drug_pairs(
             WITH {sql_join}
             SELECT
                 gene_symbol, drug_name, entity_id, drug_class, log2fc, padj,
-                {lab} AS lab,
+                -- {lab} AS lab,
                 {study_id} AS study_id,
                 CASE WHEN padj < ? AND log2fc > 0 THEN 'Up'
                      WHEN padj < ? AND log2fc < 0 THEN 'Down'
@@ -1441,7 +1450,7 @@ def gene_drug_pairs(
             FROM goi_rows
             ORDER BY ABS(log2fc) DESC      -- padj ASC NULLS LAST
         """
-        table = con.execute(sql, [padj, padj] + join_params).arrow()
+        table = con.execute(sql, join_params + [padj, padj]).arrow()
     return _arrow_response(table)
 
 
@@ -1459,17 +1468,19 @@ def expression_signature(
         ctx = _dataset_context(con, lab, study_id)
         view = _safe_view_name("v", lab, study_id)
         entity_ids = _clean_terms(entity_id)
-        sql_join, join_params = _build_gene_entity_join(con, ctx, view, entity_ids, condition, timepoint)
+        sql_join, join_params = _build_gene_entity_join(con, ctx, view, entity_ids, condition, timepoint, filter_on = "entity")
         
         sql = f"""
             WITH {sql_join}
             SELECT
-              gene_symbol, log2fc, padj, entity_id, drug_name, drug_class, {lab} AS lab, {study_id} AS study_id
+              gene_symbol, log2fc, padj, entity_id, drug_name, drug_class, 
+              -- {lab} AS lab,
+              {study_id} AS study_id
             FROM goi_rows
             ORDER BY log2fc DESC      -- or padj ASC NULLS LAST 
             LIMIT ?
         """
-        final_params = join_params
+        final_params = join_params + [limit]
         table = con.execute(sql, final_params).arrow()
     return _arrow_response(table)
 

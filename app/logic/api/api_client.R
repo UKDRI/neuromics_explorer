@@ -633,7 +633,9 @@ fetch_gene_drug_pairs <- function(lab_source, study_id, genes, padj_thresh = 0.0
 }
 #' Fetches all genes and their expression, signatures, etc. for selected entities to drive focal plots like drug-panel volcano
 #' @export
-fetch_expression_signature <- function(lab_source, study_id, entity_id, condition = NULL, timepoint = NULL, limit = 20000L) {
+fetch_expression_signatures <- function(lab_source, study_id, entity_id, condition = NULL, timepoint = NULL, limit = 20000L) {
+  # entity_id <- unique(trimws(entity_id %||% character(0)))
+  # entity_id <- entity_id[nzchar(entity_id)]
   perform_arrow_request(
     sprintf("/datasets/%s/%s/expression/all-signatures", lab_source, study_id),
     query = list(
@@ -651,15 +653,6 @@ fetch_contrast_options <- function(lab_source, study_id) {
   perform_arrow_request(sprintf("/datasets/%s/%s/contrast-options", lab_source, study_id))
 }
 
-#' @export
-fetch_expression_signatures <- function(lab_source, study_id, entity_id, limit = 20000L) {
-  entity_id <- unique(trimws(entity_id %||% character(0)))
-  entity_id <- entity_id[nzchar(entity_id)]
-  perform_arrow_request(
-    sprintf("/datasets/%s/%s/expression/all-signatures", lab_source, study_id),
-    query = list(entity_id = entity_id, limit = as.integer(limit))
-  )
-}
 
 #' Fetch embedding coordinates and optional selected-term expression overlays.
 #'
