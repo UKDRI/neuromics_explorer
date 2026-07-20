@@ -94,7 +94,7 @@ volcano_server <- function(id, de_data, padj_thresh, lfc_thresh, gene = reactive
     #     # padj_thresh(),
     #     # lfc_thresh(),
     #     # gene()  #since annotations added in plot_obj
-    #   )
+    #   ) # Causes Error: object '' not found due to computing drug panel cache when datas not ready
 
     plot_obj <- reactive({
       df   <- plot_df()
