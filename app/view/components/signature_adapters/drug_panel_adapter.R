@@ -25,8 +25,8 @@ drug_rank_adapter <- list(
         wellPanel(
             fluidRow(
                 column(6, uiOutput(ns("contrast_filter_ui"))),
-                column(3, selectizeInput(ns("drug_search"), "Search drug", choices = NULL, multiple = TRUE, 
-                    options = list(placeholder = "e.g. Imatinib...")))
+                # column(3, selectizeInput(ns("drug_search"), "Search drug", choices = NULL, multiple = TRUE, 
+                #     options = list(placeholder = "e.g. Imatinib...")))
                 # column(3, checkboxInput(ns("sig_only"), "Count only significant hits (padj threshold)", value = TRUE))
             )
         ),
@@ -64,9 +64,15 @@ drug_rank_adapter <- list(
             head(terms[!is.na(terms) & nzchar(terms)], 25L)   # cap irregardless of how many were searched
         })
 
+        # Only the Webber iPSC microglia drug screen is a drug assay today.
+        # Expand this check (e.g. by adding more lab_source/study_id pairs) as
+        # more drug datasets are registered.
+        is_drug_dataset <- function(ds) !is.null(ds) && identical(ds$lab_source, "webber")
+
         contrast_opts <- reactive({
             ds <- dataset()
             req(ds) #,identical(ds$lab_source, "webber")
+            validate(need(is_drug_dataset(ds), "Please select just one drug-study dataset to use the Gene-Drug Explorer."))
             fetch_contrast_options(ds$lab_source, ds$study_id)
         })
 
@@ -150,6 +156,7 @@ drug_rank_adapter <- list(
             ds <- dataset()
             genes <- goi_terms()
             req(ds, length(genes) > 0)
+            validate(need(is_drug_dataset(ds), "Please select just one drug-study dataset to have explore."))
             fetch_gene_drug_summary(
                 lab_source  = ds$lab_source, study_id = ds$study_id,
                 genes       = genes,
@@ -252,7 +259,7 @@ drug_rank_adapter <- list(
             display$log2fc <- round(display$log2fc, 3)
             display$padj <- signif(display$padj, 3)
             names(display) <- c("Gene", "Drug", "Class", "log2FC", "padj", "Drug ID#")
-            datatable(display, selection = "multiple", filter = "top", rownames = FALSE,
+            datatable(display, selection = "single", filter = "top", rownames = FALSE,
                 options = list(pageLength = 10, scrollX = TRUE))    # scrollY = TRUE
         }, server = TRUE)
 

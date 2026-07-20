@@ -1225,7 +1225,14 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
     }
     gated_gene_drug_dataset <- reactive({
       req(is_gene_drug_tab())
-      active_dataset()
+      req(length(listing_selection()) == 1) # one dataset at a time
+      ds <- active_dataset()
+      req(ds)
+      ds
+      # list(
+      #   n_selected = length(listing_selection()),
+      #   dataset    = if (length(listing_selection()) == 1) active_dataset() else NULL
+      # )
     })
 
     # ── Per-idx cached data reactives for Compare tab ──────────────────────────

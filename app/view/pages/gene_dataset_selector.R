@@ -15,7 +15,7 @@ box::use(
                            fetch_metadata_filter_options, fetch_protein_index_ids],
   bslib[tooltip],
   dplyr[arrange, bind_rows, group_by, select, summarise, semi_join],
-  DT[ datatable, DTOutput, renderDT],
+  DT[ datatable, DTOutput, renderDT, dataTableProxy, selectRows],
   jsonlite[fromJSON],
   shiny[...],
 )
@@ -360,6 +360,16 @@ gene_selector_server <- function(id, selected_dataset) {
           columnDefs   = list(list(className = "dt-right", targets = 5:9))
         )
       )
+    })
+
+
+    # ── Cap dataset selection at 4 ───────────────────────────────────────────
+    observeEvent(input$hits_tbl_rows_selected, {
+      sel <- input$hits_tbl_rows_selected
+      if (length(sel) > 4) {
+        showNotification("You must select a max of 4 datasets at a time.", type = "warning")
+        dataTableProxy("hits_tbl") |> selectRows(sel[1:4])
+      }
     })
 
 
