@@ -16,8 +16,6 @@ services:
 
   frontend:
     image: shesanislandukdri/neuromics_explorer_shiny
-    ports:
-      - "4848:4848"
     expose:
       - "4848"
     volumes:
