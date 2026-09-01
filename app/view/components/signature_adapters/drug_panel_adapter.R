@@ -61,18 +61,17 @@ drug_rank_adapter <- list(
             req(ds)
             terms <- unique(c(ds$genes %||% character(0), ds$proteins %||% character(0)))
             terms <- trimws(as.character(terms))
-            head(terms[!is.na(terms) & nzchar(terms)], 25L)   # cap irregardless of how many were searched
+            head(terms[!is.na(terms) & nzchar(terms)], 25L)   # cap to 25 for performance
         })
 
         # Only the Webber iPSC microglia drug screen is a drug assay today.
-        # Expand this check (e.g. by adding more lab_source/study_id pairs) as
-        # more drug datasets are registered.
+        # This will be scaled to include check for more lab_source/study_id pairs as more drug datasets are registered.
         is_drug_dataset <- function(ds) !is.null(ds) && identical(ds$lab_source, "webber")
 
         contrast_opts <- reactive({
             ds <- dataset()
             req(ds) #,identical(ds$lab_source, "webber")
-            validate(need(is_drug_dataset(ds), "Please select just one drug-study dataset to use the Gene-Drug Explorer."))
+            validate(need(is_drug_dataset(ds), "Please select just one drug-study dataset to use the Gene-Drug Explorer."))     # prevents raw 404s
             fetch_contrast_options(ds$lab_source, ds$study_id)
         })
 
@@ -297,10 +296,15 @@ drug_rank_adapter <- list(
                 entity_id = selected_drugs() %||% NULL,
                 limit = 5000L
             )
-            df$lab_source <- ds$lab_source %||% "unknown" #NA_character_ 
+            df$lab_source <- ds$lab_source %||% "unknown" #NA_character_
             df$study_id   <- ds$study_id %||% NA_integer_ # NA_character_
             df
-        })
+        }) |> bindCache(
+            dataset()$lab_source %||% "none",
+            dataset()$study_id %||% "none",
+            paste(goi_terms(), collapse = ","),
+            paste(selected_drugs() %||% "none", collapse = ",")
+        )
 
         output$heatmap <- renderPlotly({
             df <- focal_data()
@@ -321,15 +325,11 @@ drug_rank_adapter <- list(
             df$lab_source <- ds$lab_source %||% "unknown"   # volcano_server's bindCache needs these to prevent Error: object '' not found
             df$study_id   <- ds$study_id %||% NA_integer_
             df
-        })
-
-        observe({
-            df <- full_data()
-            message("volcano rows = ", nrow(df))
-        })
-        observe({
-            print(selected_drugs())
-        }) #[1] "ID_1501198"
+        }) |> bindCache(
+            dataset()$lab_source %||% "none",
+            dataset()$study_id %||% "none",
+            paste(selected_drugs() %||% "none", collapse = ",")
+        )
 
         volcano_server("volcano", full_data,
             padj_thresh = sidebar_vals$padj_thresh,
