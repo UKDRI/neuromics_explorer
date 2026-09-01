@@ -1,5 +1,3 @@
-# Top N DE genes across canonical metadata groupings.
-
 box::use(
   shiny[NS, bindCache, moduleServer, reactive, req, tagList, selectInput, updateSelectInput,
         observe, uiOutput, renderUI, checkboxGroupInput, tags],
