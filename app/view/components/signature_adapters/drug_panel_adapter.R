@@ -281,30 +281,18 @@ drug_rank_adapter <- list(
         }) #observeEvent(input$back_to_landscape, selected_drugs(character(0)))
 
         # TODO when genes in plot is reselected, reset, the gene-drug table AND close focal plots to get ready for a refresh
+        # TODO: multiple drug selections
 
 
         # ── Focal panel: volcano (single drug only) + heatmap (any number) ────────────────
 
         # Drives (goi-drug)-paired plots (ie heatmap)
-        # Drugs selected in DT filters GOI-based 'expression/table' results
+        # Drugs selected in DT subsets the volcano superset (full_data) for the selected drug
         focal_data <- reactive({
-            req(length(selected_drugs()) > 0)
-            ds <- dataset()
-            df <- fetch_expression_table(
-                lab_source = ds$lab_source, study_id = ds$study_id,
-                genes = goi_terms() %||% NULL,  # NULL = all genes for this drug
-                entity_id = selected_drugs() %||% NULL,
-                limit = 5000L
-            )
-            df$lab_source <- ds$lab_source %||% "unknown" #NA_character_
-            df$study_id   <- ds$study_id %||% NA_integer_ # NA_character_
-            df
-        }) |> bindCache(
-            dataset()$lab_source %||% "none",
-            dataset()$study_id %||% "none",
-            paste(goi_terms(), collapse = ","),
-            paste(selected_drugs() %||% "none", collapse = ",")
-        )
+            df <- full_data()
+            goi <- toupper(goi_terms())
+            df[toupper(df$gene_symbol) %in% goi, , drop = FALSE]   # case-insensitive matches the search endpoints
+        })
 
         output$heatmap <- renderPlotly({
             df <- focal_data()
@@ -320,9 +308,9 @@ drug_rank_adapter <- list(
         full_data <- reactive({
             req(length(selected_drugs()) > 0)
             ds <- dataset()
-            df <- fetch_expression_signatures(ds$lab_source, ds$study_id, selected_drugs())
+            df <- fetch_expression_signatures(ds$lab_source, ds$study_id, selected_drugs(), limit = 100000L)    # limit raised from the default 20k to prevent silent truncation of GOI from heatmap as one drug spans multiple contrasts
             validate(need(nrow(df) > 0, "No expression data available."))
-            df$lab_source <- ds$lab_source %||% "unknown"   # volcano_server's bindCache needs these to prevent Error: object '' not found
+            df$lab_source <- ds$lab_source %||% "unknown"           # volcano_server's bindCache needs these to prevent Error: object '' not found
             df$study_id   <- ds$study_id %||% NA_integer_
             df
         }) |> bindCache(
