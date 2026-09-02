@@ -127,25 +127,23 @@ volcano_server <- function(id, de_data, padj_thresh, lfc_thresh, gene = reactive
           source     = "volcano",
           marker     = list(size = 6, opacity = 0.7, line = list(width = 0))
         ) |>
-        # Horizontal padj threshold line
-        plotly::add_segments(
-          x = -xpad, xend = xpad,
-          y = -log10(pt), yend = -log10(pt),
-          line       = list(dash = "dot", color = COLS$thresh, width = 1),
-          showlegend = FALSE, hoverinfo = "skip"
-        ) |>
-        # Vertical lfc threshold lines (only when lfc_thresh > 0)
-        plotly::add_segments(
-          x = lfc, xend = lfc, y = 0, yend = ymax,
-          line       = list(dash = "dot", color = COLS$thresh, width = 1),
-          showlegend = FALSE, hoverinfo = "skip"
-        ) |>
-        plotly::add_segments(
-          x = -lfc, xend = -lfc, y = 0, yend = ymax,
-          line       = list(dash = "dot", color = COLS$thresh, width = 1),
-          showlegend = FALSE, hoverinfo = "skip"
-        ) |>
+        # Threshold lines as layout shapes, NOT add_segments() scatter traces as this is likely main
+        # reason for slow rendering as add_segments() defaults to inherit = TRUE, so each line
+        # inherited the full 10,000s-row data, color = ~sig, customdata and marker from plot_ly()
+        # (∴ = ~9 SVG scatter traces being converted back to SVG) and ∴ bloating JSON payload,
+        # blowing the DOM.
+        # Shapes carry no data, traces, or legend entries
         plotly::layout(
+          shapes = list(
+            # Horizontal padj threshold line
+            list(type = "line", x0 = -xpad, x1 = xpad, y0 = -log10(pt), y1 = -log10(pt),
+                 line = list(dash = "dot", color = COLS$thresh, width = 1)),
+            # Vertical lfc threshold lines (coincide at 0 when lfc_thresh = 0)
+            list(type = "line", x0 =  lfc, x1 =  lfc, y0 = 0, y1 = ymax,
+                 line = list(dash = "dot", color = COLS$thresh, width = 1)),
+            list(type = "line", x0 = -lfc, x1 = -lfc, y0 = 0, y1 = ymax,
+                 line = list(dash = "dot", color = COLS$thresh, width = 1))
+          ),
           paper_bgcolor = COLS$bg, plot_bgcolor = COLS$bg,
           xaxis = list(
             title       = "log₂ Fold Change",
