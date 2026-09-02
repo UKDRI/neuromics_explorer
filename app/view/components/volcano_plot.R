@@ -196,6 +196,10 @@ volcano_server <- function(id, de_data, padj_thresh, lfc_thresh, gene = reactive
       bindCache(
         paste(de_data()$lab_source[1] %||% "", collapse = ","),
         paste(de_data()$study_id[1] %||% "", collapse = ","),
+        # Key on the data itself rather than lab/study only otherwise the volcano plots are identical under
+        # the drug panel for every drug. Allows additional filtering (eg cell_type, timepoint, condition etc)
+        nrow(de_data()),
+        sum(de_data()$log2fc, na.rm = TRUE),
         # padj_thresh(),
         # lfc_thresh(),
         paste(gene() %||% character(0), collapse = ",")
