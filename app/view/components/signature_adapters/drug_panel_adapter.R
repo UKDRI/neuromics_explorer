@@ -2,7 +2,7 @@
 
 box::use(
   shiny[NS, moduleServer, bindCache, reactive, reactiveVal, observe, observeEvent, req,
-        tagList, fluidRow, column, checkboxInput, checkboxGroupInput, selectizeInput,
+        tagList, fluidRow, column, checkboxInput, checkboxGroupInput, radioButtons, selectizeInput,
         renderUI, uiOutput, textOutput, renderText, tags, updateSelectizeInput, wellPanel, validate, need],
   plotly[plotlyOutput, renderPlotly, plot_ly, layout, event_register, event_data],
   shinycssloaders[withSpinner],
@@ -254,10 +254,11 @@ drug_rank_adapter <- list(
             df <- gene_drug_paired_data()
             validate(need(nrow(df) > 0, "No rows match the current gene or drug filters."))
             # Keep entity_id as reference for selection, but display as Drug ID#
-            display <- df[, c("gene_symbol", "drug_name", "drug_class", "log2fc", "padj", "entity_id")]
+            df$contrast <- paste(df$condition, df$timepoint, sep = " · ")
+            display <- df[, c("gene_symbol", "drug_name", "drug_class", "contrast", "log2fc", "padj", "entity_id")]
             display$log2fc <- round(display$log2fc, 3)
             display$padj <- signif(display$padj, 3)
-            names(display) <- c("Gene", "Drug", "Class", "log2FC", "padj", "Drug ID#")
+            names(display) <- c("Gene", "Drug", "Class", "Contrast", "log2FC", "padj", "Drug ID#")
             datatable(display, selection = "single", filter = "top", rownames = FALSE,
                 options = list(pageLength = 10, scrollX = TRUE))    # scrollY = TRUE
         }, server = TRUE)
@@ -282,6 +283,8 @@ drug_rank_adapter <- list(
 
         # TODO when genes in plot is reselected, reset, the gene-drug table AND close focal plots to get ready for a refresh
         # TODO: multiple drug selections
+        # TODO: consider 2x2 subplot grid for all contrasts vs radio buttons
+        # TODO: fix initial heatmap collapsing multiple contrasts for the selected drug; consider combining drug_name w contrast into a composite x-axis label vs radio buttons
 
 
         # ── Focal panel: volcano (single drug only) + heatmap (any number) ────────────────
@@ -306,17 +309,23 @@ drug_rank_adapter <- list(
 
         # Drives full data plots (eg volcano) requiring all genes for selected entities
         full_data <- reactive({
-            req(length(selected_drugs()) > 0)
+            req(length(selected_drugs()) > 0, input$focal_condition, input$focal_timepoint)
             ds <- dataset()
-            df <- fetch_expression_signatures(ds$lab_source, ds$study_id, selected_drugs(), limit = 100000L)    # limit raised from the default 20k to prevent silent truncation of GOI from heatmap as one drug spans multiple contrasts
-            validate(need(nrow(df) > 0, "No expression data available."))
+            df <- fetch_expression_signatures(
+                ds$lab_source, ds$study_id, selected_drugs(),
+                condition = input$focal_condition, timepoint = input$focal_timepoint,
+                limit = 100000L    # TODO: remove? # limit raised from the default 20k to prevent silent truncation of GOI from heatmap as one drug spans multiple contrasts
+            )
+            validate(need(nrow(df) > 0, "No expression data available for this drug and contrast."))
             df$lab_source <- ds$lab_source %||% "unknown"           # volcano_server's bindCache needs these to prevent Error: object '' not found
             df$study_id   <- ds$study_id %||% NA_integer_
             df
         }) |> bindCache(
             dataset()$lab_source %||% "none",
             dataset()$study_id %||% "none",
-            paste(selected_drugs() %||% "none", collapse = ",")
+            paste(selected_drugs() %||% "none", collapse = ","),
+            input$focal_condition %||% "none",
+            input$focal_timepoint %||% "none"
         )
 
         volcano_server("volcano", full_data,
@@ -324,10 +333,28 @@ drug_rank_adapter <- list(
             lfc_thresh  = sidebar_vals$lfc_thresh_min
         )
 
+        # Focal plot contrast selector
+        # NB. separate from the multi-select checkboxes at the top, which scope the bubble plot/DT
+        output$focal_contrast_filter_ui <- renderUI({
+            opts <- contrast_opts()
+            req(nrow(opts) > 0)
+            conds <- opts$conditions[[1]]
+            tmps   <- opts$timepoints[[1]]
+            wellPanel(
+                fluidRow(
+                    column(6, radioButtons(ns("focal_condition"), "Contrast condition:",
+                        choices = conds, selected = conds[1], inline = TRUE)),
+                    column(6, radioButtons(ns("focal_timepoint"), "Contrast timepoint:",
+                        choices = tmps, selected = tmps[1], inline = TRUE))
+                )
+            )
+        })
+
         # Render focal panel
         output$focal_panel <- renderUI({
             req(selected_drugs())
             tagList(
+                uiOutput(ns("focal_contrast_filter_ui")),
                 plotlyOutput(ns("heatmap")),
                 volcano_ui(ns("volcano"))
             )
