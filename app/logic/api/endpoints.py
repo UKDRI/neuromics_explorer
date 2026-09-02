@@ -1325,6 +1325,8 @@ def _build_gene_entity_join(
                 cm.drug_id           AS entity_id,
                 cm.drug_name,
                 cm.drug_class,
+                cm.condition,
+                cm.timepoint,
                 {SEMANTIC_GENE_EXPR} AS gene_symbol,
                 v.human_gene,
                 v.protein_id,
@@ -1446,7 +1448,7 @@ def gene_drug_pairs(
         sql = f"""
             WITH {sql_join}
             SELECT
-                gene_symbol, drug_name, entity_id, drug_class, log2fc, padj,
+                gene_symbol, drug_name, entity_id, drug_class, condition, timepoint, log2fc, padj,
                 -- {lab} AS lab,
                 {study_id} AS study_id,
                 CASE WHEN padj < ? AND log2fc > 0 THEN 'Up'
@@ -1498,7 +1500,7 @@ def expression_signature(
             clauses.append(f"cm.timepoint IN ({placeholders_timepoint})")
             params += timepoint
         cm_rows = con.execute(
-            f"SELECT obs, drug_id, drug_name, drug_class FROM {contrast_ref} WHERE {' AND '.join(clauses)}",
+            f"SELECT obs, drug_id, drug_name, drug_class, condition, timepoint FROM {contrast_ref} WHERE {' AND '.join(clauses)}",
             params,
         ).fetchall()
 
@@ -1507,10 +1509,12 @@ def expression_signature(
             table = con.execute(f"""
                 SELECT {SEMANTIC_GENE_EXPR} AS gene_symbol,
                     v.human_gene, v.protein_id,
-                    v.log2fc, v.padj,
+                    v.log2fc, v.padj, v.pvalue,
                     CAST(NULL AS VARCHAR) AS entity_id,
                     CAST(NULL AS VARCHAR) AS drug_name,
                     CAST(NULL AS VARCHAR) AS drug_class,
+                    CAST(NULL AS VARCHAR) AS condition,
+                    CAST(NULL AS VARCHAR) AS timepoint,
                     {study_id} AS study_id
                 FROM {view} v WHERE FALSE
             """).arrow()
@@ -1520,19 +1524,21 @@ def expression_signature(
         # meaning the join is only with the already-pruned expression rows.
         obs_vals = [r[0] for r in cm_rows]                              # obs_vals = ["E1_NON__ID_2300270", "E2_ACT__ID_2300270"]
         placeholders_obs = ",".join(["?"] * len(obs_vals))
-        placeholders_cm = ",".join(["(?, ?, ?, ?)"] * len(cm_rows))     # unnamed tuples for VALUES clause -  [("E1_NON__ID_2300270", "ID_2300270", "Imatinib", "TKI"), (...)]
-        params_cm = [field for row in cm_rows for field in row]         # ["E1_NON__ID_2300270", "ID_2300270", "Imatinib", "TKI", "E2_ACT__ID_2300270", "ID_2300270", ...]  # flattened so each placeholder in placeholders_cm gets exactly one value, in order
+        placeholders_cm = ",".join(["(?, ?, ?, ?, ?, ?)"] * len(cm_rows))   # unnamed tuples for VALUES clause -  [("E1_NON__ID_2300270", "ID_2300270", "Imatinib", "TKI", "non activated", "12h"), (...)]
+        params_cm = [field for row in cm_rows for field in row]         # ["E1_NON__ID_2300270", "ID_2300270", "Imatinib", "TKI", "non activated", "12h", "E2_ACT__ID_2300270", "ID_2300270", ...]  # flattened so each placeholder in placeholders_cm gets exactly one value, in order
 
         sql = f"""
-            WITH cm_subset(obs, entity_id, drug_name, drug_class) AS (VALUES {placeholders_cm})
+            WITH cm_subset(obs, entity_id, drug_name, drug_class, condition, timepoint) AS (VALUES {placeholders_cm})
             SELECT
                 v.obs AS drug_contrast_id, --TBD?
                 cm_subset.entity_id,
                 cm_subset.drug_name,
                 cm_subset.drug_class,
+                cm_subset.condition,
+                cm_subset.timepoint,
                 {SEMANTIC_GENE_EXPR} AS gene_symbol,
                 v.human_gene, v.protein_id,
-                v.log2fc, v.padj,
+                v.log2fc, v.padj, v.pvalue,
                 -- {lab} AS lab,
                 {study_id} AS study_id
             FROM {view} v
