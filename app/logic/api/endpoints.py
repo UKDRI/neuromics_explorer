@@ -1293,14 +1293,19 @@ def _build_gene_entity_join(
 
     contrast_ref = _table_ref(dataset_ctx, contrast_table, "cm")
 
-    # For entity-focal plots like volcano
-    if filter_on == "entity":
-        placeholders = ",".join(["?"] * len(terms))
-        predicates = [f"cm.drug_id IN ({placeholders})"]
-        params = list(terms)
-    else:
-        # For overviews and goi-focal plots like heatmap
-        predicates, params = _term_predicates(terms, [])
+    # NOTE: the `filter_on == "entity"` branch is superseded — '/expression/all-signatures'
+    # now resolves drug_id -> obs on the small contrast table first and filters the expression
+    # view on v.obs directly (see expression_signature), so the parquet scan can prune row groups
+    # via zonemaps instead of hash-joining all rows for all drugs.
+    # if filter_on == "entity":
+    #     placeholders = ",".join(["?"] * len(terms))
+    #     predicates = [f"cm.drug_id IN ({placeholders})"]
+    #     params = list(terms)
+    # else:
+    # For expression overviews and goi-focal plots (gene-rank, gene-drug-summary, gene-drug-pairs):
+    # the predicate is on gene terms, which live on the expression data, so the join with expr+contrast
+    # is needed — every drug's rows for those genes are genuinely needed.
+    predicates, params = _term_predicates(terms, [])
 
     filter_clauses, filter_params = [], []
     if condition:
@@ -1321,7 +1326,7 @@ def _build_gene_entity_join(
                 cm.drug_name,
                 cm.drug_class,
                 {SEMANTIC_GENE_EXPR} AS gene_symbol,
-                v.human_gene, -- remove v.?
+                v.human_gene,
                 v.protein_id,
                 v.log2fc,
                 v.padj
@@ -1462,26 +1467,81 @@ def expression_signature(
     timepoint: list[str] | None= Query(None),
     limit: int = Query(20000, ge=100, le=100000),
 ):
-    """Full gene signature (ALL genes, not GOI-scoped) for selected entities — ie drive drug-panel volcano."""
+    """
+    Full gene signature (ALL genes, not GOI-scoped) for selected entities — ie drive drug-panel volcano.
+
+    Two-step plan replaces full drug_id-keyed hash join: First filter on v.obs so parquet scan prune row
+    groups via zonemaps (in expression data) before joining with contrast_metadata therefore only selected
+    drug slices are read.
+    """
     pool = _require_pool(request)
     with get_conn(pool) as con:
-        ctx = _dataset_context(con, lab, study_id)
+        dataset_ctx = _dataset_context(con, lab, study_id)
         view = _safe_view_name("v", lab, study_id)
         entity_ids = _clean_terms(entity_id)
-        sql_join, join_params = _build_gene_entity_join(con, ctx, view, entity_ids, condition, timepoint, filter_on = "entity")
-        
+
+        contrast_table = dataset_ctx["table_map"].get("contrast_metadata")
+        if not contrast_table:
+            raise HTTPException(404, "No contrast_metadata table registered for this dataset.")
+        contrast_ref = _table_ref(dataset_ctx, contrast_table, "cm")
+
+        # Resolve drug_id (+ optional condition/timepoint) -> obs keys and labels
+        placeholders = ",".join(["?"] * len(entity_ids))
+        clauses = [f"cm.drug_id IN ({placeholders})"]
+        params: list = list(entity_ids)
+        if condition:
+            placeholders_cond = ",".join(["?"] * len(condition))
+            clauses.append(f"cm.condition IN ({placeholders_cond})")
+            params += condition
+        if timepoint:
+            placeholders_timepoint = ",".join(["?"] * len(timepoint))
+            clauses.append(f"cm.timepoint IN ({placeholders_timepoint})")
+            params += timepoint
+        cm_rows = con.execute(
+            f"SELECT obs, drug_id, drug_name, drug_class FROM {contrast_ref} WHERE {' AND '.join(clauses)}",
+            params,
+        ).fetchall()
+
+        if not cm_rows:
+            # No matching contrasts — return an empty, correctly-typed result.
+            table = con.execute(f"""
+                SELECT {SEMANTIC_GENE_EXPR} AS gene_symbol,
+                    v.human_gene, v.protein_id,
+                    v.log2fc, v.padj,
+                    CAST(NULL AS VARCHAR) AS entity_id,
+                    CAST(NULL AS VARCHAR) AS drug_name,
+                    CAST(NULL AS VARCHAR) AS drug_class,
+                    {study_id} AS study_id
+                FROM {view} v WHERE FALSE
+            """).arrow()
+            return _arrow_response(table)
+
+        # Predicate on v.obs and reattach drug labels via a tiny inline VALUES relation,
+        # meaning the join is only with the already-pruned expression rows.
+        obs_vals = [r[0] for r in cm_rows]                              # obs_vals = ["E1_NON__ID_2300270", "E2_ACT__ID_2300270"]
+        placeholders_obs = ",".join(["?"] * len(obs_vals))
+        placeholders_cm = ",".join(["(?, ?, ?, ?)"] * len(cm_rows))     # unnamed tuples for VALUES clause -  [("E1_NON__ID_2300270", "ID_2300270", "Imatinib", "TKI"), (...)]
+        params_cm = [field for row in cm_rows for field in row]         # ["E1_NON__ID_2300270", "ID_2300270", "Imatinib", "TKI", "E2_ACT__ID_2300270", "ID_2300270", ...]  # flattened so each placeholder in placeholders_cm gets exactly one value, in order
+
         sql = f"""
-            WITH {sql_join}
+            WITH cm_subset(obs, entity_id, drug_name, drug_class) AS (VALUES {placeholders_cm})
             SELECT
-              gene_symbol, log2fc, padj, entity_id, drug_name, drug_class, 
-              -- {lab} AS lab,
-              {study_id} AS study_id
-            FROM goi_rows
-            ORDER BY log2fc DESC      -- or padj ASC NULLS LAST 
+                v.obs AS drug_contrast_id, --TBD?
+                cm_subset.entity_id,
+                cm_subset.drug_name,
+                cm_subset.drug_class,
+                {SEMANTIC_GENE_EXPR} AS gene_symbol,
+                v.human_gene, v.protein_id,
+                v.log2fc, v.padj,
+                -- {lab} AS lab,
+                {study_id} AS study_id
+            FROM {view} v
+            JOIN cm_subset ON v.obs = cm_subset.obs
+            WHERE v.obs IN ({placeholders_obs})
+            ORDER BY log2fc DESC      -- or padj ASC NULLS LAST
             LIMIT ?
         """
-        final_params = join_params + [limit]
-        table = con.execute(sql, final_params).arrow()
+        table = con.execute(sql, params_cm + obs_vals + [limit]).arrow()
     return _arrow_response(table)
 
 @router.get("/datasets/{lab}/{study_id}/contrast-options")
