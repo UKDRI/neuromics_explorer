@@ -112,20 +112,6 @@ explorer_ui <- function(id) {
               class = "d-flex justify-content-between align-items-center",
               div(
                 tags$h4("Data Visualisation", class = "mb-0")
-              ),
-              div(
-                style = "display: flex; gap: 8px; align-items: center;",
-                downloadButton(
-                  ns("results-dl_csv"),
-                  label = "Export CSV",
-                  class = "btn btn-sm btn-outline-secondary"
-                ),
-                tags$button(
-                  class = "btn btn-sm btn-outline-primary",
-                  icon("download"),
-                  "Export Plot",
-                  onclick = sprintf("Shiny.setInputValue('%s', Math.random())", ns("export_plot"))
-                )
               )
             ),
             card_body(

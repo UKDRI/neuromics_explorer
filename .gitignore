@@ -2,6 +2,14 @@
 .Rhistory
 .RData
 .Ruserdata
-data/neuromics_registry.duckdb
 
 /.quarto/
+
+# Visitor usage metrics — contains visitor IDs, user agents and referrers - belongs only on server.
+data/neuromics_registry.duckdb
+data/usage_metrics.sqlite3
+data/usage_metrics.sqlite3-wal
+data/usage_metrics.sqlite3-shm
+
+.DS_Store
+.history/

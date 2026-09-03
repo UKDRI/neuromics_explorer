@@ -139,10 +139,10 @@ drug_rank_adapter <- list(
             tagList(
                 # radioButtons(ns("condition"), "Condition", choices = opts$conditions[[1]], inline = TRUE),
                 # radioButtons(ns("timepoint"), "Timepoint", choices = opts$timepoints[[1]], inline = TRUE)
-                tags$label("Condition:", style = "font-weight:600; font-size:18px;"),
+                tags$label("Condition:"),
                 checkboxGroupInput(ns("condition"), label = NULL,
                     choices = opts$conditions[[1]], selected = character(0), inline = TRUE),
-                tags$label("Timepoint:", style = "font-weight:600; font-size:18px;"),
+                tags$label("Timepoint:"),
                 checkboxGroupInput(ns("timepoint"), label = NULL,
                     choices = opts$timepoints[[1]], selected = character(0), inline = TRUE)
 
@@ -346,7 +346,7 @@ drug_rank_adapter <- list(
         observeEvent(active_goi(), {
             selected_drugs(NULL)
             dataTableProxy("gene_drug_table") |> selectRows(NULL)
-        }, ignoreInit = TRUE)
+        }, ignoreInit = TRUE)   # `ignoreInit = TRUE` keeps it from firing on module startup (when its created/initialised), solely when clicked on
 
         output$gene_drug_table_heading <- renderUI({
             req(length(active_goi()) > 0)

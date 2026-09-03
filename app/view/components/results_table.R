@@ -38,18 +38,18 @@ results_server <- function(id, de_data) {
         filter      = "top",
         rownames    = FALSE,
         class       = "table-sm table-condensed table-hover",
-        extensions  = c("Scroller"),
+        extensions  = c("Scroller", "Buttons"),
         options     = list(
           pageLength = 25,
           scrollX    = TRUE,
           scrollY    = "420px",
           scroller   = TRUE,
           dom        = "Bfrtip",    # controls which DT widgets appear: B=Buttons, f=filter/search, r=processing, t=table, i=info, p=pagination
-          buttons    = c("csv", "excel"),
+          buttons    = c('copy', 'csv', 'excel', 'pdf', 'print'),
           #autoWidth = TRUE,
           columnDefs = list(
             list(className = "dt-right", targets = which(sapply(df, is.numeric)) - 1)   # right-align numbers (DT default is left-align)
-          ) # TODO - check
+          )
         )
       )
 
