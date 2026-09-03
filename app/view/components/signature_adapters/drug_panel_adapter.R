@@ -32,8 +32,15 @@ drug_rank_adapter <- list(
             )
         ),
         tags$h3("Genes of interest - drug overview", style = "font-size:28px;font-weight:600;"),
-        tags$p("Bubble size = drugs tested; height = fraction significant. Click a gene to see which drugs affect it.",
-            style = "color:#666; font-size:13px;"),    #; colour = net direction bias
+        tags$p(
+            style = "color:#666; font-size:13px;",
+            tags$b("Height"), " = fraction of tested drugs that significantly change the gene · ",
+            tags$b("Bubble size"), " = number of drugs tested · ",
+            tags$b("Colour"), " = net direction of those significant hits (",
+            tags$span(style = "color:#bd594e; font-weight:600;", "red"), " = more drugs push expression up, ",
+            tags$span(style = "color:#398cc4; font-weight:600;", "blue"), " = more drugs push expression down, ",
+            "white = balanced). \n \n Click a gene (or lasso several) to see which drugs were tested against it."
+        ),
         fluidRow(
             column(3, uiOutput(ns("breadcrumb"))),
         ),
@@ -243,22 +250,40 @@ drug_rank_adapter <- list(
                     ifelse(df$net_change < 0, paste0(df$net_change, " down-leaning"), "balanced"))
             )
 
-            plot_ly(df, x = ~gene_symbol, y = ~frac_sig, size = ~n_drugs_tested, color = ~net_change, colors = c("#398cc4", "#F5F5F5", "#bd594e"),
-                type = "scattergl", mode = "markers", 
+            # cmin/cmid/cmax are used to fix a symmetrical colour scale around zero
+            net_lim <- suppressWarnings(max(abs(df$net_change), na.rm = TRUE))
+            if (!is.finite(net_lim) || net_lim == 0) net_lim <- 1
+
+            # NB. set colour/size aesthetics inside `marker` vs plot_ly's `color =`/`size =` shortcuts which instead build
+            # their own legend/colourbar and titles it with raw column name before drawing another ontop = scale title overlap
+            plot_ly(df, x = ~gene_symbol, y = ~frac_sig,
+                type = "scattergl", mode = "markers",
                 marker = list(
+                    size = ~n_drugs_tested,
                     sizemode = "area",
-                    sizeref = max(df$n_drugs_tested) / 2500,
+                    sizeref = max(df$n_drugs_tested) / 2500,   # keeps the largest bubble at ~50px whatever the panel size
+                    sizemin = 4,                               # a gene tested against 1 drug still gets a clickable target
                     opacity = 0.85,
-                    line = list(width = 1, color = "#888"), #color = "white" | color = "#D8DEE6", width = 2 | colorscale  = list(c(0,"#AEC6E8"), c(1,"#1F4E96")),
+                    line = list(width = 1, color = "#888"),  # color = "white" | color = "#D8DEE6", width = 2 | colorscale  = list(c(0,"#AEC6E8"), c(1,"#1F4E96")),
+                    color = ~net_change,
+                    colorscale = list(c(0, "#398cc4"), c(0.5, "#F5F5F5"), c(1, "#bd594e")),
+                    cmin = -net_lim, cmid = 0, cmax = net_lim,
                     showscale = TRUE,
-                    colorbar = list(title = "Significance")
+                    colorbar = list(
+                        title = list(text = "Net direction", side = "top", font = list(size = 12)),
+                        x = 1.02, xanchor = "left",
+                        y = 0.5, yanchor = "middle",
+                        len = 0.6, thickness = 14,
+                        ticks = "outside", tickfont = list(size = 10),
+                        outlinewidth = 0
+                    )
                 ),
                 text = hover_text, hoverinfo = "text", showlegend = FALSE, source = "genebubble") |>
             layout(
                 xaxis = list(title = "Genes"),
-                yaxis = list(title = "Fraction of significant drugs"),  #list(title = "Fraction of drugs with significant hit", range = c(0, 1))
-                tickformat = ".0%",
-                dragmode = "select", margin = list(l = 140),
+                yaxis = list(title = "Fraction of significant drugs"),  #list(title = "Fraction of drugs with significant hit", range = c(0, 1)) # rangemode = "tozero"),
+                dragmode = "select",
+                margin = list(l = 90, r = 110, t = 40),   # r margin reserves space for the colourbar
                 showlegend = FALSE) |>   #layout(dragmode = "lasso") 
             event_register("plotly_click") |> event_register("plotly_selected")
         })
