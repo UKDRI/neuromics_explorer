@@ -84,10 +84,54 @@ h1, h2, h3, h4, h5, h6 {
   color: #fff !important;
 }
 
-.alert-info {
+.alert-info,
+.alert-secondary,
+.well,
+.well-sm,
+.card.panel-info {
+  background-color: #eaf2ff !important;
+  color: #23467d !important;
+  border: 1px solid #bed4f5 !important;
+}
+
+/* Progressive step guide for the Gene-Drug Explorer */
+.gene-drug-guide {
   background-color: #eaf2ff;
+  border: 1px solid #bed4f5;
+  border-radius: 8px;
   color: #23467d;
-  border-color: #bed4f5;
+  margin-bottom: 12px;
+  padding: 12px 14px;
+}
+
+.gene-drug-guide .step {
+  align-items: baseline;
+  display: flex;
+  gap: 8px;
+  line-height: 1.45;
+  padding: 3px 0;
+  transition: opacity 0.25s ease;
+}
+
+.gene-drug-guide .step-done {
+  opacity: 0.55;
+}
+
+.gene-drug-guide .step-done .step-text {
+  text-decoration: line-through;
+}
+
+.gene-drug-guide .step-active {
+  font-weight: 600;
+}
+
+.gene-drug-guide .step-todo {
+  opacity: 0.7;
+}
+
+.gene-drug-guide .step-marker {
+  flex: 0 0 auto;
+  width: 1.25rem;
 }
 
 .value-box {

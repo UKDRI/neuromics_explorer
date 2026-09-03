@@ -1479,7 +1479,7 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
       ds <- selected_dataset()
       if (is.null(ds)) return(NULL)
       tags$div(
-        class = "alert alert-secondary",
+        class = "alert alert-info",
         role = "alert",
         style = "margin-bottom: 12px;",
         tags$strong("Expression data is showing: "),
@@ -1493,7 +1493,7 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
       ds <- active_dataset()
       if (is.null(ds)) return(NULL)
       tags$div(
-        class = "alert alert-secondary",
+        class = "alert alert-info",
         role = "alert",
         style = "margin-bottom: 12px;",
         tags$strong("Plot is showing: "),

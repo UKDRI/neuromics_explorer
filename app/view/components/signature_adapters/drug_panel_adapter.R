@@ -22,6 +22,7 @@ drug_rank_adapter <- list(
   ui = function(id) {
     ns <- NS(id)
     tagList(
+        uiOutput(ns("steps_guide")),
         wellPanel(
             fluidRow(
                 column(6, uiOutput(ns("contrast_filter_ui"))),
@@ -39,7 +40,7 @@ drug_rank_adapter <- list(
         plotlyOutput(ns("bubble_overview"), height = "680px") |> withSpinner(
             type = 1, caption = "Loading plot...", color = "#5b5b5b"),
         textOutput(ns("selection_summary")),
-        tags$h5("Drugs tested against selected gene(s)", style = "margin-top:20px;font-size:24px;font-weight:600;"),
+        uiOutput(ns("gene_drug_table_heading")),   # heading only once a gene bubble is clicked
         DTOutput(ns("gene_drug_table")),
         uiOutput(ns("focal_panel"))
     )
@@ -73,6 +74,57 @@ drug_rank_adapter <- list(
             req(ds) #,identical(ds$lab_source, "webber")
             validate(need(is_drug_dataset(ds), "Please select just one drug-study dataset to use the Gene-Drug Explorer."))     # prevents raw 404s
             fetch_contrast_options(ds$lab_source, ds$study_id)
+        })
+
+        # ── Guide ──────────────────────────────────────────────
+        # Each step is ticked off once satisfied, and the next one becomes the active (bold) instruction.
+        output$steps_guide <- renderUI({
+            has_contrast        <- length(input$condition) > 0 || length(input$timepoint) > 0
+            has_gene            <- length(active_goi()) > 0
+            has_drug            <- length(selected_drugs()) > 0
+            has_focal_contrast  <- !is.null(input$focal_condition) && !is.null(input$focal_timepoint)
+
+            steps <- list(
+                list(done = has_contrast,
+                    text = tagList(
+                        "Narrow the overview by ", tags$b("condition"), " and ", tags$b("timepoint"),
+                        ", or leave them clear to summarise across all contrasts.")),
+                list(done = has_gene,
+                    text = tagList(
+                        "Click a gene bubble to list every drug tested against it. ",
+                        "Higher bubbles have a larger fraction of significant drug hits.")),
+                list(done = has_drug,
+                    text = tagList(
+                        "Pick one gene x drug row in the table to open the focal views for that drug.")),
+                list(done = has_focal_contrast,
+                    text = tagList(
+                        "Choose a single contrast beneath the table to compare your genes of interest ",
+                        "(heatmap) against the drug's whole transcriptome (volcano)."))
+            )
+
+            # Find which step the user is currently on.
+            active_idx <- which(!vapply(steps, `[[`, logical(1), "done"))[1]    # pulls `done` flag from each step into a logical vector, e.g. c(TRUE, TRUE, FALSE, FALSE); `!` flips so which()[1] returns the first position of outstanding steps, e.g. step 3 in this example
+            if (is.na(active_idx)) active_idx <- length(steps)      # NA means every step is done so hold highlight on final step rather than indexing out of bounds
+
+            tags$div(
+                class = "gene-drug-guide", role = "note",
+                tags$div(style = "font-weight:700; margin-bottom:6px;",
+                    "How to explore gene-drug relationships"),
+                #   step-done   -> faded (opacity .55) and text strike-through
+                #   step-active -> bold, instruction for user to follow next
+                #   step-todo   -> dimmed (opacity .7), instructions to follow later
+                #   step-marker -> tick or step number
+                #   step-text   -> the instruction itself (the strike-through target)
+                lapply(seq_along(steps), function(i) {
+                    state <- if (steps[[i]]$done) "step-done" else if (i == active_idx) "step-active" else "step-todo"
+                    tags$div(
+                        class = paste("step", state),
+                        tags$span(class = "step-marker",
+                            if (steps[[i]]$done) "✓" else paste0(i, ".")),
+                        tags$span(class = "step-text", steps[[i]]$text)
+                    )
+                })
+            )
         })
 
         output$contrast_filter_ui <- renderUI({
@@ -224,7 +276,14 @@ drug_rank_adapter <- list(
             req(length(active_goi()) > 0)
             breadcrumb_ui(ns)
         })
-        observeEvent(input$back_to_landscape, active_goi(character(0))) #NULL
+        # "Back to Landscape View" function is a full undo back to solely the bubble plot: clears gene selection to hide DT + its
+        # heading, and hide focal panel (volcano + heatmap) and its contrast radios. The focal panel is also cleared when the user
+        # clicks a different gene bubble, which triggers a new DT query and refreshes the volcano/heatmap for the new drug selection.
+        observeEvent(input$back_to_landscape, {
+            active_goi(character(0))
+            selected_drugs(NULL)
+            dataTableProxy("gene_drug_table") |> selectRows(NULL)
+        })
 
 
         # ── Repopulate drug search box choices from whichever gene is currently active ───────
@@ -277,9 +336,13 @@ drug_rank_adapter <- list(
         #     breadcrumb_ui(ns)
         # })
 
-        observeEvent(input$back_to_landscape, {
-            dataTableProxy("gene_drug_table") |> selectRows(NULL)
-        }) #observeEvent(input$back_to_landscape, selected_drugs(character(0)))
+        # (reset handled by the single back_to_landscape observer above)
+
+        output$gene_drug_table_heading <- renderUI({
+            req(length(active_goi()) > 0)
+            tags$h5("Drugs tested against selected gene(s)",
+                style = "margin-top:20px;font-size:24px;font-weight:600;")
+        })
 
         # TODO when genes in plot is reselected, reset, the gene-drug table AND close focal plots to get ready for a refresh
         # TODO: multiple drug selections
