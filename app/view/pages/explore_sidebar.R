@@ -11,6 +11,9 @@ box::use(
   bslib[accordion, accordion_panel],
 )
 
+# log2(1.5) = 0.585; default rounded to the slider's 0.01 step. Shared by the input and the 'Reset' button.
+LFC_DEFAULT <- 0.58
+
 #' @export
 sidebar_ui <- function(id) {
   ns <- NS(id)
@@ -44,11 +47,12 @@ sidebar_ui <- function(id) {
         title = "Significance Filters",
         icon  = shiny::icon("filter"),  # TODO select different icon
         
-        tags$label("LogFC", style = "font-weight: 600; color: #333; font-size: 13px;"),
+        # Default 0.58 = log2(1.5), the conventional 1.5-fold cut-off. Max 5 ~32-fold.
+        tags$label("Minimum | log₂FC |", style = "font-weight: 600; color: #333; font-size: 13px;"),
         sliderInput(ns("lfc_thresh"),
-                    label = NULL, min = -8, max = 8,
-                    value = c(0, 1),
-                    step  = 0.1, ticks = FALSE
+                    label = NULL, min = 0, max = 5,
+                    value = LFC_DEFAULT,
+                    step  = 0.01, ticks = FALSE   # 0.01 so the 0.58 default is representable (0.1 would snap it to 0.6)
         ),
         
         tags$label("padj threshold", style = "font-weight: 600; color: #333; font-size: 13px;"),
@@ -131,7 +135,7 @@ sidebar_server <- function(id, selected_dataset) {
     
     # ── Reset ─────────────────────────────────────────────────────────────
     observeEvent(input$reset_filters, {
-      updateSliderInput(session, "lfc_thresh",   value = c(0, 1))
+      updateSliderInput(session, "lfc_thresh",   value = LFC_DEFAULT)
       updateSliderInput(session, "padj_thresh",  value = 0.05)
       updateSelectInput(session, "plot_type",    selected = "Volcano")
       updateSelectInput(session, "organism",     selected = "All")
@@ -160,8 +164,7 @@ sidebar_server <- function(id, selected_dataset) {
     list(
       plot_type         = reactive(input$plot_type),
       padj_thresh       = reactive(input$padj_thresh),
-      lfc_thresh_min    = reactive(input$lfc_thresh[1]),
-      lfc_thresh_max    = reactive(input$lfc_thresh[2]),
+      lfc_thresh_min    = reactive(input$lfc_thresh),
       cell_types        = reactive(input$cell_types),
       organism          = reactive(input$organism)
     )
