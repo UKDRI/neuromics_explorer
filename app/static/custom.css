@@ -94,7 +94,14 @@ h1, h2, h3, h4, h5, h6 {
   border: 1px solid #bed4f5 !important;
 }
 
-/* Progressive step guide for the Gene-Drug Explorer */
+/* Progressive step guide for the Gene-Drug Explorer
+  Originally used custom.css file for styling but issue with syncing w UI therefore inline styling used instead
+  - step-done   -> faded (opacity .55) and text strike-through
+  - step-active -> bold, instruction for user to follow next
+  - step-todo   -> dimmed (opacity .7), instructions to follow later
+  - step-marker -> tick or step number
+  - step-text   -> the instruction itself (the strike-through target)
+*/
 .gene-drug-guide {
   background-color: #eaf2ff;
   border: 1px solid #bed4f5;

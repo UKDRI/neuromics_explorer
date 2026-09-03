@@ -79,15 +79,15 @@ drug_rank_adapter <- list(
         # ── Guide ──────────────────────────────────────────────
         # Each step is ticked off once satisfied, and the next one becomes the active (bold) instruction.
         output$steps_guide <- renderUI({
-            has_contrast        <- length(input$condition) > 0 || length(input$timepoint) > 0
             has_gene            <- length(active_goi()) > 0
             has_drug            <- length(selected_drugs()) > 0
-            has_focal_contrast  <- !is.null(input$focal_condition) && !is.null(input$focal_timepoint)
+            # Step 1 (filtering by contrasts) is optional also counts as done once the user has moved straight to Step 2 (selecting gene bubble)
+            has_contrast        <- length(input$condition) > 0 || length(input$timepoint) > 0 || has_gene
 
             steps <- list(
                 list(done = has_contrast,
                     text = tagList(
-                        "Narrow the overview by ", tags$b("condition"), " and ", tags$b("timepoint"),
+                        "Narrow the overview by the available contrasts such as: ", tags$b("condition"), " or ", tags$b("timepoint"),
                         ", or leave them clear to summarise across all contrasts.")),
                 list(done = has_gene,
                     text = tagList(
@@ -96,13 +96,13 @@ drug_rank_adapter <- list(
                 list(done = has_drug,
                     text = tagList(
                         "Pick one gene x drug row in the table to open the focal views for that drug.")),
-                list(done = has_focal_contrast,
+                list(done = FALSE,      # Final step (changing focal contrast buttons from defaults) never ticks and remains bold
                     text = tagList(
                         "Choose a single contrast beneath the table to compare your genes of interest ",
                         "(heatmap) against the drug's whole transcriptome (volcano)."))
             )
 
-            # Find which step the user is currently on.
+            # Finds which step the user is currently on
             active_idx <- which(!vapply(steps, `[[`, logical(1), "done"))[1]    # pulls `done` flag from each step into a logical vector, e.g. c(TRUE, TRUE, FALSE, FALSE); `!` flips so which()[1] returns the first position of outstanding steps, e.g. step 3 in this example
             if (is.na(active_idx)) active_idx <- length(steps)      # NA means every step is done so hold highlight on final step rather than indexing out of bounds
 
@@ -110,18 +110,24 @@ drug_rank_adapter <- list(
                 class = "gene-drug-guide", role = "note",
                 tags$div(style = "font-weight:700; margin-bottom:6px;",
                     "How to explore gene-drug relationships"),
-                #   step-done   -> faded (opacity .55) and text strike-through
-                #   step-active -> bold, instruction for user to follow next
-                #   step-todo   -> dimmed (opacity .7), instructions to follow later
-                #   step-marker -> tick or step number
-                #   step-text   -> the instruction itself (the strike-through target)
+                # Originally used custom.css file for styling (w .step-* classes) but issue with syncing w UI therefore inline styling used instead
+                    #   done    -> faded and strike-through text, completed steps
+                    #   active  -> bold, the current instruction to follow
+                    #   todos   -> dimmed/opaque, steps to come that aren't yet reachable
                 lapply(seq_along(steps), function(i) {
-                    state <- if (steps[[i]]$done) "step-done" else if (i == active_idx) "step-active" else "step-todo"
+                    done   <- steps[[i]]$done
+                    active <- (i == active_idx)
+                    row_style <- paste0(
+                        "display:flex; gap:8px; align-items:baseline; padding:3px 0; line-height:1.45;",
+                        if (done) " opacity:0.55;" else if (active) " opacity:1; font-weight:600;" else " opacity:0.7;"
+                    )
                     tags$div(
-                        class = paste("step", state),
-                        tags$span(class = "step-marker",
-                            if (steps[[i]]$done) "✓" else paste0(i, ".")),
-                        tags$span(class = "step-text", steps[[i]]$text)
+                        style = row_style,
+                        tags$span(style = "flex:0 0 auto; width:1.25rem;",
+                            if (done) "✓" else paste0(i, ".")),
+                        tags$span(
+                            style = if (done) "text-decoration:line-through;" else "",
+                            steps[[i]]$text)
                     )
                 })
             )
@@ -336,7 +342,11 @@ drug_rank_adapter <- list(
         #     breadcrumb_ui(ns)
         # })
 
-        # (reset handled by the single back_to_landscape observer above)
+        # New gene selection in bubble plot requires resetting gene x drug DT and removing selected drug and the stale focal plots; guide also falls back to step 3
+        observeEvent(active_goi(), {
+            selected_drugs(NULL)
+            dataTableProxy("gene_drug_table") |> selectRows(NULL)
+        }, ignoreInit = TRUE)
 
         output$gene_drug_table_heading <- renderUI({
             req(length(active_goi()) > 0)
@@ -344,7 +354,6 @@ drug_rank_adapter <- list(
                 style = "margin-top:20px;font-size:24px;font-weight:600;")
         })
 
-        # TODO when genes in plot is reselected, reset, the gene-drug table AND close focal plots to get ready for a refresh
         # TODO: multiple drug selections
         # TODO: consider 2x2 subplot grid for all contrasts vs radio buttons
         # TODO: fix initial heatmap collapsing multiple contrasts for the selected drug; consider combining drug_name w contrast into a composite x-axis label vs radio buttons
@@ -379,7 +388,7 @@ drug_rank_adapter <- list(
                 condition = input$focal_condition, timepoint = input$focal_timepoint,
                 limit = 100000L    # TODO: remove? # limit raised from the default 20k to prevent silent truncation of GOI from heatmap as one drug spans multiple contrasts
             )
-            validate(need(nrow(df) > 0, "No expression data available for this drug and contrast."))
+            validate(need(nrow(df) > 0, "No expression data available for this drug with the selected contrast."))
             df$lab_source <- ds$lab_source %||% "unknown"           # volcano_server's bindCache needs these to prevent Error: object '' not found
             df$study_id   <- ds$study_id %||% NA_integer_
             df
