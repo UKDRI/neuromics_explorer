@@ -7,12 +7,62 @@ box::use(
   # shiny[...],
   shiny[moduleServer, NS, tagList, selectInput, updateSelectInput,
         sliderInput, updateSliderInput, checkboxGroupInput, actionButton,
-        observeEvent, uiOutput, renderUI, tags, reactive],
-  bslib[accordion, accordion_panel],
+        observeEvent, uiOutput, renderUI, tags, reactive, debounce, icon],
+  bslib[accordion, accordion_panel, tooltip],
 )
 
 # log2(1.5) = 0.585; default rounded to the slider's 0.01 step. Shared by the input and the 'Reset' button.
 LFC_DEFAULT <- 0.58
+
+# Small (?) hover icon, same pattern as the gene-search modal's "Why do some genes appear
+# more than once?". `content` may be a string or tags. The click is swallowed so an icon
+# placed inside the accordion header does not also toggle the panel.
+help_tip <- function(content, placement = "right") {
+  tooltip(
+    tags$span(
+      icon("circle-info"),
+      style    = "display:inline-flex; color:#667eea; cursor:help; margin-left:6px; font-size:12px;",
+      onclick  = "event.stopPropagation();",
+      tabindex = "0", role = "button", `aria-label` = "What does this control do?"
+    ),
+    content,
+    placement = placement
+  )
+}
+
+# Text kept in one place so the tooltips stay in step with what the plots actually consume
+# (see the plot servers at the bottom of data_explorer.R for the wiring).
+TIP_FILTERS <- tags$div(
+  style = "text-align:left; font-size:12px; line-height:1.45;",
+  tags$div(style = "font-weight:600; margin-bottom:4px;",
+    "These two thresholds decide which features count as significant."),
+  tags$div(style = "font-weight:600; margin-top:6px;", "They drive:"),
+  tags$ul(style = "padding-left:16px; margin:2px 0;",
+    tags$li(tags$b("Volcano"), " - Up/Down colouring and the dashed threshold lines"),
+    tags$li(tags$b("Heatmap"), " - which top genes are fetched and shown"),
+    tags$li(tags$b("Violin"), " - the Up / Down / NS grouping"),
+    tags$li(tags$b("Feature Scatter"), " - point colouring"),
+    tags$li(tags$b("Gene-Drug Explorer"), " - which drug hits count as significant (padj only)")
+  ),
+  tags$div(style = "margin-top:4px;", "Applies on both the Plot and Compare tabs."),
+  tags$div(style = "font-weight:600; margin-top:6px;", "They do not affect:"),
+  tags$div("Expression data table, Histogram, Dots Plot, UMAP, Top Features, or the drug-panel heatmap.")
+)
+
+TIP_PADJ <- tags$div(
+  style = "text-align:left; font-size:12px; line-height:1.45;",
+  "Adjusted p-value cut-off (Benjamini-Hochberg). A feature is significant when its padj is ",
+  tags$b("below"), " this value.",
+  tags$div(style = "margin-top:4px;", "0.05 = accept ~5% false discoveries among the calls. Lower is stricter.")
+)
+
+TIP_LFC <- tags$div(
+  style = "text-align:left; font-size:12px; line-height:1.45;",
+  "Minimum absolute log\u2082 fold change, applied symmetrically: log\u2082FC above the value is ",
+  tags$b("Up"), ", below its negative is ", tags$b("Down"), ".",
+  tags$div(style = "margin-top:4px;",
+    "0.58 \u2248 1.5-fold \u00b7 1 = 2-fold \u00b7 2 = 4-fold. Set to 0 to require significance only, with no effect-size cut-off.")
+)
 
 #' @export
 sidebar_ui <- function(id) {
@@ -44,18 +94,21 @@ sidebar_ui <- function(id) {
       open = FALSE,
       
       accordion_panel(
-        title = "Significance Filters",
+        title = tags$span("Significance Filters", help_tip(TIP_FILTERS)),
+        value = "significance_filters",   # required: bslib defaults value to title, which must then be a string
         icon  = shiny::icon("filter"),  # TODO select different icon
         
         # Default 0.58 = log2(1.5), the conventional 1.5-fold cut-off. Max 5 ~32-fold.
-        tags$label("Minimum | log₂FC |", style = "font-weight: 600; color: #333; font-size: 13px;"),
+        tags$label("Minimum | log₂FC |", help_tip(TIP_LFC),
+                   style = "font-weight: 600; color: #333; font-size: 13px;"),
         sliderInput(ns("lfc_thresh"),
                     label = NULL, min = 0, max = 5,
                     value = LFC_DEFAULT,
                     step  = 0.01, ticks = FALSE   # 0.01 so the 0.58 default is representable (0.1 would snap it to 0.6)
         ),
         
-        tags$label("padj threshold", style = "font-weight: 600; color: #333; font-size: 13px;"),
+        tags$label("padj threshold", help_tip(TIP_PADJ),
+                   style = "font-weight: 600; color: #333; font-size: 13px;"),
         sliderInput(ns("padj_thresh"),
                     label = NULL, min = 0.001, max = 0.2,
                     value = 0.05, step = 0.001, ticks = FALSE
@@ -163,8 +216,11 @@ sidebar_server <- function(id, selected_dataset) {
     # ── Return reactive list for use by data_explore.R ────────────────────
     list(
       plot_type         = reactive(input$plot_type),
-      padj_thresh       = reactive(input$padj_thresh),
-      lfc_thresh_min    = reactive(input$lfc_thresh),
+      # Debounced: the thresholds are now part of the plot cache keys downstream, so without this
+      # a slider drag would create one cache entry per tick (step is 0.01). 300 ms lets a drag
+      # settle into a single recompute.
+      padj_thresh       = debounce(reactive(input$padj_thresh), 300),
+      lfc_thresh_min    = debounce(reactive(input$lfc_thresh), 300),
       cell_types        = reactive(input$cell_types),
       organism          = reactive(input$organism)
     )

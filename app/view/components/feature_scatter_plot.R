@@ -117,8 +117,9 @@ feature_scatter_server <- function(id, selected_dataset, padj_thresh, lfc_thresh
       bindCache(
         selected_dataset()$lab_source,
         selected_dataset()$study_id,
-        # padj_thresh(),
-        # lfc_thresh(),
+        # Thresholds drive the colouring in the body, so they belong in the key.
+        padj_thresh(),
+        lfc_thresh(),
         paste(selected_dataset()$genes %||% character(0), collapse = ","),
         paste(selected_dataset()$proteins %||% character(0), collapse = ",")
       )

@@ -1890,6 +1890,8 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
             compare_source_rows()[idx,,drop=FALSE]$lab_source[1],
             compare_source_rows()[idx,,drop = FALSE]$study_id[1],
             sidebar_vals$plot_type(),
+            sidebar_vals$padj_thresh(),
+            sidebar_vals$lfc_thresh_min(),
             input$compare_heatmap_x_axis   %||% "",
             paste(input$compare_heatmap_terms %||% character(0), collapse = ","),
             input$compare_violin_y_var     %||% "log2fc",

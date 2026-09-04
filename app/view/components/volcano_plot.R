@@ -200,8 +200,8 @@ volcano_server <- function(id, de_data, padj_thresh, lfc_thresh, gene = reactive
         # the drug panel for every drug. Allows additional filtering (eg cell_type, timepoint, condition etc)
         nrow(de_data()),
         sum(de_data()$log2fc, na.rm = TRUE),
-        # padj_thresh(),
-        # lfc_thresh(),
+        padj_thresh(),
+        lfc_thresh(),
         paste(gene() %||% character(0), collapse = ",")
       )
 

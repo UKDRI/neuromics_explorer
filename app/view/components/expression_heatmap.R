@@ -79,10 +79,9 @@ heatmap_server <- function(id, selected_dataset,
       bindCache(
         selected_dataset()$lab_source,
         selected_dataset()$study_id,
-        n_genes()
-        # ,
-        # padj_thresh(),
-        # lfc_thresh()
+        n_genes(),
+        padj_thresh(),
+        lfc_thresh()
       )
 
     searched_gene_terms <- reactive({
@@ -135,8 +134,8 @@ heatmap_server <- function(id, selected_dataset,
         selected_dataset()$lab_source,
         selected_dataset()$study_id,
         n_genes(),
-        # padj_thresh(),
-        # lfc_thresh(),
+        padj_thresh(),
+        lfc_thresh(),
         paste(input$heatmap_terms %||% character(0), collapse = ",")
       )
 
@@ -275,8 +274,8 @@ heatmap_server <- function(id, selected_dataset,
         selected_dataset()$lab_source,
         selected_dataset()$study_id,
         n_genes(),
-        # padj_thresh(),
-        # lfc_thresh(),
+        padj_thresh(),
+        lfc_thresh(),
         input$x_axis,
         paste(input$heatmap_terms %||% character(0), collapse = ",")
       )
