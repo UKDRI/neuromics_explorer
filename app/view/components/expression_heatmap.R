@@ -7,6 +7,7 @@ box::use(
   tidyr[pivot_wider],
   tibble[column_to_rownames],
   app/logic/api/api_client[fetch_top_de, fetch_expression_goi],
+  app/view/components/helpers/de_helpers[build_de_category, pick_strongest],
 )
 
 #' @export
@@ -39,15 +40,6 @@ heatmap_server <- function(id, selected_dataset,
       values <- as.character(df[[col]])
       values <- values[!is.na(values) & nzchar(trimws(values))]
       length(unique(values)) > 1
-    }
-
-    build_de_category <- function(df) {
-      if (has_values(df, "de_category")) {
-        values <- as.character(df$de_category)
-        values[is.na(values) | !nzchar(values)] <- "unlabelled"
-        return(values)
-      }
-      rep("All", nrow(df))
     }
 
     group_label_map <- c(
@@ -142,7 +134,7 @@ heatmap_server <- function(id, selected_dataset,
     x_axis_choices <- reactive({
       df <- heatmap_data()
       # Ensure GOI and top-de rows have de_category column
-      df$de_category <- build_de_category(df)
+      df$de_category <- build_de_category(df, padj_thresh(), lfc_thresh())
       choices <- c()
       for (candidate in names(group_label_map)) {
         if (has_multiple_values(df, candidate)) {
@@ -192,7 +184,7 @@ heatmap_server <- function(id, selected_dataset,
       df <- heatmap_data()
       req(nrow(df) > 0)
 
-      df$de_category <- build_de_category(df)
+      df$de_category <- build_de_category(df, padj_thresh(), lfc_thresh())
 
       group_col <- input$x_axis
       if (!group_col %in% names(df)) {
@@ -216,7 +208,7 @@ heatmap_server <- function(id, selected_dataset,
           id_cols = gene_symbol,
           names_from = group,
           values_from = log2fc,
-          values_fn = mean, #value
+          values_fn = pick_strongest,   # mean, value
           values_fill = NA_real_  #filters out genes or gene-cluster combos that have been dropped due to significance filter, shows up as a neutral gaps/transparent 
         )
 
@@ -232,6 +224,10 @@ heatmap_server <- function(id, selected_dataset,
       row_idx <- row_idx[!is.na(row_idx)]
       mat <- mat[row_idx, , drop = FALSE]
 
+      # Symmetric limits so 0 always sits on white and red/blue intensity is comparable across tabs and datasets (rather than auto-ranging).
+      z_limit <- suppressWarnings(max(abs(mat), na.rm = TRUE))
+      if (!is.finite(z_limit) || z_limit == 0) z_limit <- 1
+
       group_title <- names(x_axis_choices())[match(group_col, unname(x_axis_choices()))]
 
       plotly::plot_ly(
@@ -245,7 +241,7 @@ heatmap_server <- function(id, selected_dataset,
           c(0.5, "#FFFFFF"), # white (0)
           c(1, "#C0392B")    # red   (up)
         ),
-        zmid = 0,
+        zmid = 0, zmin = -z_limit, zmax = z_limit,
         hovertemplate = "%{y} · %{x}<br>log2FC: %{z:.3f}<extra></extra>"
         # hovertemplate = ifelse(
         #   is.na(df$condition_b),

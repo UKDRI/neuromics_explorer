@@ -35,6 +35,7 @@ box::use(
   app/view/components/highest_expr_plot[highest_expr_ui, highest_expr_server],
   app/view/components/signature_explorer[signature_explorer_ui, signature_explorer_server],
   app/view/components/signature_adapters/drug_panel_adapter[drug_rank_adapter],
+  app/view/components/helpers/de_helpers[build_de_category, pick_strongest],
   app/view/pages/gene_dataset_selector[gene_selector_ui, gene_selector_server, parse_json_text],
   app/view/pages/explore_sidebar[sidebar_ui, sidebar_server],
   app/logic/api/api_client[fetch_all_datasets, fetch_datasets_for_terms, fetch_expression_table, fetch_expression_volcano,
@@ -410,29 +411,6 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
         label[keep] <- values[keep]
       }
       label
-    }
-
-    # Builds DE category column if 'de_category' column is missing
-    build_de_category <- function(df, padj_thresh, lfc_thresh, df_names = names(df)) {
-      if (has_values(df, "de_category", df_names)) {
-        values <- as.character(df$de_category)
-        values[is.na(values) | !nzchar(values)] <- "unlabelled"
-        return(values)
-      }
-
-      for (candidate in c("comparison", "DE", "category", "variable")) {
-        if (has_values(df, candidate, df_names)) {
-          values <- as.character(df[[candidate]])
-          values[is.na(values) | !nzchar(values)] <- "unlabelled"
-          return(values)
-        }
-      }
-
-      dplyr::case_when(
-        !is.na(df$padj) & df$padj < padj_thresh & !is.na(df$log2fc) & df$log2fc > lfc_thresh ~ "Up",
-        !is.na(df$padj) & df$padj < padj_thresh & !is.na(df$log2fc) & df$log2fc < -lfc_thresh ~ "Down",
-        TRUE ~ "No"
-      )
     }
 
     # ── Vectorised choice builders ─────────────────────────────────────────────
@@ -821,11 +799,11 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
       agg <- stats::aggregate(
         df$log2fc,
         by = list(gene_symbol = df$gene_symbol, group = df[[group_col]]),
-        FUN = function(x) x[which.max(abs(x))]  #OR `FUN = mean)` - decided max due to some groups/categories empty, while mean() can't handle NA and is baised towards 0
+        FUN = pick_strongest
       )
       names(agg)[3] <- "log2fc"
       agg <- agg[!is.na(agg$gene_symbol) & !is.na(agg$group), , drop = FALSE]
-      validate(need(nrow(agg) > 0, "No grouped heatmap rows remain after aggregation."))
+      validate(need(nrow(agg) > 0, "Heatmap grouping unavailable after aggregation."))
       
       gene_levels <- unique(c(
         goi_terms_present,
