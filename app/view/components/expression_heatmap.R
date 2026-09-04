@@ -176,7 +176,7 @@ heatmap_server <- function(id, selected_dataset,
       selected_terms <- selected_terms[nzchar(selected_terms)]
 
       # Follows Plot tab's "Which genes are interesting, and how do they behave everywhere?"
-      # Thresholds control	which genes are picked; Good when there are	many columns e.g. clusters, cell types
+      # Thresholds controlwhich genes are picked; Good when there are	many columns e.g. clusters, cell types
       top_gene_symbols <- unique(top_df$gene_symbol)
       all_genes <- unique(c(top_gene_symbols, selected_terms))
 

@@ -701,10 +701,11 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
         )
     }
 
+    # TODO: consider changing to fit the same shape as heatmap_server's heatmap_data(); see comments for more info
     render_compare_heatmap <- function(df, dataset_row, dataset_name, padj_thresh, lfc_thresh,
                                        group_col = NULL, selected_terms = character(0),
                                        goi_df = NULL) {
-      
+
       # Append selected terms on heatmap where available
       ds <- selected_dataset()
       goi_terms <- unique(trimws(selected_terms %||% ds$genes %||% character(0)))
@@ -1789,15 +1790,7 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
           row <- datasets[idx, , drop = FALSE]
           output_id <- paste0("compare_plot_", idx)
 
-          #### DEBUG
-          message("Attempting to build idx=", idx)
-          ####
-
           output[[output_id]] <- renderPlotly({
-            
-            #### DEBUG
-            message("rendering idx=", idx, " plot_type=", plot_type)
-            ####
 
             current_state <- selected_dataset()
             req(current_state)
