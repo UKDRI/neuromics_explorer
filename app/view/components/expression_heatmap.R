@@ -27,7 +27,7 @@ heatmap_info_ui <- function() {
       tags$p(
         style = "margin: 0 0 6px;",
         tags$b("One cell = one log\u2082FC."),
-        " A gene can appears more than once inside the same DE category (X-axis) e.g. the same gene
+        " A gene can appears more than once inside the same Contrast / DE category (X-axis) e.g. the same gene
          measured across several cell types in single-cell dataset, or across several samples,
          replicates or contrasts. Those values have to be collapsed into the single number the
          cell can show."
@@ -55,7 +55,7 @@ heatmap_info_ui <- function() {
       tags$p(
         style = "margin: 0 0 6px;",
         tags$b("So for a dataset with multiple variables"),
-        ", you may want to switch the X-axis to something more appropriate than the default 'DE category'. That way
+        ", you may want to switch the X-axis to something more appropriate than the default 'Contrast / DE category'. That way
          nothing is collapsed and each column is shown and you can see where the signal actually comes from."
       ),
 
@@ -108,7 +108,7 @@ heatmap_server <- function(id, selected_dataset,
     }
 
     group_label_map <- c(
-      de_category = "DE category",
+      de_category = "Contrast / DE category",
       cluster_id = "Cluster",
       cell_type = "Cell type",
       condition_a = "Condition A",
@@ -172,19 +172,37 @@ heatmap_server <- function(id, selected_dataset,
 
       req(nrow(top_df) > 0)
 
-      top_gene_symbols <- unique(top_df$gene_symbol)
       selected_terms <- input$heatmap_terms %||% character(0)
       selected_terms <- selected_terms[nzchar(selected_terms)]
-      all_genes <- unique(c(top_gene_symbols, selected_terms))
+      # top_gene_symbols <- unique(top_df$gene_symbol)
+      # all_genes <- unique(c(top_gene_symbols, selected_terms))
+      # fetch_expression_goi(
+      #   lab_source = ds$lab_source,
+      #   study_id = ds$study_id,
+      #   genes = all_genes,
+      #   limit = 5000L
+      # )
 
       ds <- selected_dataset()
       req(ds)
-      fetch_expression_goi(
-        lab_source = ds$lab_source,
-        study_id = ds$study_id,
-        genes = all_genes,
-        limit = 5000L
-      )
+
+      goi_df <- if (length(selected_terms) > 0) {
+        fetch_expression_goi(
+          lab_source = ds$lab_source,
+          study_id = ds$study_id,
+          genes = selected_terms,
+          limit = 5000L
+        )
+      } else NULL
+
+      if (is.null(goi_df) || nrow(goi_df) == 0) return(top_df)
+
+      # Align columns from '/expression/top-de' vs '/expression/goi'
+      # Duplicate gene x group rows are expected and are collapsed later by pick_strongest().
+      common_cols <- union(names(top_df), names(goi_df))
+      for (col in setdiff(common_cols, names(top_df))) top_df[[col]] <- NA
+      for (col in setdiff(common_cols, names(goi_df))) goi_df[[col]] <- NA
+      rbind(top_df[, common_cols, drop = FALSE], goi_df[, common_cols, drop = FALSE])
 
     }) |>
       bindCache(
@@ -210,7 +228,7 @@ heatmap_server <- function(id, selected_dataset,
           any(!is.na(df$padj)) &&
           any(!is.na(df$log2fc)))
         ) {
-          choices[["DE category"]] <- "de_category"
+          choices[["Contrast / DE category"]] <- "de_category"
         }
       }
       # or
@@ -222,7 +240,7 @@ heatmap_server <- function(id, selected_dataset,
       #     next
       #   }
       #   if (has_multiple_values(df, candidate)) {
-      #     choices[[group_label_map[[candidate]]]] <- candidate  #choices[["DE category"]] <- "de_category"
+      #     choices[[group_label_map[[candidate]]]] <- candidate  #choices[["Contrast / DE category"]] <- "de_category"
       #   }
       # }
       choices
@@ -328,6 +346,7 @@ heatmap_server <- function(id, selected_dataset,
             tickangle = 45),
           yaxis = list(title = "",
                        automargin = TRUE,
+                       autorange  = "reversed",    # searched genes at the top without touching the goi-first ordering that builds `mat`
                        tickmode   = "array",
                        tickvals   = seq_along(rownames(mat)) - 1,
                        ticktext   = rownames(mat),

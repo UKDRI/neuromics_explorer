@@ -60,7 +60,7 @@ violin_server <- function(id, de_data, selected_dataset, padj_thresh, lfc_thresh
     }
 
     metadata_label_map <- c(
-      de_category = "DE category",
+      de_category = "Contrast / DE category",
       cluster_id = "Cluster",
       cell_type = "Cell type",
       condition_a = "Condition A",
@@ -188,13 +188,13 @@ violin_server <- function(id, de_data, selected_dataset, padj_thresh, lfc_thresh
       }
 
       if (!all(c("padj", "log2fc") %in% names(df))) {
-        return(rep("No", nrow(df)))
+        return(rep("No change", nrow(df)))
       }
 
       dplyr::case_when(
         !is.na(df$padj) & df$padj < padj_thresh() & !is.na(df$log2fc) & df$log2fc > lfc_thresh() ~ "Up",
         !is.na(df$padj) & df$padj < padj_thresh() & !is.na(df$log2fc) & df$log2fc < -lfc_thresh() ~ "Down",
-        TRUE ~ "No"
+        TRUE ~ "No change"
       )
     }
 
@@ -308,7 +308,7 @@ violin_server <- function(id, de_data, selected_dataset, padj_thresh, lfc_thresh
             (all(c("padj", "log2fc") %in% names(df)) &&
              any(!is.na(df$padj)) &&
              any(!is.na(df$log2fc)))) {
-          choices[["DE category"]] <- "de_category"
+          choices[["Contrast / DE category"]] <- "de_category"
         } else if (
           has_values(df, "de_category") ||
           has_values(df, "comparison") ||
@@ -316,7 +316,7 @@ violin_server <- function(id, de_data, selected_dataset, padj_thresh, lfc_thresh
           any(!is.na(df$padj)) &&
           any(!is.na(df$log2fc)))
         ) {
-          choices[["DE category"]] <- "de_category"
+          choices[["Contrast / DE category"]] <- "de_category"
         }
 
         for (candidate in names(metadata_label_map)[names(metadata_label_map) != "de_category"]) {

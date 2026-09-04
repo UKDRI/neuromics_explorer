@@ -48,7 +48,7 @@ histogram_server <- function(id, selected_dataset, source_data) {
     )
 
     group_label_map <- c(
-      de_category = "DE category",
+      de_category = "Contrast / DE category",
       cluster_id = "Cluster",
       cell_type = "Cell type",
       condition_a = "Condition A",

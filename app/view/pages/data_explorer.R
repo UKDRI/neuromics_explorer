@@ -36,6 +36,7 @@ box::use(
   app/view/components/signature_explorer[signature_explorer_ui, signature_explorer_server],
   app/view/components/signature_adapters/drug_panel_adapter[drug_rank_adapter],
   app/view/components/helpers/de_helpers[build_de_category, pick_strongest],
+  app/view/components/expression_heatmap[heatmap_info_ui],
   app/view/pages/gene_dataset_selector[gene_selector_ui, gene_selector_server, parse_json_text],
   app/view/pages/explore_sidebar[sidebar_ui, sidebar_server],
   app/logic/api/api_client[fetch_all_datasets, fetch_datasets_for_terms, fetch_expression_table, fetch_expression_volcano,
@@ -385,7 +386,7 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
 
     group_label <- function(col_name) {
       labels <- c(
-        de_category = "DE category",
+        de_category = "Contrast / DE category",
         cluster_id = "Cluster",
         cell_type = "Cell type",
         condition_a = "Condition A",
@@ -421,7 +422,7 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
           any(!is.na(df$padj)) &&
           any(!is.na(df$log2fc))) {
         return(list(
-          name = "DE category",
+          name = "Contrast / DE category",
           values = build_de_category(df, padj_thresh, lfc_thresh, cols)
         ))
       }
@@ -490,7 +491,7 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
            (all(c("padj", "log2fc") %in% cols) &&
             any(!is.na(df$padj)) &&
             any(!is.na(df$log2fc))))) {
-        choices[["DE category"]] <- "de_category"
+        choices[["Contrast / DE category"]] <- "de_category"
       }
 
       candidates <- c("cluster_id", "cell_type", "condition_a", "condition_b", "sample_a", "sample_b", "tissue", "sex", "age", "cell_id")
@@ -631,7 +632,7 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
       } else {
         compare_violin_group(df, padj_thresh, lfc_thresh, cols)$values
       }
-      group_name <- if (identical(x_axis, "de_category")) "DE category" else group_label(x_axis)
+      group_name <- if (identical(x_axis, "de_category")) "Contrast / DE category" else group_label(x_axis)
 
       plot_df <- df |>
         dplyr::mutate(
@@ -854,6 +855,7 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
           xaxis = list(title = group_label(group_col), tickangle = -35),
           yaxis = list(title = "", 
                        automargin = TRUE,
+                       autorange = "reversed",    # puts searched genes at the top
                        tickmode   = "array",
                        tickvals   = seq_along(rownames(mat)) - 1,
                        ticktext   = rownames(mat),
@@ -1748,21 +1750,25 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
         )
       }
 
-      tags$div(
-        style = "display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 14px;",
-        lapply(seq_len(nrow(datasets)), function(i) {
-          row <- datasets[i, , drop = FALSE]
-          card(
-            full_screen = TRUE,
-            card_header(
-              paste0(row$dataset_name[1], " · ", row$omic_type[1], " · ", row$lab_source[1])
-            ),
-            card_body(
-              plotlyOutput(session$ns(paste0("compare_plot_", i)), height = "420px") |> withSpinner(
-                type = 1, caption = "Loading plot...", color = "#5b5b5b")
+      tagList(
+        tags$div(
+          style = "display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 14px;",
+          lapply(seq_len(nrow(datasets)), function(i) {
+            row <- datasets[i, , drop = FALSE]
+            card(
+              full_screen = TRUE,
+              card_header(
+                paste0(row$dataset_name[1], " · ", row$omic_type[1], " · ", row$lab_source[1])
+              ),
+              card_body(
+                plotlyOutput(session$ns(paste0("compare_plot_", i)), height = "420px") |> withSpinner(
+                  type = 1, caption = "Loading plot...", color = "#5b5b5b")
+              )
             )
-          )
-        })
+          })
+        ),
+        # Shared explainer, rendered once below the whole grid rather than inside each card
+        if (identical(sidebar_vals$plot_type(), "Heatmap")) heatmap_info_ui()
       )
     })
 
