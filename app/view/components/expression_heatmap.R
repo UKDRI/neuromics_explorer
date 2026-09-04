@@ -174,35 +174,43 @@ heatmap_server <- function(id, selected_dataset,
 
       selected_terms <- input$heatmap_terms %||% character(0)
       selected_terms <- selected_terms[nzchar(selected_terms)]
-      # top_gene_symbols <- unique(top_df$gene_symbol)
-      # all_genes <- unique(c(top_gene_symbols, selected_terms))
-      # fetch_expression_goi(
-      #   lab_source = ds$lab_source,
-      #   study_id = ds$study_id,
-      #   genes = all_genes,
-      #   limit = 5000L
-      # )
+
+      # Follows Plot tab's "Which genes are interesting, and how do they behave everywhere?"
+      # Thresholds control	which genes are picked; Good when there are	many columns e.g. clusters, cell types
+      top_gene_symbols <- unique(top_df$gene_symbol)
+      all_genes <- unique(c(top_gene_symbols, selected_terms))
 
       ds <- selected_dataset()
       req(ds)
+      fetch_expression_goi(
+        lab_source = ds$lab_source,
+        study_id = ds$study_id,
+        genes = all_genes,
+        limit = 5000L
+      )
 
-      goi_df <- if (length(selected_terms) > 0) {
-        fetch_expression_goi(
-          lab_source = ds$lab_source,
-          study_id = ds$study_id,
-          genes = selected_terms,
-          limit = 5000L
-        )
-      } else NULL
+      # # VS
+      # # Follows Compare tab's "Show me only the cells that passed my thresholds"
+      # # Thresholds control only which cells are drawn; Good when there are a few columns e.g. Up / Down / No change
+      # ds <- selected_dataset()
+      # req(ds)
+      # goi_df <- if (length(selected_terms) > 0) {
+      #   fetch_expression_goi(
+      #     lab_source = ds$lab_source,
+      #     study_id = ds$study_id,
+      #     genes = selected_terms,
+      #     limit = 5000L
+      #   )
+      # } else NULL
 
-      if (is.null(goi_df) || nrow(goi_df) == 0) return(top_df)
+      # if (is.null(goi_df) || nrow(goi_df) == 0) return(top_df)
 
-      # Align columns from '/expression/top-de' vs '/expression/goi'
-      # Duplicate gene x group rows are expected and are collapsed later by pick_strongest().
-      common_cols <- union(names(top_df), names(goi_df))
-      for (col in setdiff(common_cols, names(top_df))) top_df[[col]] <- NA
-      for (col in setdiff(common_cols, names(goi_df))) goi_df[[col]] <- NA
-      rbind(top_df[, common_cols, drop = FALSE], goi_df[, common_cols, drop = FALSE])
+      # # Align columns from '/expression/top-de' vs '/expression/goi'
+      # # Duplicate gene x group rows are expected and are collapsed later by pick_strongest().
+      # common_cols <- union(names(top_df), names(goi_df))
+      # for (col in setdiff(common_cols, names(top_df))) top_df[[col]] <- NA
+      # for (col in setdiff(common_cols, names(goi_df))) goi_df[[col]] <- NA
+      # rbind(top_df[, common_cols, drop = FALSE], goi_df[, common_cols, drop = FALSE])
 
     }) |>
       bindCache(
