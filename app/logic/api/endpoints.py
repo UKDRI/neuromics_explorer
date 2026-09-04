@@ -374,7 +374,8 @@ def _dataset_unions(
               log2fc, pvalue, padj,
               abundance_a, abundance_b,
               pct_expressed_a, pct_expressed_b,
-              sample_a, sample_b, condition_a, condition_b, de_category, cell_type
+              sample_a, sample_b, condition_a, condition_b, de_category, cell_type,
+              cluster_id, tissue, sex, age
             FROM {view}
             WHERE 1 = 1
               {term_clause}
