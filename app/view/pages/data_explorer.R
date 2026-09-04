@@ -584,30 +584,20 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
           ),
         marker = list(size = 6, opacity = 0.7)
       ) |>
-        plotly::add_segments(
-          x = -x_limit * 1.1,
-          xend = x_limit * 1.1,
-          y = -log10(padj_thresh),
-          yend = -log10(padj_thresh),
-          line = list(dash = "dot", color = "#7F8C8D", width = 1),
-          showlegend = FALSE,
-          hoverinfo = "skip"
-        ) |>
-        plotly::add_segments(
-          x = lfc_thresh, xend = lfc_thresh,
-          y = 0, yend = y_limit * 1.05,
-          line = list(dash = "dot", color = "#7F8C8D", width = 1),
-          showlegend = FALSE,
-          hoverinfo = "skip"
-        ) |>
-        plotly::add_segments(
-          x = -lfc_thresh, xend = -lfc_thresh,
-          y = 0, yend = y_limit * 1.05,
-          line = list(dash = "dot", color = "#7F8C8D", width = 1),
-          showlegend = FALSE,
-          hoverinfo = "skip"
-        ) |>
         plotly::layout(
+          shapes = list(
+            # Horizontal padj threshold line
+            list(type = "line", x0 = -x_limit * 1.1, x1 = x_limit * 1.1,
+                 y0 = -log10(padj_thresh), y1 = -log10(padj_thresh),
+                 line = list(dash = "dot", color = "#7F8C8D", width = 1)),
+            # Vertical lfc threshold lines (coincide at 0 when lfc_thresh = 0)
+            list(type = "line", x0 =  lfc_thresh, x1 =  lfc_thresh,
+                 y0 = 0, y1 = y_limit * 1.05,
+                 line = list(dash = "dot", color = "#7F8C8D", width = 1)),
+            list(type = "line", x0 = -lfc_thresh, x1 = -lfc_thresh,
+                 y0 = 0, y1 = y_limit * 1.05,
+                 line = list(dash = "dot", color = "#7F8C8D", width = 1))
+          ),
           title = list(text = dataset_name, x = 0.02),
           xaxis = list(title = "log2 Fold Change"),
           yaxis = list(title = "-log10(padj / p-value)"),
@@ -841,10 +831,13 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
         goi_terms_present,
         agg$gene_symbol
       ))  # ensure goi included in heatmap and prevents duplicate rows collapsing into one label
-      if (!exists("all_groups", inherits = FALSE) || length(all_groups) == 0) {
-        all_groups <- unique(agg$group)
-      }
-      group_levels <- all_groups[!is.na(all_groups)]  # group_levels <- unique(agg$group)
+
+      if (!exists("all_groups", inherits = FALSE)) all_groups <- character(0)
+      # Union keeps the lab's own category ordering (and any category that is empty for this dataset)
+      # while guaranteeing every group in `agg` has a column.
+      group_levels <- unique(c(all_groups[!is.na(all_groups)], agg$group))    # Fixes "NAs are not allowed in subscripted assignments".
+      group_levels <- group_levels[!is.na(group_levels)]
+
       gene_levels  <- gene_levels[!is.na(gene_levels)]
       mat <- matrix(
         NA_real_,
