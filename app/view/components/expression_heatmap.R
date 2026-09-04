@@ -10,6 +10,70 @@ box::use(
   app/view/components/helpers/de_helpers[build_de_category, pick_strongest],
 )
 
+#' Collapsible context explaining how one heatmap cell is produced.
+#'
+#' @export
+heatmap_info_ui <- function() {
+  tags$details(
+    class = "alert alert-info",
+    style = "font-size: 12px; line-height: 1.5; padding: 8px 12px; margin: 10px 0 0;",
+    tags$summary(
+      style = "cursor: pointer; font-weight: 600; font-size: 13px;",
+      "How each heatmap cell is calculated"
+    ),
+    tags$div(
+      style = "margin-top: 8px;",
+
+      tags$p(
+        style = "margin: 0 0 6px;",
+        tags$b("One cell = one log\u2082FC."),
+        " A gene can appears more than once inside the same DE category (X-axis) e.g. the same gene
+         measured across several cell types in single-cell dataset, or across several samples,
+         replicates or contrasts. Those values have to be collapsed into the single number the
+         cell can show."
+      ),
+
+      tags$p(
+        style = "margin: 0 0 6px;",
+        tags$b("Strongest change used."),
+        " Of the duplicate values, the heatmap cells display the largest absolute log\u2082FC, i.e.
+         (the largest change), whether up or down. The ", tags$i("mean/ average"), " is avoided due to a bias towards",
+        tags$i("0"), ", which would render it white and read as \u201cno change\u201d instead of \u201cmixed\u201d. The",
+        tags$i("most statistically significant"),
+        " was also avoided due to bias towards tiny but significant changes, which may not be biologically meaningful"
+      ),
+
+      tags$p(
+        style = "margin: 0 0 6px; padding: 6px 8px; background: rgba(255,255,255,0.55); border-radius: 4px;",
+        tags$b("Bias to be aware of: "),
+        "the strongest value wins even when it is the least reliable. If a gene shifts
+         0.3 log\u2082FC across 5,000 astrocytes (padj 1e-20) but 4.2 log\u2082FC across just
+         12 microglia (padj 0.4), the cell shows ", tags$b("4.2"),
+        " \u2014 a large change supported by a handful of cells."
+      ),
+
+      tags$p(
+        style = "margin: 0 0 6px;",
+        tags$b("So for a dataset with multiple variables"),
+        ", you may want to switch the X-axis to something more appropriate than the default 'DE category'. That way
+         nothing is collapsed and each column is shown and you can see where the signal actually comes from."
+      ),
+
+      tags$p(
+        style = "margin: 0;",
+        tags$b("How the DE labels are categorised: "),
+        "where a lab supplied its own contrast labels, those are shown as-is (which is why some
+         datasets show contrast names such as ",
+        tags$code("APOE3__APOE4"), " which signifies", tags$code("APOE3 vs APOE4"), " rather than Up/Down).
+         Otherwise each row is labelled from the sidebar's significant threshold filters: \n ",
+        tags$b("Up"), " = significant and increased, ",
+        tags$b("Down"), " = significant and decreased, ",
+        tags$b("No change"), " = everything else."
+      )
+    )
+  )
+}
+
 #' @export
 heatmap_ui <- function(id) {
   ns <- NS(id)
@@ -17,7 +81,8 @@ heatmap_ui <- function(id) {
     selectInput(ns("x_axis"), "X-axis", choices = character(0)),
     uiOutput(ns("gene_selector_ui")),
     plotlyOutput(ns("plot"), height = "600px") |> withSpinner(
-      type = 1, caption = "Loading plot...", color = "#5b5b5b")
+      type = 1, caption = "Loading plot...", color = "#5b5b5b"),
+    heatmap_info_ui()
   )
 }
 
@@ -242,6 +307,9 @@ heatmap_server <- function(id, selected_dataset,
           c(1, "#C0392B")    # red   (up)
         ),
         zmid = 0, zmin = -z_limit, zmax = z_limit,
+        colorbar = list(title = list(text = "log\u2082FC", side = "right", font = list(size = 11)),
+                        thickness = 14, len = 0.6, ticks = "outside",
+                        tickfont = list(size = 10), outlinewidth = 0),
         hovertemplate = "%{y} · %{x}<br>log2FC: %{z:.3f}<extra></extra>"
         # hovertemplate = ifelse(
         #   is.na(df$condition_b),

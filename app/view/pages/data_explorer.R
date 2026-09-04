@@ -844,6 +844,9 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
           c(1, "#C0392B")
         ),
         zmid = 0,
+        colorbar = list(title = list(text = "log\u2082FC", side = "right", font = list(size = 11)),
+                        thickness = 12, len = 0.6, ticks = "outside",
+                        tickfont = list(size = 9), outlinewidth = 0),
         hovertemplate = "%{y} · %{x}<br>log2FC: %{z:.3f}<extra></extra>"
       ) |>
         plotly::layout(
