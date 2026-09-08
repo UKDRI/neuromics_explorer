@@ -160,3 +160,139 @@ h1, h2, h3, h4, h5, h6 {
   height: 50px !important;
   width: auto;
 }
+
+/* ── Privacy & cookies page ───────────────────────────────────────────── */
+.nex-privacy { max-width: 960px; padding-top: 24px; padding-bottom: 40px; }
+
+.nex-privacy-head { margin-bottom: 20px; }
+
+.nex-privacy-lede {
+  font-size: 1.05rem;
+  line-height: 1.6;
+  color: #2c3e52;
+  max-width: 72ch;
+}
+
+.nex-privacy-meta { font-size: 0.85rem; color: #8d99a8; margin-bottom: 0; }
+
+.nex-privacy-card {
+  background: var(--ukdri-white);
+  border: 1px solid var(--ukdri-light-grey);
+  border-radius: 12px;
+  box-shadow: 0 4px 14px rgba(8, 36, 75, 0.06);
+  padding: 20px 24px;
+  margin-bottom: 20px;
+}
+
+.nex-privacy-card h3 {
+  font-size: 1.25rem;
+  margin-top: 0;
+  margin-bottom: 4px;
+}
+
+.nex-privacy-subhead { margin-top: 28px !important; }
+
+.nex-privacy-note { font-size: 0.85rem; color: #6b7889; }
+
+.nex-choice-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 20px;
+  padding: 16px 0;
+  border-top: 1px solid #eef1f4;
+}
+
+.nex-choice-copy { flex: 1 1 auto; }
+
+.nex-choice-title {
+  font-size: 1rem;
+  margin: 0 0 4px 0;
+  color: var(--ukdri-dark-blue);
+}
+
+.nex-choice-detail {
+  font-size: 0.88rem;
+  line-height: 1.55;
+  color: #4b5968;
+  margin: 0;
+  max-width: 68ch;
+}
+
+.nex-choice-control { flex: 0 0 auto; padding-top: 2px; }
+
+.nex-choice-switch .form-check-input { width: 2.6em; height: 1.3em; cursor: pointer; }
+
+.nex-choice-switch .form-check-input:checked {
+  background-color: var(--ukdri-sky-blue);
+  border-color: var(--ukdri-petrol-blue);
+}
+
+.nex-choice-locked {
+  font-size: 0.8rem;
+  color: #6b7889;
+  background: #eef1f4;
+  border-radius: 999px;
+  padding: 3px 10px;
+  white-space: nowrap;
+}
+
+.nex-privacy-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid #eef1f4;
+}
+
+.nex-privacy-status { font-size: 0.85rem; color: var(--ukdri-petrol-blue); }
+
+.nex-privacy-table { font-size: 0.85rem; }
+
+.nex-privacy-table th {
+  color: var(--ukdri-dark-blue);
+  font-weight: 600;
+  white-space: nowrap;
+  border-bottom: 2px solid var(--ukdri-light-grey);
+}
+
+.nex-privacy-table td { vertical-align: top; line-height: 1.5; }
+.nex-privacy-table td code { font-size: 0.78rem; color: var(--ukdri-dark-grey); }
+.nex-privacy-table tbody tr:first-child td { border-top: 0; }
+
+.nex-privacy-list { font-size: 0.9rem; line-height: 1.6; max-width: 76ch; }
+.nex-privacy-list li { margin-bottom: 8px; }
+
+.nex-privacy-idbox {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  background: #f4f7fb;
+  border: 1px solid var(--ukdri-light-grey);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+}
+
+.nex-privacy-id {
+  font-size: 0.85rem;
+  color: var(--ukdri-dark-blue);
+  word-break: break-all;
+}
+
+.nex-privacy-dl { font-size: 0.9rem; margin-bottom: 0; }
+
+.nex-privacy-dl dt {
+  color: var(--ukdri-dark-blue);
+  font-weight: 600;
+  margin-top: 14px;
+}
+
+.nex-privacy-dl dd {
+  margin-left: 0;
+  margin-bottom: 0;
+  line-height: 1.6;
+  color: #35485e;
+  max-width: 76ch;
+}
