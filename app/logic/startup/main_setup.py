@@ -33,6 +33,7 @@ from app.logic.startup.usage_metrics import (
     get_client_id,
     initialise_usage_metrics,
     log_request_metrics,
+    tracking_opted_out,
 )
 from app.logic.api.endpoints import router as api_router
 from fastapi.staticfiles import StaticFiles
@@ -116,7 +117,9 @@ async def track_usage_metrics(request, call_next):
     request.state.session_id = session_id
     started_at = datetime.now(timezone.utc)
     response = await call_next(request)
-    if "nex_session_id" not in request.cookies:
+    # The session cookie exists only to group requests for metrics, so it is not
+    # "strictly necessary" and must not be set once the visitor has opted out.
+    if "nex_session_id" not in request.cookies and not tracking_opted_out(request):
         response.set_cookie("nex_session_id", session_id, httponly=True, samesite="lax")
 
     # Get db_path and write lock if they exist in app state (i.e. if startup successful), otherwise skip tracking to avoid errors during startup

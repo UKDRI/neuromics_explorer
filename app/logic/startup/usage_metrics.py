@@ -31,10 +31,17 @@ TRACKING_EXCLUDED_PATTERNS = (
     "/api/datasets/*/*/embeddings",
 )
 SEARCH_EVENT_PATHS = {"/api/datasets/search"}
-# Time window to suppress duplicated or inflated entries for the same user IP, path, method, and status code
+# Time window to suppress duplicated or inflated entries for the same user IP, path,
+# method, and status code
 DEDUP_WINDOW_SECONDS = 3.0
 RECENT_REQUEST_CACHE_LIMIT = 512
-
+# Visitors may opt out of first-party usage metrics from the privacy page.
+# The browser records the choice in the nex_metrics cookie (static/nex_consent.js)
+# and Shiny forwards it upstream as a header, because the Shiny frontend is what
+# the browser talks to directly.
+OPT_OUT_COOKIE = "nex_metrics"
+OPT_OUT_HEADER = "x-nex-metrics"
+OPT_OUT_VALUE = "off"
 
 def _connect_metrics_db(metrics_db_path: str) -> sqlite3.Connection:
     con = sqlite3.connect(metrics_db_path, timeout=5.0)
@@ -110,9 +117,26 @@ def initialise_usage_metrics(metrics_db_path: str) -> None:
         con.close()
 
 
+def tracking_opted_out(request) -> bool:
+    """
+    Return True when the visitor has declined first-party usage metrics.
+
+    Checked before anything else is derived from the request: an opt-out means
+    no row is written at all, rather than a row with the identifier stripped.
+    """
+    header = (request.headers.get(OPT_OUT_HEADER) or "").strip().lower()    # frontend forwards the cookie as header
+    if header == OPT_OUT_VALUE:
+        return True
+    cookie = (request.cookies.get(OPT_OUT_COOKIE) or "").strip().lower()    # frontend sets cookie directly
+    return cookie == OPT_OUT_VALUE
+
+
 def get_client_id(request) -> str | None:
     """
     Return a stable client identifier for usage analytics.
+
+    Returns None when the visitor has opted out, which stops
+    log_request_metrics() before it writes anything.
 
     Preference order:
       1. Browser-generated UUID supplied via X-NEX-User-ID header (from static/get_user_id.js).
@@ -124,11 +148,24 @@ def get_client_id(request) -> str | None:
     The UUID-based identifiers are preferred because multiple users may
     share the same IP address and individual users may change IPs over time.
     """
+    # An opt-out must never fall through to the IP-based branches below;
+    # that would replace a random UUID with personal data.
+    if tracking_opted_out(request):
+        return None
+
     return(
         # Browser-based user identifier
         request.headers.get("x-nex-user-id")
-        or request.cookies.get("nex_user_id")   # TODO: consider implementing cookie first to use IP: document.cookie: 'nex_client_ip=144.82.114.207; nex_user_id=ffcc7348-0dd2-4941-8f7d-1d272403aef2'
-
+        or request.cookies.get("nex_user_id")
+        # TODO (do not implement as written): setting the client IP in a cookie
+        # alongside the UUID, e.g.
+        #   document.cookie: 'nex_client_ip=144.82.114.207; nex_user_id=ffcc7348-...'
+        # would remove the header/cookie race, but an IP address is personal
+        # data, so storing one on the device needs consent under PECR reg. 6 and
+        # would undercut the whole reason the random UUID exists.
+        # It survive an opt-out, since the cookie is written by the browser rather
+        # Suggestion: if the race needs fixing, do so by making the UUID available 
+        # earlier e.g. in nex_consent.js
         # IP-based fallbacks
         or request.headers.get("x-forwarded-for", "").split(",")[0].strip()
         or (request.headers.get("x-real-ip") or "").strip()
