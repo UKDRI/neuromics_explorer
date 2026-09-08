@@ -18,6 +18,8 @@ box::use(
   app/view/pages/explore_sidebar[sidebar_ui, sidebar_server],
   app/view/pages/data_explorer[explorer_ui, explorer_server],
   app/view/pages/data_submit[submit_ui, submit_server],
+  app/view/pages/privacy_page[privacy_ui],
+  app/view/components/consent_banner[notice_bar_ui, privacy_nav_link_ui],
 )
 
 # Register app/static as a Shiny resource path so the logo and custom stylesheet are served correctly.
@@ -47,7 +49,12 @@ ui <- page_navbar(
   ),
   
   # ── Google Analytics — add exactly once here ──────────────────────────
+
+  # Consent state is inlined before the tag so Google Consent Mode only honours the
+  # default that reaches dataLayer before gtag first fires, i.e. static/nex_consent.js
+  # races the async fetching of consent state to set dataLayer before gtag is loaded.
   tags$head(
+    includeScript(file.path(static_path, "nex_consent.js")),
     tags$script(
       async = NA,
       src   = "https://www.googletagmanager.com/gtag/js?id=G-QNFVT5KKH5"
@@ -59,10 +66,18 @@ ui <- page_navbar(
        gtag("config", "G-QNFVT5KKH5");'
     ))
   ),
-  
+
   # Custom CSS and styles
   header = tags$head(
-    tags$link(rel = "stylesheet", type = "text/css", href = "static/custom.css"),
+    # Cache-busted on file mtime - without it, the browser serves a stale custom.css
+    tags$link(
+      rel = "stylesheet",
+      type = "text/css",
+      href = paste0(
+        "static/custom.css?v=",
+        as.integer(file.mtime(file.path(static_path, "custom.css")))
+      )
+    ),
     tags$style(HTML("
       /* Hide navbar items on homepage */
       .hide-nav .navbar-nav { display: none !important; }
@@ -153,6 +168,13 @@ ui <- page_navbar(
       )
     ),
     
+    nav_panel(
+      title = "Privacy & cookies",
+      icon = icon("user-shield"),
+      value = "privacy",
+      privacy_ui()
+    ),
+    
     # nav_panel(
     #   title = "Documentation",
     #   icon = icon("file-alt"),
@@ -230,10 +252,18 @@ ui <- page_navbar(
   #     )
   #   )
   # ),
-  
+
   # Right-aligned items
   nav_spacer(),
-  
+
+  # Top-right corner link - ensures the privacy page is easily reachable if the privacy notice bar is dismissed
+  privacy_nav_link_ui(),
+
+  # Footer data privacy notice - rendered here once so it is present on every page;
+  # nex_consent.js reparents it to <body> on load, because bslib puts the footer
+  # inside the tab-content wrapper where position: fixed does not pin reliably.
+  footer = notice_bar_ui(),
+
   # nav_panel(
   #   title = "Feedback",
   #   icon = icon("comment-dots"),
@@ -260,6 +290,7 @@ server <- function(input, output, session) {
     explore_data = "explore",
     submit_data = "submit",
     getting_started = "getting_started",
+    privacy = "privacy",
     documentation = "documentation",
     tutorials = "tutorials",
     about_us = "about",
@@ -397,7 +428,11 @@ server <- function(input, output, session) {
   # sidebar_server("filters")
   explorer_server("explore", initial_link = reactive(shared_link()))  # Pass shared_link to fetch correct dataset
   submit_server("submit")
-  
+  # The notice bar's "privacy notice" link sets this from nex_consent.js.
+  observeEvent(input$nex_open_privacy, {
+    shiny::updateNavbarPage(session, "main_nav", selected = "privacy")
+  }, ignoreInit = TRUE)
+
   # ── About page — rendered from Rmd ───────────────────────────────
   output$about_page <- renderUI({
     # Iframe full shiny integration
