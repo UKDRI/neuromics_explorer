@@ -5,12 +5,14 @@ description: Build, tag, and deploy Neuromics Explorer's Shiny frontend and Fast
 
 # Bring up Neuromics Explorer stack
 
-**Pre-condition** the user must connect to the server to continue invoking this skill.
+Source of truth is `docker-compose*.yml` + `Dockerfile`. If the files have changed and conflicts with this or other skills, trust them and flag the mismatch to the user, detailing the differences and a single, simple suggestion where appropriate.
+
+**Pre-condition** the user must be connected to the server to invoke this skill instead of running it locally. Do not ty to connect or check the server, the skill should be invoked only after the user has already done so. If not, ask the user to connect first while providing the user the ssh command, then re-run skill.
 
 ## Connect with ssh
 
 ```bash
-ssh dammy@128.40.163.137    # Abebe
+ssh dammy@128.40.163.137    # Abebe, not run just showing command used to prompt user to connect first
 ```
 
 # Deploying Neuromics Explorer with Docker
@@ -22,7 +24,7 @@ The app ships as two images built from a single multi-stage `Dockerfile`:
 | `shiny-frontend` | `shesanislandukdri/neuromics_explorer_shiny` | 4848 |
 | `fastapi-backend` | `shesanislandukdri/neuromics_explorer_backend` | 7000 |
 
-Compose files layer: `docker-compose.yml` (base) + `docker-compose.dev.yml` (dev override, host port `1122`, `${PWD}/data_dev` volume, `latest-dev` tag) **or** `docker-compose.prod.yml` (production override, host port `3838`, `${PWD}/data` volume, `latest` tag).
+Compose files layer: `docker-compose.yml` (base) + `docker-compose.dev.yml` (dev override, host port `1122`, `data_dev` volume, `latest-dev` tag) **or** `docker-compose.prod.yml` (production override, host port `3838`, `data` volume, `latest` tag) + `/srv/neuromics/abebe.{dev,prod}.yml` for team/organisational specific overrides.
 
 ## CRITICAL rules
 
@@ -37,7 +39,7 @@ Ask the user for the version tag first (e.g. `1.2.1-dev`) — never reuse an old
 
 ```bash
 cd /mnt/Data/neuromics/neuromics_explorer
-git checkout dev    # <-- This should only if user is not currently on dev branch or to otherwise make sure it is checked out
+git checkout dev    # <-- This should only be used if user is not currently on dev branch or to otherwise make sure it is checked out
 git pull
 
 DEV_TAG=1.2.1-dev   # <-- confirm with the user, if incorrect then list what was previously used, ask for correct tag and set here
@@ -118,7 +120,10 @@ If any steps fail, stop, report the issue and actual error output, and instead o
 
 Collate above checks and results into a report under `/mnt/Data/neuromics/logs/deploy_report_$(date +%Y%m%d_%H%M%S).txt` and show the user the path to it. Tail logs shows last 80 lines of container as `/mnt/Data/neuromics/logs/<container>_YYYYMMDD_HHMMSS.log`.
 
-
+If needed, make directory for logs:
+```bash
+mkdir -p /mnt/Data/neuromics/logs
+```
 
 ## Update the data
 
@@ -131,7 +136,7 @@ If only the data (or data_dev) has changed, re-run the `docker compose ... up -d
 
 ## Clean up
 
-Remove dangling, unused images to free disk space once new images are built and deployed. This is safe.
+Remove dangling, unused images to free disk space once new images are built and deployed. This is safe so tagged images are kept, and rollback targets survive.
 ```bash
 docker image prune -f
 ```
@@ -139,7 +144,7 @@ docker image prune -f
 ## Common gotchas
 
 - **renv.lock**: missing or out-of-date/ mismatching `renv.lock` in repo root will break R dependencies in frontend image. Always run `renv::status()` to check any issues when dependencies have changed or aren't working/failing to build image. Use `renv::snapshot()` to update after adding/removing R packages; where appropriately needed use `renv::install("packageName@version")` to install a specific version of a package.
-- **Data volume**: dev mounts `data_dev`, prod mounts `data`. A missing `dataset_registry.yml` or `.duckdb` file under the mounted dir makes the backend fail startup. Confirm the data dir exists and is populated before deploying. Highlight any file differences between dev and prod data dirs to the user if they are deploying to prod.
+- **Data volume**: both services mount a host directory at `/app/data` in the container. `docker-compose.dev.yml` overrides only the backend to `./data_dev`; the dev frontend still mounts `./data`. Prod leaves both at `./data`. A missing `dataset_registry.yml` or `.duckdb` under the mounted dir makes the backend fail startup — confirm the dir exists and is populated before deploying. Highlight any file differences between `data/` and `data_dev/` to the user when deploying to prod.
 - **`--platform linux/amd64`** is required — the server is amd64; building on an Apple-silicon machine without it produces arm64 images that won't run there, hence why it is done through the server.
 - **`--no-cache`** guarantees a clean rebuild but is slow (full renv restore + pip install). Drop it only for quick iterations where dependencies are unchanged.
 - **Rollback**: re-tag the previous known-good tag as `latest-dev`/`latest` and re-run the `compose ... up -d` line — no rebuild needed due to error with current new build.
