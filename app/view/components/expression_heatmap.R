@@ -5,9 +5,9 @@ box::use(
   plotly[plotlyOutput, renderPlotly, plot_ly, layout],
   stringi[stri_sort],
   tidyr[pivot_wider],
-  tibble[column_to_rownames],
-  app/logic/api/api_client[fetch_top_de, fetch_expression_goi],
-  app/view/components/helpers/de_helpers[build_de_category, pick_strongest],
+  app/logic/api/api_client[fetch_top_de, fetch_expression_heatmap,
+                           fetch_expression_grouping_options],
+  app/view/components/helpers/de_helpers[pick_strongest],
 )
 
 #' Collapsible context explaining how one heatmap cell is produced.
@@ -95,18 +95,6 @@ heatmap_server <- function(id, selected_dataset,
                            padj_thresh, lfc_thresh, n_genes) {
   moduleServer(id, function(input, output, session) {
     
-    has_values <- function(df, col) {
-      col %in% names(df) &&
-        any(!is.na(df[[col]]) & nzchar(trimws(as.character(df[[col]]))))
-    }
-
-    has_multiple_values <- function(df, col) {
-      if (!col %in% names(df)) return(FALSE)
-      values <- as.character(df[[col]])
-      values <- values[!is.na(values) & nzchar(trimws(values))]
-      length(unique(values)) > 1
-    }
-
     group_label_map <- c(
       de_category = "Contrast / DE category",
       cluster_id = "Cluster",
@@ -167,92 +155,121 @@ heatmap_server <- function(id, selected_dataset,
       )
     })
 
-    heatmap_data <- reactive({
-      ds <- selected_dataset()
-      req(ds)
 
+          # # VS
+          # # Follows Compare tab's "Show me only the cells that passed my thresholds"
+          # # Thresholds control only which cells are drawn; Good when there are a few columns e.g. Up / Down / No change
+          # ds <- selected_dataset()
+          # req(ds)
+          # goi_df <- if (length(selected_terms) > 0) {
+          #   fetch_expression_goi(
+          #     lab_source = ds$lab_source,
+          #     study_id = ds$study_id,
+          #     genes = selected_terms,
+          #     limit = 5000L
+          #   )
+          # } else NULL
+          # if (is.null(goi_df) || nrow(goi_df) == 0) return(top_df)
+
+          # # Align columns from '/expression/top-de' vs '/expression/goi'
+          # # Duplicate gene x group rows are expected and are collapsed later by pick_strongest().
+          # common_cols <- union(names(top_df), names(goi_df))
+          # for (col in setdiff(common_cols, names(top_df))) top_df[[col]] <- NA
+          # for (col in setdiff(common_cols, names(goi_df))) goi_df[[col]] <- NA
+          # rbind(top_df[, common_cols, drop = FALSE], goi_df[, common_cols, drop = FALSE])
+    
+    # Gene set the heatmap plots: top-DE picks which genes are interesting, the searched terms
+    # are always included. No req() on top_df - '/top-de' filters on `WHERE padj < ?`, so data
+    # carrying only p-values (eg hong proteomics has pvalue but no padj) returns zero rows.
+    # Gating = empty x-axis dropdown = blank plot
+    plot_genes <- reactive({
       selected_terms <- input$heatmap_terms %||% character(0)
       selected_terms <- selected_terms[nzchar(selected_terms)]
 
-      # Thresholds control which genes are picked; useful when there are many columns e.g. clusters, cell types
-      # No req() on top_df: '/top-de' endpoint filters on `WHERE padj < ?`, so data carrying only raw
-      # p-values (eg hong proteomics has pvalue but no padj) returns zero rows. Gating the whole reactive
-      # gives an empty x-axis dropdown = blank plot
       top_df <- top_genes()
       top_gene_symbols <- if (nrow(top_df) > 0) unique(top_df$gene_symbol) else character(0)
+
       all_genes <- unique(c(top_gene_symbols, selected_terms))
-
       req(length(all_genes) > 0)
+      all_genes
+    })
 
-      fetch_expression_goi(
+    # Single row of counts per candidate column (eg n_cell_type, n_de_category etc.)
+    # Used to populate X-axis dropdown to filter data by grouping col.)
+    # TODO: change in compare tab, also
+    grouping_opts <- reactive({
+      ds <- selected_dataset()
+      req(ds)
+      fetch_expression_grouping_options(
         lab_source = ds$lab_source,
         study_id = ds$study_id,
-        genes = all_genes,
-        limit = 5000L
+        genes = plot_genes()
       )
-
-      # # VS
-      # # Follows Compare tab's "Show me only the cells that passed my thresholds"
-      # # Thresholds control only which cells are drawn; Good when there are a few columns e.g. Up / Down / No change
-      # ds <- selected_dataset()
-      # req(ds)
-      # goi_df <- if (length(selected_terms) > 0) {
-      #   fetch_expression_goi(
-      #     lab_source = ds$lab_source,
-      #     study_id = ds$study_id,
-      #     genes = selected_terms,
-      #     limit = 5000L
-      #   )
-      # } else NULL
-
-      # if (is.null(goi_df) || nrow(goi_df) == 0) return(top_df)
-
-      # # Align columns from '/expression/top-de' vs '/expression/goi'
-      # # Duplicate gene x group rows are expected and are collapsed later by pick_strongest().
-      # common_cols <- union(names(top_df), names(goi_df))
-      # for (col in setdiff(common_cols, names(top_df))) top_df[[col]] <- NA
-      # for (col in setdiff(common_cols, names(goi_df))) goi_df[[col]] <- NA
-      # rbind(top_df[, common_cols, drop = FALSE], goi_df[, common_cols, drop = FALSE])
-
     }) |>
       bindCache(
         selected_dataset()$lab_source,
         selected_dataset()$study_id,
-        n_genes(),
-        padj_thresh(),
-        lfc_thresh(),
-        paste(input$heatmap_terms %||% character(0), collapse = ",")
+        paste(plot_genes(), collapse = ",")
       )
 
+    # input$x_axis is empty on the first render (the observe() below populates the picker afterwards)
+    # and can hold a stale column after a dataset switch - prevents what looks like a hung plot.
+    #  UI: X-axis dropdown is populated by grouping_opts() and the first valid choice is selected.
+    active_group_col <- reactive({
+      choices <- x_axis_choices()
+      req(length(choices) > 0)
+      col <- input$x_axis
+      if (!isTRUE(col %in% unname(choices))) col <- unname(choices)[1]
+      col
+    })
+
+    # One row per heatmap cell: gene_symbol, group_label, log2fc. DuckDB applies the same
+    # max-abs collapse as pick_strongest(), so nothing is truncated by the API row cap.
+    heatmap_data <- reactive({
+      ds <- selected_dataset()
+      req(ds)
+      group_col <- active_group_col()
+
+      fetch_expression_heatmap(
+        lab_source = ds$lab_source,
+        study_id = ds$study_id,
+        genes = plot_genes(),
+        group_by = group_col,
+        padj_thresh = padj_thresh(),
+        lfc_thresh = lfc_thresh()
+      )
+    }) |>
+      bindCache(
+        selected_dataset()$lab_source,
+        selected_dataset()$study_id,
+        paste(plot_genes(), collapse = ","),
+        active_group_col(),
+        padj_thresh(),
+        lfc_thresh()
+      )
+
+    # Candidate grouping columns, e.g. 'Contrast / DE category' is offered when the lab supplied labels, from
+    # our pipelines, or there are padj + log2fc to derive Up / Down / No change from - matching build_de_category labelling.
+    MAX_GROUPS <- 100L   # gaurds against heatmaps w more columns than is unreadable
     x_axis_choices <- reactive({
-      df <- heatmap_data()
-      # Ensure GOI and top-de rows have de_category column
-      df$de_category <- build_de_category(df, padj_thresh(), lfc_thresh())
+      opts <- grouping_opts()
+      req(nrow(opts) > 0)
+
+      n <- function(col) {
+        v <- opts[[paste0("n_", col)]]
+        if (is.null(v) || length(v) == 0 || is.na(v[1])) 0L else as.integer(v[1])
+      }
+
       choices <- c()
-      for (candidate in names(group_label_map)) {
-        if (has_multiple_values(df, candidate)) {
+      if (n("de_category") > 0 || (n("padj") > 0 && n("log2fc") > 0)) {
+        choices[[group_label_map[["de_category"]]]] <- "de_category"
+      }
+      for (candidate in setdiff(names(group_label_map), "de_category")) {
+        count <- n(candidate)
+        if (count > 1 && count <= MAX_GROUPS) {
           choices[[group_label_map[[candidate]]]] <- candidate
-        } else if (
-          has_values(df, "de_category") ||
-          (all(c("padj", "log2fc") %in% names(df)) &&
-          any(!is.na(df$padj)) &&
-          any(!is.na(df$log2fc)))
-        ) {
-          choices[["Contrast / DE category"]] <- "de_category"
         }
       }
-      # or
-      # for (candidate in names(group_label_map)) {
-      #   if (candidate == "de_category") {
-      #     if (has_values(df, "de_category")) {
-      #       choices[[group_label_map[[candidate]]]] <- candidate
-      #     }
-      #     next
-      #   }
-      #   if (has_multiple_values(df, candidate)) {
-      #     choices[[group_label_map[[candidate]]]] <- candidate  #choices[["Contrast / DE category"]] <- "de_category"
-      #   }
-      # }
       choices
     })
 
@@ -274,24 +291,14 @@ heatmap_server <- function(id, selected_dataset,
     })
 
     output$plot <- renderPlotly({
-      df <- heatmap_data()
+      plot_source <- heatmap_data()
       validate(need(
-        nrow(df) > 0,
+        nrow(plot_source) > 0,
         "No expression rows for these genes. Search for a gene, or relax the significance thresholds."
       ))
 
-      df$de_category <- build_de_category(df, padj_thresh(), lfc_thresh())
-
-      group_col <- input$x_axis
-      if (!group_col %in% names(df)) {
-        choices <- x_axis_choices()
-        req(length(choices) > 0)
-        group_col <- unname(choices)[1]
-      }
-
-      plot_source <- df[, intersect(c("gene_symbol", group_col, "log2fc"), names(df)), drop = FALSE]
-      # plot_source <- df[, c("gene_symbol", group_col, "log2fc"), drop = FALSE]
-      names(plot_source)[names(plot_source) == group_col] <- "group"
+      group_col <- active_group_col()
+      names(plot_source)[names(plot_source) == "group_label"] <- "group"
       plot_source <- plot_source[!is.na(plot_source$gene_symbol) & (!is.na(plot_source$group)), , drop = FALSE]
       req(nrow(plot_source) > 0)
 
@@ -372,7 +379,7 @@ heatmap_server <- function(id, selected_dataset,
         n_genes(),
         padj_thresh(),
         lfc_thresh(),
-        input$x_axis,
+        active_group_col(),   # replaces input$x_axis - plot renders the resolved column
         paste(input$heatmap_terms %||% character(0), collapse = ",")
       )
   })

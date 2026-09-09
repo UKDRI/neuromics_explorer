@@ -24,7 +24,7 @@ box::use(
   DT[DTOutput, renderDT, datatable, dataTableProxy, selectRows],
   htmlwidgets[JS],
   app/view/components/dataset_table[dataset_table_ui, dataset_table_server],
-  app/view/components/expression_heatmap[heatmap_ui, heatmap_server],
+  app/view/components/expression_heatmap[heatmap_ui, heatmap_server, heatmap_info_ui],
   app/view/components/results_table[results_ui, results_server],
   app/view/components/umap_plot[umap_ui, umap_server],
   app/view/components/violin_plot[violin_ui, violin_server],
@@ -36,7 +36,6 @@ box::use(
   app/view/components/signature_explorer[signature_explorer_ui, signature_explorer_server],
   app/view/components/signature_adapters/drug_panel_adapter[drug_rank_adapter],
   app/view/components/helpers/de_helpers[build_de_category, pick_strongest],
-  app/view/components/expression_heatmap[heatmap_info_ui],
   app/view/pages/gene_dataset_selector[gene_selector_ui, gene_selector_server, parse_json_text],
   app/view/pages/explore_sidebar[sidebar_ui, sidebar_server],
   app/logic/api/api_client[fetch_all_datasets, fetch_datasets_for_terms, fetch_expression_table, fetch_expression_volcano,
@@ -141,7 +140,8 @@ explorer_ui <- function(id) {
                   title = "Compare",
                   icon = icon("table-columns"),
                   uiOutput(ns("compare_controls_ui")),
-                  uiOutput(ns("compare_ui"))
+                  uiOutput(ns("compare_ui")),
+                  uiOutput(ns("compare_heatmap_note"))
                 ),
 
                 nav_panel(
@@ -1751,26 +1751,37 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
         )
       }
 
-      tagList(
-        tags$div(
-          style = "display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 14px;",
-          lapply(seq_len(nrow(datasets)), function(i) {
-            row <- datasets[i, , drop = FALSE]
-            card(
-              full_screen = TRUE,
-              card_header(
-                paste0(row$dataset_name[1], " · ", row$omic_type[1], " · ", row$lab_source[1])
-              ),
-              card_body(
-                plotlyOutput(session$ns(paste0("compare_plot_", i)), height = "420px") |> withSpinner(
-                  type = 1, caption = "Loading plot...", color = "#5b5b5b")
-              )
+      # Deliberately does NOT read sidebar_vals$plot_type(). This block owns the
+      # plotlyOutput("compare_plot_*") placeholders, and the observer below assigns those
+      # outputs on the same plot_type dependency. If both fire, a re-render can replace the
+      # placeholders after the outputs were assigned, leaving every card stuck on
+      # "Loading plot..." with no error and no console output. The heatmap explainer therefore
+      # lives in its own sibling output (compare_heatmap_note) instead.
+      tags$div(
+        style = "display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 14px;",
+        lapply(seq_len(nrow(datasets)), function(i) {
+          row <- datasets[i, , drop = FALSE]
+          card(
+            full_screen = TRUE,
+            card_header(
+              paste0(row$dataset_name[1], " · ", row$omic_type[1], " · ", row$lab_source[1])
+            ),
+            card_body(
+              plotlyOutput(session$ns(paste0("compare_plot_", i)), height = "420px") |> withSpinner(
+                type = 1, caption = "Loading plot...", color = "#5b5b5b")
             )
-          })
-        ),
-        # Shared explainer, rendered once below the whole grid rather than inside each card
-        if (identical(sidebar_vals$plot_type(), "Heatmap")) heatmap_info_ui()
+          )
+        })
       )
+    })
+
+    # Shared explainer, once below the whole grid rather than inside each card. Kept in its own
+    # output so plot_type changes never re-render the grid that holds the plot placeholders.
+    output$compare_heatmap_note <- renderUI({
+      req(is_compare_tab())
+      req(nrow(compare_source_rows()) >= 2)
+      if (!identical(sidebar_vals$plot_type(), "Heatmap")) return(NULL)
+      heatmap_info_ui()
     })
 
     # ── Compare tab renderPlotly — one per card slot, and cache output ────────────────────────

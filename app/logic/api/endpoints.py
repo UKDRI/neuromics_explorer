@@ -1080,6 +1080,138 @@ def expression_groups(
     return _query_arrow(request, sql, params_with_top)
 
 
+# Columns the heatmap X-axis picker may group by via /grouping-options counts.
+# Mirrors group_label_map in app/view/components/expression_heatmap.R.
+HEATMAP_GROUP_COLUMNS = (
+    "de_category", "cluster_id", "cell_type", "condition_a", "condition_b",
+    "sample_a", "sample_b", "tissue", "sex", "age", "cell_id",
+)
+
+
+@router.get("/datasets/{lab}/{study_id}/expression/heatmap")
+def expression_heatmap(
+    request: Request,
+    lab: str,
+    study_id: int,
+    gene: list[str] | None = Query(None),
+    protein: list[str] | None = Query(None),
+    group_by: str = Query("de_category"),
+    padj: float = 0.05,
+    lfc: float = 0.0,
+    cell_type: str | None = None,
+):
+    """
+    Return one pre-collapsed cell per gene x group for the heatmap.
+
+    UI connection:
+    the heatmap draws a single log2fc per (gene, group), fetching raw rows hit the MAX_TABLE_LIMIT
+    ceiling on wide datasets. E.g. drug panel has 3,400 rows per gene, thus 5,000 limit truncates
+    rows to first 2-3 genes - aggregation endpoint removes truncation/ slicing issue.
+    """
+    if group_by not in HEATMAP_GROUP_COLUMNS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"group_by must be one of: {', '.join(sorted(HEATMAP_GROUP_COLUMNS))}",
+        )
+
+    view = _safe_view_name("v", lab, study_id)
+    genes = _clean_optional_terms(gene)
+    proteins = _clean_optional_terms(protein)
+    if not genes and not proteins:
+        raise HTTPException(status_code=400, detail="At least one gene or protein is required for the heatmap endpoint.")
+
+    clauses, params = _expression_filters(genes, proteins, cell_type)
+
+    if group_by == "de_category":
+        # Mirrors build_de_category() in de_helpers.R. The BOOL_OR flag is deliberate and
+        # dataset-wide: when label derives from - rows are labelled and blanks would become 'unlabelled'.
+        # A per-row COALESCE instead handles it and labels blanks Up/Down/No change.
+        clauses.append(f"{SEMANTIC_GENE_EXPR} IS NOT NULL")
+        where_sql = _where_sql(clauses)
+        sql = f"""
+            WITH s AS (
+              SELECT {SEMANTIC_GENE_EXPR} AS gene_symbol, de_category, padj, log2fc
+              FROM {view}
+              {where_sql}
+            ),
+            f AS (
+              SELECT BOOL_OR(de_category IS NOT NULL AND TRIM(de_category) <> '') AS has_de FROM s
+            )
+            SELECT
+              s.gene_symbol,
+              CASE
+                WHEN f.has_de THEN COALESCE(NULLIF(TRIM(s.de_category), ''), 'unlabelled')
+                WHEN s.padj IS NOT NULL AND s.padj < ? AND s.log2fc IS NOT NULL AND s.log2fc >  ? THEN 'Up'
+                WHEN s.padj IS NOT NULL AND s.padj < ? AND s.log2fc IS NOT NULL AND s.log2fc < -? THEN 'Down'
+                ELSE 'No change'
+              END                                   AS group_label,
+              ARG_MAX(s.log2fc, ABS(s.log2fc))      AS log2fc
+            FROM s CROSS JOIN f
+            GROUP BY 1, 2
+            ORDER BY 1, 2
+        """
+        # Placeholder order follows the SQL text: the `s` CTE's filters, then the CASE thresholds.
+        params = params + [padj, lfc, padj, lfc]
+    else:
+        clauses.append(f"{SEMANTIC_GENE_EXPR} IS NOT NULL")
+        clauses.append(f"{group_by} IS NOT NULL AND TRIM(CAST({group_by} AS VARCHAR)) <> ''")
+        where_sql = _where_sql(clauses)
+        sql = f"""
+            SELECT
+              {SEMANTIC_GENE_EXPR} AS gene_symbol,
+              CAST({group_by} AS VARCHAR)      AS group_label,
+              ARG_MAX(log2fc, ABS(log2fc))     AS log2fc
+            FROM {view}
+            {where_sql}
+            GROUP BY 1, 2
+            ORDER BY 1, 2
+        """
+
+    return _query_arrow(request, sql, params)
+
+
+@router.get("/datasets/{lab}/{study_id}/expression/grouping-options")
+def expression_grouping_options(
+    request: Request,
+    lab: str,
+    study_id: int,
+    gene: list[str] | None = Query(None),
+    protein: list[str] | None = Query(None),
+    cell_type: str | None = None,
+):
+    """
+    Return distinct non-blank value counts for each candidate heatmap grouping column.
+
+    UI connection: 
+    heatmap X-axis picker used to infer its options by scanning the fetched rows for distinct values.
+    Now that '/expression/heatmap' returns pre-collapsed rows, counts via `n_padj`/`n_log2fc`
+    say whether a Contrast / DE category axis can be derived when not provided in the data.
+    It is similar to the R-side `has_values()` and `has_multiple_values()` helpers, but avoids 
+    fetching all rows to R just to count them.
+    """
+    view = _safe_view_name("v", lab, study_id)
+    genes = _clean_optional_terms(gene)
+    proteins = _clean_optional_terms(protein)
+    clauses, params = _expression_filters(genes, proteins, cell_type)
+    where_sql = _where_sql(clauses)
+
+    # NULLIF(TRIM(...)) so a present-but-blank column counts as absent, matching has_values()
+    # and has_multiple_values() on the R side.
+    counts_sql = ",\n              ".join(
+        f"COUNT(DISTINCT NULLIF(TRIM(CAST({col} AS VARCHAR)), '')) AS n_{col}"
+        for col in HEATMAP_GROUP_COLUMNS
+    )
+    sql = f"""
+        SELECT
+              {counts_sql},
+              COUNT(padj)   AS n_padj,
+              COUNT(log2fc) AS n_log2fc
+        FROM {view}
+        {where_sql}
+    """
+    return _query_arrow(request, sql, params)
+
+
 @router.get("/datasets/{lab}/{study_id}/expression/goi")
 def expression_goi(
     request: Request,
