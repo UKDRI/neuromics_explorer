@@ -35,7 +35,8 @@ box::use(
   app/view/components/highest_expr_plot[highest_expr_ui, highest_expr_server],
   app/view/components/signature_explorer[signature_explorer_ui, signature_explorer_server],
   app/view/components/signature_adapters/drug_panel_adapter[drug_rank_adapter],
-  app/view/components/helpers/de_helpers[build_de_category, pick_strongest],
+  app/view/components/helpers/de_helpers[build_de_category, pick_strongest,
+                                        match_gene_symbol_rows],
   app/view/pages/gene_dataset_selector[gene_selector_ui, gene_selector_server, parse_json_text],
   app/view/pages/explore_sidebar[sidebar_ui, sidebar_server],
   app/logic/api/api_client[fetch_all_datasets, fetch_datasets_for_terms, fetch_expression_table, fetch_expression_volcano,
@@ -583,11 +584,14 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
           showlegend = FALSE,
           margin = list(t = 50)
         )
-      
-      # Annotate searched gene if present
+
+      # Annotate searched genes on all matching rows (incl. one per cell_type / condition etc.)
       if (length(gene) > 0 && "gene_symbol" %in% names(plot_df)) {
         for (g in gene) {
-          match_idxs <- which(toupper(plot_df$gene_symbol) == toupper(g))[1]
+          match_idxs <- match_gene_symbol_rows(plot_df$gene_symbol, g)
+          # TODO: consider capping labels per gene (eg first 5, then a "+N more" note) if dense
+          # datasets - one row per cell_type / condition - become unreadable. Deliberately
+          # uncapped for now so Plot and Compare label the same rows.
           for (idx in match_idxs) {          # one annotation per row (each cell_type etc.)
             gp <- plot_df[idx, , drop = FALSE]
             p  <- p |> plotly::add_annotations(
@@ -1751,12 +1755,6 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
         )
       }
 
-      # Deliberately does NOT read sidebar_vals$plot_type(). This block owns the
-      # plotlyOutput("compare_plot_*") placeholders, and the observer below assigns those
-      # outputs on the same plot_type dependency. If both fire, a re-render can replace the
-      # placeholders after the outputs were assigned, leaving every card stuck on
-      # "Loading plot..." with no error and no console output. The heatmap explainer therefore
-      # lives in its own sibling output (compare_heatmap_note) instead.
       tags$div(
         style = "display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 14px;",
         lapply(seq_len(nrow(datasets)), function(i) {

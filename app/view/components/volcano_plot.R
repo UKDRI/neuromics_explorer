@@ -24,6 +24,7 @@ box::use(
   plotly[plotlyOutput, renderPlotly, plot_ly, layout, add_annotations,
          add_segments, event_data, event_register],
   dplyr[mutate, case_when, filter, arrange, desc],
+  app/view/components/helpers/de_helpers[match_gene_symbol_rows],
 )
 
 # UK DRI brand-adjacent palette
@@ -178,7 +179,10 @@ volcano_server <- function(id, de_data, padj_thresh, lfc_thresh, gene = reactive
       g_terms <- gene()
       if (length(g_terms) > 0 && "gene_symbol" %in% names(df)) {
         for (g in g_terms) {
-          match_idxs <- which(toupper(df$gene_symbol) == toupper(g))
+          # Matches composite symbols, so a dataset storing "GAPDH;GAPD" is labelled for a GAPDH search.
+          match_idxs <- match_gene_symbol_rows(df$gene_symbol, g)
+          # TODO: consider capping labels per gene (eg first 5, then a "+N more" note) if dense
+          # datasets cause severe overlapping of labels - i.e. one gene-row per cell_type / condition
           for (idx in match_idxs) {          # one annotation per row (each cell_type etc.)
             gp <- df[idx, , drop = FALSE]
             p  <- p |> plotly::add_annotations(
