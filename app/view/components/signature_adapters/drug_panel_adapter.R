@@ -98,7 +98,7 @@ drug_rank_adapter <- list(
                         ", or leave them clear to summarise across all contrasts.")),
                 list(done = has_gene,
                     text = tagList(
-                        "Click a gene bubble to list every drug tested against it. ",
+                        "Click or lasso one or more gene bubbles to list every drug tested against it. ",
                         "Higher bubbles have a larger fraction of significant drug hits.")),
                 list(done = has_drug,
                     text = tagList(
