@@ -54,6 +54,15 @@ def get_sql_col(
 
     Used to safely embed original column names from column_mappings into SQL strings 
     without risk of injecting None or unquoted identifiers.
+
+    TODO: the default fallback "NULL" is an UNTYPED null, so DuckDB types the resulting view
+    column as INTEGER even for text columns. Unmapped de_category / cell_type / cluster_id /
+    tissue / sex / age / cell_id / sample_* / condition_* therefore come out INTEGER (currently
+    dion 1, hong 1, webber 1, williams 1). DuckDB 1.4 removed the implicit INTEGER->VARCHAR
+    cast that 1.3 allowed, so any string operation on one of those raises eg
+    "No function matches ... trim(INTEGER)" - see /expression/heatmap, which CASTs defensively.
+    Passing fallback="CAST(NULL AS VARCHAR)" for text columns would fix this at source, but it
+    rebuilds all semantic views, so it is deliberately deferred.
     """
     original_name = name_mappings.get(canonical_name)
     if original_name and (col_names is None or original_name in col_names):

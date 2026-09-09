@@ -1130,7 +1130,13 @@ def expression_heatmap(
         where_sql = _where_sql(clauses)
         sql = f"""
             WITH s AS (
-              SELECT {SEMANTIC_GENE_EXPR} AS gene_symbol, de_category, padj, log2fc
+              -- CAST is required, not cosmetic: db_views emits a bare NULL for an unmapped
+              -- de_category, which DuckDB types as INTEGER (dion, hong 1, webber, williams).
+              -- DuckDB 1.4 dropped the implicit INTEGER->VARCHAR cast that 1.3 allowed, so
+              -- TRIM(de_category) raises "No function matches ... trim(INTEGER)".
+              SELECT {SEMANTIC_GENE_EXPR} AS gene_symbol,
+                     CAST(de_category AS VARCHAR) AS de_category,
+                     padj, log2fc
               FROM {view}
               {where_sql}
             ),
