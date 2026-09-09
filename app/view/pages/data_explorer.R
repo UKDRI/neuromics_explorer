@@ -1159,13 +1159,6 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
 
     # Reactive exposes the actively DT selected datasets from the Dataset Listings table driving the 'Compare' tab.
     # i.e. a subset of selected_dataset()$selected_datasets, filtered by listing_selection()
-    # TRACE-REMOVE: temporary diagnostics for the Compare spinner hang. Delete this block and
-    # every other line tagged TRACE-REMOVE once the cause is confirmed.
-    .trace <- function(...) {
-      message(sprintf("[NEX %s] %s", format(Sys.time(), "%H:%M:%OS3"),
-                      paste0(as.character(list(...)), collapse = "")))
-    }
-
     compare_source_rows <- reactive({
       ds <- selected_dataset()
       if (is.null(ds) || is.null(ds$selected_datasets) || nrow(ds$selected_datasets) == 0) {
@@ -1757,11 +1750,6 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
     # Compare tab, allowing side-by-side visual inspection.
     output$compare_ui <- renderUI({
       datasets <- compare_source_rows()
-      # TRACE-REMOVE: isolate() so tracing cannot add reactive dependencies compare_ui lacks
-      .trace("compare_ui   RUN   nrow=", nrow(datasets),
-             " is_compare_tab=", isolate(is_compare_tab()),
-             " listing=", paste(isolate(listing_selection()), collapse = "/"),
-             " plot_type=", isolate(sidebar_vals$plot_type()))
       if (nrow(datasets) < 2) {
         return(
           tags$div(
@@ -1807,9 +1795,7 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
       req(is_compare_tab())
       datasets <- compare_source_rows()
       plot_type <- sidebar_vals$plot_type()
-      .trace("observer     RUN   nrow=", nrow(datasets), " plot_type=", plot_type)   # TRACE-REMOVE
       if (nrow(datasets) < 2) {
-        .trace("observer     SKIP  nrow<2, no outputs assigned")                      # TRACE-REMOVE
         return(invisible(NULL))
       }
 
@@ -1820,9 +1806,6 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
           output_id <- paste0("compare_plot_", idx)
 
           output[[output_id]] <- renderPlotly({
-            .trace("render       START ", output_id)                                  # TRACE-REMOVE
-            on.exit(.trace("render       EXIT  ", output_id), add = TRUE)              # TRACE-REMOVE
-
             current_state <- selected_dataset()
             req(current_state)
 
@@ -1909,13 +1892,6 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
             paste(selected_dataset()$genes %||% character(0), collapse = ","),
             paste(selected_dataset()$proteins %||% character(0), collapse = ",")
           )
-
-          # TRACE-REMOVE: is Shiny suspending this output? Outputs nested inside a uiOutput
-          # within a nav_panel can stay suspended after the panel becomes visible, in which
-          # case the render never runs and withSpinner() spins forever - and switching tab
-          # or changing a control unsuspends it, which matches the reported workaround.
-          .trace("observer     ASSIGNED ", output_id,
-                 " suspendWhenHidden=", isTRUE(outputOptions(output, output_id)$suspendWhenHidden))
         })
       }
     })
@@ -2007,7 +1983,6 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
       # is the next event, propagates normally, and still shows the fewer-than-two alert.
       if (length(row_idx) == 0 && isTRUE(isolate(awaiting_listing_reselect()))) {
         awaiting_listing_reselect(FALSE)
-        .trace("listing      SWALLOW empty report during re-select")   # TRACE-REMOVE
         return(invisible(NULL))
       }
       if (length(row_idx) > 0) awaiting_listing_reselect(FALSE)
