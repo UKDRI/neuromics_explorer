@@ -97,7 +97,15 @@ volcano_server <- function(id, de_data, padj_thresh, lfc_thresh, gene = reactive
     #     # gene()  #since annotations added in plot_obj
     #   ) # Causes Error: object '' not found due to computing drug panel cache when datas not ready
 
+    # TRACE-REMOVE: why the Plot-tab volcano draws no gene labels while Compare does.
+    # Delete every line tagged TRACE-REMOVE once confirmed.
+    .vtrace <- function(...) {
+      message(sprintf("[VOLC %s] %s", format(Sys.time(), "%H:%M:%OS3"),
+                      paste0(as.character(list(...)), collapse = "")))
+    }
+
     plot_obj <- reactive({
+      .vtrace("plot_obj BODY RUN (a cache HIT would print nothing at all)")   # TRACE-REMOVE
       df   <- plot_df()
       pt   <- padj_thresh()
       lfc  <- lfc_thresh()
@@ -177,10 +185,18 @@ volcano_server <- function(id, de_data, padj_thresh, lfc_thresh, gene = reactive
       #   )
       # }
       g_terms <- gene()
+      # TRACE-REMOVE
+      .vtrace("  gene() n=", length(g_terms),
+              " values=", paste(g_terms, collapse = "/"),
+              " | df rows=", nrow(df),
+              " has gene_symbol=", "gene_symbol" %in% names(df),
+              " | study_id=", paste(unique(df$study_id)[1], collapse = ""),
+              " lab_source_in_df=", "lab_source" %in% names(df))
       if (length(g_terms) > 0 && "gene_symbol" %in% names(df)) {
         for (g in g_terms) {
           # Matches composite symbols, so a dataset storing "GAPDH;GAPD" is labelled for a GAPDH search.
           match_idxs <- match_gene_symbol_rows(df$gene_symbol, g)
+          .vtrace("  match '", g, "' -> ", length(match_idxs), " row(s)")   # TRACE-REMOVE
           # TODO: consider capping labels per gene (eg first 5, then a "+N more" note) if dense
           # datasets cause severe overlapping of labels - i.e. one gene-row per cell_type / condition
           for (idx in match_idxs) {          # one annotation per row (each cell_type etc.)
@@ -194,6 +210,8 @@ volcano_server <- function(id, de_data, padj_thresh, lfc_thresh, gene = reactive
           }
         }
       }
+      .vtrace("  annotations on returned object=",
+              length(plotly::plotly_build(p)$x$layout$annotations %||% list()))   # TRACE-REMOVE
       plotly::event_register(p, "plotly_click")
       p
     }) |>
