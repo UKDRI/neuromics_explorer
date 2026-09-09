@@ -1130,9 +1130,15 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
     # )
     selected_dataset <- reactiveVal(NULL)
 
-    # This reactiveVal tracks the current rows selected inside Dataset Listings and drives 'Expression' and 'Compare' tab
+    # This reactiveVal tracks current rows selected inside Dataset Listings and drives 'Expression' and 'Compare' tabs
     # Can also drive the aggregate value boxes.
     listing_selection <- reactiveVal(integer())
+    # Set when a new dataset list arrives (from modal reselection) and DT is told to re-select every dataset-row.
+    # The table initially reports an EMPTY selection while it re-renders, before the selectRows() proxy
+    # call lands, and treating that as a real deselection previously drove compare_source_rows() to 0 rows for ~300ms
+    # = compare_ui flickers to "select at least two" alert, destroying the plot placeholders = Compare cards
+    # is left spinning/hanging - awaiting_listing_reselect fixes that.
+    awaiting_listing_reselect <- reactiveVal(FALSE)
     last_dataset_keys <- reactiveVal(character())
 
     # Active single-dataset selection for 'Plot' tab.
@@ -1153,6 +1159,13 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
 
     # Reactive exposes the actively DT selected datasets from the Dataset Listings table driving the 'Compare' tab.
     # i.e. a subset of selected_dataset()$selected_datasets, filtered by listing_selection()
+    # TRACE-REMOVE: temporary diagnostics for the Compare spinner hang. Delete this block and
+    # every other line tagged TRACE-REMOVE once the cause is confirmed.
+    .trace <- function(...) {
+      message(sprintf("[NEX %s] %s", format(Sys.time(), "%H:%M:%OS3"),
+                      paste0(as.character(list(...)), collapse = "")))
+    }
+
     compare_source_rows <- reactive({
       ds <- selected_dataset()
       if (is.null(ds) || is.null(ds$selected_datasets) || nrow(ds$selected_datasets) == 0) {
@@ -1744,6 +1757,11 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
     # Compare tab, allowing side-by-side visual inspection.
     output$compare_ui <- renderUI({
       datasets <- compare_source_rows()
+      # TRACE-REMOVE: isolate() so tracing cannot add reactive dependencies compare_ui lacks
+      .trace("compare_ui   RUN   nrow=", nrow(datasets),
+             " is_compare_tab=", isolate(is_compare_tab()),
+             " listing=", paste(isolate(listing_selection()), collapse = "/"),
+             " plot_type=", isolate(sidebar_vals$plot_type()))
       if (nrow(datasets) < 2) {
         return(
           tags$div(
@@ -1789,7 +1807,9 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
       req(is_compare_tab())
       datasets <- compare_source_rows()
       plot_type <- sidebar_vals$plot_type()
+      .trace("observer     RUN   nrow=", nrow(datasets), " plot_type=", plot_type)   # TRACE-REMOVE
       if (nrow(datasets) < 2) {
+        .trace("observer     SKIP  nrow<2, no outputs assigned")                      # TRACE-REMOVE
         return(invisible(NULL))
       }
 
@@ -1800,6 +1820,8 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
           output_id <- paste0("compare_plot_", idx)
 
           output[[output_id]] <- renderPlotly({
+            .trace("render       START ", output_id)                                  # TRACE-REMOVE
+            on.exit(.trace("render       EXIT  ", output_id), add = TRUE)              # TRACE-REMOVE
 
             current_state <- selected_dataset()
             req(current_state)
@@ -1887,6 +1909,13 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
             paste(selected_dataset()$genes %||% character(0), collapse = ","),
             paste(selected_dataset()$proteins %||% character(0), collapse = ",")
           )
+
+          # TRACE-REMOVE: is Shiny suspending this output? Outputs nested inside a uiOutput
+          # within a nav_panel can stay suspended after the panel becomes visible, in which
+          # case the render never runs and withSpinner() spins forever - and switching tab
+          # or changing a control unsuspends it, which matches the reported workaround.
+          .trace("observer     ASSIGNED ", output_id,
+                 " suspendWhenHidden=", isTRUE(outputOptions(output, output_id)$suspendWhenHidden))
         })
       }
     })
@@ -1934,7 +1963,18 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
         "Cell types", "Conditions"
       )[seq_along(display)]
 
-      datatable(display, selection="multiple", rownames=FALSE,
+      datatable(display,
+        # Render already selected rather than relying on the selectRows() proxy call in the
+        # re-selection observer below fixes Compare hanging spinners
+        # isolate() preserves the user's own selection if the table re-renders for any other reason, defaulting to all
+        selection = list(
+          mode = "multiple",
+          selected = isolate({
+            sel <- listing_selection()
+            if (length(sel) == 0) seq_len(nrow(display)) else sel
+          })
+        ),
+        rownames=FALSE,
         class="table-sm table-hover",
         options=list(dom="t", pageLength=20, scrollX=TRUE))
 
@@ -1949,6 +1989,7 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
       dataset_keys <- dataset_key(ds$selected_datasets)
       if (!identical(dataset_keys, last_dataset_keys())) {
         last_dataset_keys(dataset_keys)
+        awaiting_listing_reselect(TRUE)
         listing_selection(seq_len(nrow(ds$selected_datasets)))
         dataTableProxy("dataset_listing_table") |> selectRows(seq_len(nrow(ds$selected_datasets)))
         active_row(1) # defaults to first row
@@ -1960,6 +2001,17 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
     observeEvent(input$dataset_listing_table_rows_selected, {
       # Determines which datasets were recently un/checked by comparing to the previous selection
       row_idx <- input$dataset_listing_table_rows_selected %||% integer(0)
+
+      # Swallow exactly ONE empty report while the table is re-selecting for a new dataset list.
+      # Clearing the flag as we swallow keeps this self-limiting: a genuine "untick everything"
+      # is the next event, propagates normally, and still shows the fewer-than-two alert.
+      if (length(row_idx) == 0 && isTRUE(isolate(awaiting_listing_reselect()))) {
+        awaiting_listing_reselect(FALSE)
+        .trace("listing      SWALLOW empty report during re-select")   # TRACE-REMOVE
+        return(invisible(NULL))
+      }
+      if (length(row_idx) > 0) awaiting_listing_reselect(FALSE)
+
       previous_idx <- isolate(listing_selection())
       if (identical(row_idx, previous_idx)) {
         return(invisible(NULL))
