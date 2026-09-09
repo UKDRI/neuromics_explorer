@@ -1,6 +1,6 @@
 box::use(
   shiny[NS, bindCache, moduleServer, reactive, req, tagList, selectInput, updateSelectInput,
-        observe, uiOutput, renderUI, checkboxGroupInput, tags],
+        observe, uiOutput, renderUI, checkboxGroupInput, tags, validate, need],
   shinycssloaders[withSpinner],
   plotly[plotlyOutput, renderPlotly, plot_ly, layout],
   stringi[stri_sort],
@@ -168,20 +168,22 @@ heatmap_server <- function(id, selected_dataset,
     })
 
     heatmap_data <- reactive({
-      top_df <- top_genes()
-
-      req(nrow(top_df) > 0)
+      ds <- selected_dataset()
+      req(ds)
 
       selected_terms <- input$heatmap_terms %||% character(0)
       selected_terms <- selected_terms[nzchar(selected_terms)]
 
-      # Follows Plot tab's "Which genes are interesting, and how do they behave everywhere?"
-      # Thresholds controlwhich genes are picked; Good when there are	many columns e.g. clusters, cell types
-      top_gene_symbols <- unique(top_df$gene_symbol)
+      # Thresholds control which genes are picked; useful when there are many columns e.g. clusters, cell types
+      # No req() on top_df: '/top-de' endpoint filters on `WHERE padj < ?`, so data carrying only raw
+      # p-values (eg hong proteomics has pvalue but no padj) returns zero rows. Gating the whole reactive
+      # gives an empty x-axis dropdown = blank plot
+      top_df <- top_genes()
+      top_gene_symbols <- if (nrow(top_df) > 0) unique(top_df$gene_symbol) else character(0)
       all_genes <- unique(c(top_gene_symbols, selected_terms))
 
-      ds <- selected_dataset()
-      req(ds)
+      req(length(all_genes) > 0)
+
       fetch_expression_goi(
         lab_source = ds$lab_source,
         study_id = ds$study_id,
@@ -273,7 +275,10 @@ heatmap_server <- function(id, selected_dataset,
 
     output$plot <- renderPlotly({
       df <- heatmap_data()
-      req(nrow(df) > 0)
+      validate(need(
+        nrow(df) > 0,
+        "No expression rows for these genes. Search for a gene, or relax the significance thresholds."
+      ))
 
       df$de_category <- build_de_category(df, padj_thresh(), lfc_thresh())
 
