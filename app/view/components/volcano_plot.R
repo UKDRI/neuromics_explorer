@@ -192,6 +192,11 @@ volcano_server <- function(id, de_data, padj_thresh, lfc_thresh, gene = reactive
               " has gene_symbol=", "gene_symbol" %in% names(df),
               " | study_id=", paste(unique(df$study_id)[1], collapse = ""),
               " lab_source_in_df=", "lab_source" %in% names(df))
+      # TRACE-REMOVE: fingerprint the payload. Expected sum(log2fc) per dataset (20000-row
+      # payload): bowles 137.3959 | dion 8587.283 | ruepp 212.7862 (9746 rows) | webber 16706.8684
+      .vtrace("  PAYLOAD FINGERPRINT rows=", nrow(df),
+              " sum(log2fc)=", round(sum(df$log2fc, na.rm = TRUE), 4),
+              " first genes=", paste(utils::head(df$gene_symbol, 3), collapse = ","))
       if (length(g_terms) > 0 && "gene_symbol" %in% names(df)) {
         for (g in g_terms) {
           # Matches composite symbols, so a dataset storing "GAPDH;GAPD" is labelled for a GAPDH search.
