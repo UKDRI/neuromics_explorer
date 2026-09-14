@@ -21,18 +21,48 @@ results_server <- function(id, de_data) {
       df <- de_data()
       req(nrow(df) > 0)
 
-      # Drop internal/ redundant columns for display
+      # Drop internal/ redundant columns for display. Order is identity -> grouping -> stats.
       display_cols <- intersect(
-        c("dataset_name", "gene_symbol", "human_gene", "protein_id", "cell_type",
-          "condition_a", "condition_b", "log2fc", "pvalue", "padj",
+        c("dataset_name", "gene_symbol", "human_gene", "protein_id",
+          "de_category", "cell_type", "cluster_id",
+          "condition_a", "condition_b", "sample_a", "sample_b",
+          "log2fc", "pvalue", "padj",
           "abundance_a", "abundance_b", "pct_expressed_a", "pct_expressed_b",
           "organism"),
         names(df)
       )
       df <- df[, display_cols, drop = FALSE]
-      if ("dataset_name" %in% names(df)) {
-        names(df)[names(df) == "dataset_name"] <- "dataset"
+
+      # Column availability is per-dataset therefore drop columns that have no value.
+      # Ie diaz has abundance_*, williams has pct_expressed_* and cell_type, dion has only cluster_id, etc. 
+      keep <- vapply(df, function(x) any(!is.na(x) & nzchar(trimws(as.character(x)))), logical(1))
+      df <- df[, keep, drop = FALSE]
+      req(ncol(df) > 0)
+
+      # Numeric formatting targets are resolved BEFORE renaming below, then compute them
+      # afterwards.
+      num_cols  <- names(df)[vapply(df, is.numeric, logical(1))]
+      pval_cols <- intersect(c("pvalue", "padj"), num_cols)
+      lfc_cols  <- intersect(c("log2fc", "abundance_a", "abundance_b",
+                               "pct_expressed_a", "pct_expressed_b"), num_cols)
+
+      display_labels <- c(
+        dataset_name = "Dataset", gene_symbol = "Gene", human_gene = "Human gene",
+        protein_id = "Protein", de_category = "Contrast / DE category",
+        cell_type = "Cell type", cluster_id = "Cluster",
+        condition_a = "Condition A", condition_b = "Condition B",
+        sample_a = "Sample A", sample_b = "Sample B",
+        log2fc = "log2FC", pvalue = "pvalue", padj = "padj",
+        abundance_a = "Abundance A", abundance_b = "Abundance B",
+        pct_expressed_a = "% expressed A", pct_expressed_b = "% expressed B",
+        organism = "Organism"
+      )
+      relabel <- function(cols) {
+        ifelse(cols %in% names(display_labels), unname(display_labels[cols]), cols)
       }
+      names(df) <- relabel(names(df))
+      pval_cols <- relabel(pval_cols)
+      lfc_cols  <- relabel(lfc_cols)
 
       dt <- datatable(df,
         filter      = "top",
@@ -54,11 +84,6 @@ results_server <- function(id, de_data) {
       )
 
       # Format numeric columns sensibly
-      num_cols <- names(df)[sapply(df, is.numeric)]
-      pval_cols <- intersect(c("pvalue", "padj"), num_cols)
-      lfc_cols  <- intersect(c("log2fc", "abundance_a", "abundance_b",
-                               "pct_expressed_a", "pct_expressed_b"), num_cols)
-
       if (length(pval_cols)) dt <- DT::formatSignif(dt, pval_cols, digits = 3)
       if (length(lfc_cols))  dt <- DT::formatRound(dt, lfc_cols,  digits = 3)
       dt
