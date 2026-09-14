@@ -24,8 +24,13 @@ box::use(
   plotly[plotlyOutput, renderPlotly, plot_ly, layout, add_annotations,
          add_segments, event_data, event_register],
   dplyr[mutate, case_when, filter, arrange, desc],
-  app/view/components/helpers/de_helpers[match_gene_symbol_rows],
+  app/view/components/helpers/de_helpers[pick_label_rows, label_cap_notes],
+  app/view/components/helpers/help_tips[tool_tip, tip_text],
 )
+
+# Volcano payloads guarantees searched genes are present, so a gene with many occurrences
+# (dion has 34 rows for MPND, webber 3,400) would draw one label per row and bury the plot.
+LABEL_CAP <- 3L
 
 # UK DRI brand-adjacent palette
 COLS <- list(
@@ -43,6 +48,8 @@ volcano_ui <- function(id) {
   tagList(
     plotlyOutput(ns("plot"), height = "520px") |> withSpinner(
       type = 1, caption = "Loading plot...", color = "#5b5b5b"),
+    # Kept OUTSIDE the plotly object so it cannot overlap points, survives zoom/pan, and stays out of PNG exports.
+    uiOutput(ns("label_note")),
     uiOutput(ns("click_info")),
     p("Volcano plot showing differentially expressed genes between selected conditions.")
   )
@@ -96,6 +103,40 @@ volcano_server <- function(id, de_data, padj_thresh, lfc_thresh, gene = reactive
     #     # lfc_thresh(),
     #     # gene()  #since annotations added in plot_obj
     #   ) # Causes Error: object '' not found due to computing drug panel cache when datas not ready
+
+    # Shared by plot_obj and output$label_note. A separate reactive rather than a reactiveVal
+    # written from inside plot_obj: plot_obj is bindCache'd, so on a cache hit its body never runs
+    # and the caption would silently go stale.
+    picked_labels <- reactive({
+      df <- plot_df()
+      g_terms <- gene()
+      if (length(g_terms) == 0 || !"gene_symbol" %in% names(df)) {
+        return(pick_label_rows(character(0), character(0), numeric(0), cap = LABEL_CAP))
+      }
+      pick_label_rows(df$gene_symbol, g_terms, df$neg_log10p, cap = LABEL_CAP)
+    })
+
+    output$label_note <- renderUI({
+      notes <- label_cap_notes(picked_labels()$summary)
+      if (is.null(notes)) return(NULL)   # nothing omitted, do nothing
+      tags$div(
+        style = "font-size:12px; color:#666; margin:2px 0 0 4px; display:flex; align-items:center; gap:2px;",
+        tags$span(sprintf("Labels: max %d per gene \u00b7 %s", LABEL_CAP,
+                          paste(utils::head(notes, 2), collapse = " \u00b7 "))),
+        if (length(notes) > 2) tags$span(sprintf("\u00b7 +%d more", length(notes) - 2)),
+        tool_tip(
+          tip_text(
+            tags$div(style = "font-weight:600; margin-bottom:4px;", "Gene labels"),
+            tags$div(sprintf(paste("At most %d labels are drawn per gene, chosen by significance",
+                                   "(largest -log10 p). Every matching point is still plotted and",
+                                   "hoverable - only the labels are limited."), LABEL_CAP)),
+            tags$ul(style = "padding-left:16px; margin:6px 0 0;",
+                    lapply(notes, function(n) tags$li(n)))
+          ),
+          placement = "top"
+        )
+      )
+    })
 
     # TRACE-REMOVE: why the Plot-tab volcano draws no gene labels while Compare does.
     # Delete every line tagged TRACE-REMOVE once confirmed.
@@ -185,6 +226,7 @@ volcano_server <- function(id, de_data, padj_thresh, lfc_thresh, gene = reactive
       #   )
       # }
       g_terms <- gene()
+      picked <- picked_labels()
       # TRACE-REMOVE
       .vtrace("  gene() n=", length(g_terms),
               " values=", paste(g_terms, collapse = "/"),
@@ -197,23 +239,18 @@ volcano_server <- function(id, de_data, padj_thresh, lfc_thresh, gene = reactive
       .vtrace("  PAYLOAD FINGERPRINT rows=", nrow(df),
               " sum(log2fc)=", round(sum(df$log2fc, na.rm = TRUE), 4),
               " first genes=", paste(utils::head(df$gene_symbol, 3), collapse = ","))
-      if (length(g_terms) > 0 && "gene_symbol" %in% names(df)) {
-        for (g in g_terms) {
-          # Matches composite symbols, so a dataset storing "GAPDH;GAPD" is labelled for a GAPDH search.
-          match_idxs <- match_gene_symbol_rows(df$gene_symbol, g)
-          .vtrace("  match '", g, "' -> ", length(match_idxs), " row(s)")   # TRACE-REMOVE
-          # TODO: consider capping labels per gene (eg first 5, then a "+N more" note) if dense
-          # datasets cause severe overlapping of labels - i.e. one gene-row per cell_type / condition
-          for (idx in match_idxs) {          # one annotation per row (each cell_type etc.)
-            gp <- df[idx, , drop = FALSE]
-            p  <- p |> plotly::add_annotations(
-              x = gp$log2fc, y = gp$neg_log10p,
-              text = paste0("<b>", gp$gene_symbol, "</b>"),
-              showarrow = TRUE, arrowhead = 2, arrowsize = 0.8,
-              font = list(size = 12, color = "#2C3E50")
-            )
-          }
-        }
+      .vtrace("  picked ", nrow(picked$summary), " term(s) -> ", length(picked$idx),
+              " label(s); matched total=", sum(picked$summary$matched))   # TRACE-REMOVE
+      # ONE add_annotations call over the capped rows, not one per row otherwise each call rebuilds the
+      # whole plotly object.
+      if (length(picked$idx) > 0) {
+        lab <- df[picked$idx, , drop = FALSE]
+        p <- p |> plotly::add_annotations(
+          x = lab$log2fc, y = lab$neg_log10p,
+          text = paste0("<b>", lab$gene_symbol, "</b>"),
+          showarrow = TRUE, arrowhead = 2, arrowsize = 0.8,
+          font = list(size = 12, color = "#2C3E50")
+        )
       }
       .vtrace("  annotations on returned object=",
               length(plotly::plotly_build(p)$x$layout$annotations %||% list()))   # TRACE-REMOVE

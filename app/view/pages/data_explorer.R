@@ -36,7 +36,8 @@ box::use(
   app/view/components/signature_explorer[signature_explorer_ui, signature_explorer_server],
   app/view/components/signature_adapters/drug_panel_adapter[drug_rank_adapter],
   app/view/components/helpers/de_helpers[build_de_category, pick_strongest,
-                                        match_gene_symbol_rows],
+                                        pick_label_rows, label_cap_notes],
+  app/view/components/helpers/help_tips[tool_tip, tip_text],
   app/view/pages/gene_dataset_selector[gene_selector_ui, gene_selector_server, parse_json_text],
   app/view/pages/explore_sidebar[sidebar_ui, sidebar_server],
   app/logic/api/api_client[fetch_all_datasets, fetch_datasets_for_terms, fetch_expression_table, fetch_expression_volcano,
@@ -142,7 +143,8 @@ explorer_ui <- function(id) {
                   icon = icon("table-columns"),
                   uiOutput(ns("compare_controls_ui")),
                   uiOutput(ns("compare_ui")),
-                  uiOutput(ns("compare_heatmap_note"))
+                  uiOutput(ns("compare_heatmap_note")),
+                  uiOutput(ns("compare_volcano_note"))
                 ),
 
                 nav_panel(
@@ -385,6 +387,9 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
       length(unique(values)) > 1
     }
 
+    # Max gene labels drawn per searched term on the Compare volcanoes.
+    VOLCANO_LABEL_CAP <- 3L
+
     group_label <- function(col_name) {
       labels <- c(
         de_category = "Contrast / DE category",
@@ -585,22 +590,18 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
           margin = list(t = 50)
         )
 
-      # Annotate searched genes on all matching rows (incl. one per cell_type / condition etc.)
+      # Annotate the most significant VOLCANO_LABEL_CAP rows per searched term.
       if (length(gene) > 0 && "gene_symbol" %in% names(plot_df)) {
-        for (g in gene) {
-          match_idxs <- match_gene_symbol_rows(plot_df$gene_symbol, g)
-          # TODO: consider capping labels per gene (eg first 5, then a "+N more" note) if dense
-          # datasets - one row per cell_type / condition - become unreadable. Deliberately
-          # uncapped for now so Plot and Compare label the same rows.
-          for (idx in match_idxs) {          # one annotation per row (each cell_type etc.)
-            gp <- plot_df[idx, , drop = FALSE]
-            p  <- p |> plotly::add_annotations(
-              x = gp$log2fc, y = gp$neg_log10p,
-              text = paste0("<b>", gp$gene_symbol, "</b>"),
-              showarrow = TRUE, arrowhead = 2, arrowsize = 0.8,
-              font = list(size = 12, color = "#2C3E50")
-            )
-          }
+        picked <- pick_label_rows(plot_df$gene_symbol, gene, plot_df$neg_log10p,
+                                  cap = VOLCANO_LABEL_CAP)
+        if (length(picked$idx) > 0) {
+          lab <- plot_df[picked$idx, , drop = FALSE]
+          p <- p |> plotly::add_annotations(
+            x = lab$log2fc, y = lab$neg_log10p,
+            text = paste0("<b>", lab$gene_symbol, "</b>"),
+            showarrow = TRUE, arrowhead = 2, arrowsize = 0.8,
+            font = list(size = 12, color = "#2C3E50")
+          )
         }
       }
       p
@@ -1247,14 +1248,20 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
                 lab_source = row$lab_source[1],
                 study_id = row$study_id[1],
                 limit = 20000L,
-                offset = 0L
+                offset = 0L,
+                genes = selected_dataset()$genes,
+                proteins = selected_dataset()$proteins
               )
             )
           }) |>
             bindCache(
               compare_source_rows()[idx, , drop = FALSE]$lab_source[1],
               compare_source_rows()[idx, , drop = FALSE]$study_id[1],
-              sidebar_vals$plot_type()
+              sidebar_vals$plot_type(),
+              # Only the Volcano branch reads these, so the Heatmap/Violin branches are over-invalidated slightly 
+              # on a new search. Preferred over under-keying, which causes stale-plot bugs.
+              paste(selected_dataset()$genes %||% character(0), collapse = ","),
+              paste(selected_dataset()$proteins %||% character(0), collapse = ",")
             )
         }
 
@@ -1618,13 +1625,17 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
         lab_source = ds$lab_source,
         study_id = ds$study_id,
         limit = 20000L,
-        offset = 0L
+        offset = 0L,
+        genes = ds$genes,
+        proteins = ds$proteins
       )
     }) |> bindCache(
       is_plot_tab(),
       sidebar_vals$plot_type(),
       active_dataset()$lab_source %||% "",
-      active_dataset()$study_id %||% ""
+      active_dataset()$study_id %||% "",
+      paste(active_dataset()$genes %||% character(0), collapse = ","),
+      paste(active_dataset()$proteins %||% character(0), collapse = ",")
     )
 
     violin_data <- reactive({
@@ -1776,6 +1787,56 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
             )
           )
         })
+      )
+    })
+
+    # Per-panel label summaries for the Compare volcano tooltip note.
+    compare_label_summary <- reactive({
+      req(is_compare_tab(), identical(sidebar_vals$plot_type(), "Volcano"))
+      datasets <- compare_source_rows()
+      req(nrow(datasets) >= 2)
+
+      terms <- unique(trimws(c(selected_dataset()$genes %||% character(0),
+                               selected_dataset()$proteins %||% character(0))))
+      terms <- terms[nzchar(terms)]
+      req(length(terms) > 0)
+
+      out <- lapply(seq_len(nrow(datasets)), function(i) {
+        df <- get_compare_row_data(i)()
+        if (is.null(df) || nrow(df) == 0 || !"gene_symbol" %in% names(df)) return(NULL)
+        sig <- if ("padj" %in% names(df)) df$padj else rep(NA_real_, nrow(df))
+        if ("pvalue" %in% names(df)) sig[is.na(sig)] <- df$pvalue[is.na(sig)]
+        picked <- pick_label_rows(df$gene_symbol, terms, -log10(sig), cap = VOLCANO_LABEL_CAP)
+        notes <- label_cap_notes(picked$summary)
+        if (is.null(notes)) return(NULL)
+        list(name = datasets$dataset_name[i], notes = notes)
+      })
+      out[!vapply(out, is.null, logical(1))]
+    })
+
+    output$compare_volcano_note <- renderUI({
+      panels <- compare_label_summary()
+      if (length(panels) == 0) return(NULL)
+      tags$div(
+        style = "font-size:12px; color:#666; margin:6px 0 0 2px; display:flex; align-items:center; gap:2px;",
+        tags$span(sprintf("Labels: max %d per gene \u00b7 %d panel%s with omissions",
+                          VOLCANO_LABEL_CAP, length(panels),
+                          if (length(panels) == 1) "" else "s")),
+        tool_tip(
+          tip_text(
+            tags$div(style = "font-weight:600; margin-bottom:4px;", "Gene labels"),
+            tags$div(sprintf(paste("At most %d labels are drawn per gene per panel, chosen by",
+                                   "significance (largest -log10 p). Every matching point is still",
+                                   "plotted and hoverable - only the labels are limited."),
+                             VOLCANO_LABEL_CAP)),
+            lapply(panels, function(pn) tagList(
+              tags$div(style = "font-weight:600; margin-top:6px;", pn$name),
+              tags$ul(style = "padding-left:16px; margin:2px 0 0;",
+                      lapply(pn$notes, function(n) tags$li(n)))
+            ))
+          ),
+          placement = "top"
+        )
       )
     })
 
