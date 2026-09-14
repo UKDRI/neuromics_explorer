@@ -24,7 +24,13 @@ box::use(
   plotly[plotlyOutput, renderPlotly, plot_ly, layout, add_annotations,
          add_segments, event_data, event_register],
   dplyr[mutate, case_when, filter, arrange, desc],
+  app/view/components/helpers/de_helpers[pick_label_rows, label_cap_notes],
+  app/view/components/helpers/help_tips[tool_tip, tip_text],
 )
+
+# Volcano payloads guarantees searched genes are present, so a gene with many occurrences
+# (dion has 34 rows for MPND, webber 3,400) would draw one label per row and bury the plot.
+LABEL_CAP <- 3L
 
 # UK DRI brand-adjacent palette
 COLS <- list(
@@ -36,14 +42,75 @@ COLS <- list(
 )
 
 # ── UI ────────────────────────────────────────────────────────────────────────
+#' Explainer for what the volcano shows and what it leaves out.
+#'
+#' Exported so the Compare tab can render the same copy once below its grid.
+#' @export
+volcano_info_ui <- function() {
+  tags$details(
+    class = "alert alert-info",
+    style = "font-size: 12px; line-height: 1.5; padding: 8px 12px; margin: 10px 0 0;",
+    tags$summary(
+      style = "cursor: pointer; font-weight: 600; font-size: 13px;",
+      "What this volcano shows"
+    ),
+    tags$div(
+      style = "margin-top: 8px;",
+
+      tags$p(
+        style = "margin: 0 0 6px;",
+        tags$b("Not every row is plotted."),
+        " The volcano draws the ", tags$b("20,000 most significant rows"),
+        " (lowest padj, ties broken by largest |log", tags$sub("2"), "FC|). Plotting everything
+         would bury the overall pattern."
+      ),
+
+      tags$p(
+        style = "margin: 0 0 6px;",
+        tags$b("Your searched genes are always included."),
+        " They are added on top of that 20,000, up to 150 rows per query, so a gene is never
+         silently missing just because it sits outside the most-significant slice."
+      ),
+
+      tags$p(
+        style = "margin: 0 0 6px; padding: 6px 8px; background: rgba(255,255,255,0.55); border-radius: 4px;",
+        tags$b("Labels are capped, points are not. "),
+        "At most ", tags$b(LABEL_CAP), " labels are drawn per gene, on its most significant rows.
+         A gene measured across many cell types, clusters or drug contrasts would otherwise bury
+         the plot under its own name. Every matching point is still plotted and hoverable — only
+         the labels are limited, and a note below the plot says what was left out."
+      ),
+
+      tags$p(
+        style = "margin: 0 0 6px;",
+        tags$b("Colour and dashed lines "), "come from the sidebar's ",
+        tags$b("Significance Filters"), ": red = significant and increased, blue = significant and
+         decreased, grey = neither. The dashed lines mark those same padj and |log",
+        tags$sub("2"), "FC| thresholds, so moving a slider moves the lines."
+      ),
+
+      tags$p(
+        style = "margin: 0;",
+        tags$b("Y axis: "), "-log", tags$sub("10"), " of padj where the lab supplied one, otherwise
+         the raw p-value — so height is not always directly comparable between datasets. Some
+         datasets also store several symbols per row (eg ", tags$code("GAPDH;GAPD"),
+        "); searching any one of them matches and labels the whole stored symbol."
+      )
+    )
+  )
+}
+
 #' @export
 volcano_ui <- function(id) {
   ns <- NS(id)
   tagList(
     plotlyOutput(ns("plot"), height = "520px") |> withSpinner(
       type = 1, caption = "Loading plot...", color = "#5b5b5b"),
+    # Kept OUTSIDE the plotly object so it cannot overlap points, survives zoom/pan, and stays out of PNG exports.
+    uiOutput(ns("label_note")),
     uiOutput(ns("click_info")),
-    p("Volcano plot showing differentially expressed genes between selected conditions.")
+    p("Volcano plot showing differentially expressed genes between selected conditions."),
+    volcano_info_ui()
   )
 }
 
@@ -95,6 +162,40 @@ volcano_server <- function(id, de_data, padj_thresh, lfc_thresh, gene = reactive
     #     # lfc_thresh(),
     #     # gene()  #since annotations added in plot_obj
     #   ) # Causes Error: object '' not found due to computing drug panel cache when datas not ready
+
+    # Shared by plot_obj and output$label_note. A separate reactive rather than a reactiveVal
+    # written from inside plot_obj: plot_obj is bindCache'd, so on a cache hit its body never runs
+    # and the caption would silently go stale.
+    picked_labels <- reactive({
+      df <- plot_df()
+      g_terms <- gene()
+      if (length(g_terms) == 0 || !"gene_symbol" %in% names(df)) {
+        return(pick_label_rows(character(0), character(0), numeric(0), cap = LABEL_CAP))
+      }
+      pick_label_rows(df$gene_symbol, g_terms, df$neg_log10p, cap = LABEL_CAP)
+    })
+
+    output$label_note <- renderUI({
+      notes <- label_cap_notes(picked_labels()$summary)
+      if (is.null(notes)) return(NULL)   # nothing omitted, do nothing
+      tags$div(
+        style = "font-size:12px; color:#666; margin:2px 0 0 4px; display:flex; align-items:center; gap:2px;",
+        tags$span(sprintf("Labels: max %d per gene \u00b7 %s", LABEL_CAP,
+                          paste(utils::head(notes, 2), collapse = " \u00b7 "))),
+        if (length(notes) > 2) tags$span(sprintf("\u00b7 +%d more", length(notes) - 2)),
+        tool_tip(
+          tip_text(
+            tags$div(style = "font-weight:600; margin-bottom:4px;", "Gene labels"),
+            tags$div(sprintf(paste("At most %d labels are drawn per gene, chosen by significance",
+                                   "(largest -log10 p). Every matching point is still plotted and",
+                                   "hoverable - only the labels are limited."), LABEL_CAP)),
+            tags$ul(style = "padding-left:16px; margin:6px 0 0;",
+                    lapply(notes, function(n) tags$li(n)))
+          ),
+          placement = "top"
+        )
+      )
+    })
 
     plot_obj <- reactive({
       df   <- plot_df()
@@ -175,20 +276,17 @@ volcano_server <- function(id, de_data, padj_thresh, lfc_thresh, gene = reactive
       #     font = list(size = 12, color = "#2C3E50")
       #   )
       # }
-      g_terms <- gene()
-      if (length(g_terms) > 0 && "gene_symbol" %in% names(df)) {
-        for (g in g_terms) {
-          match_idxs <- which(toupper(df$gene_symbol) == toupper(g))
-          for (idx in match_idxs) {          # one annotation per row (each cell_type etc.)
-            gp <- df[idx, , drop = FALSE]
-            p  <- p |> plotly::add_annotations(
-              x = gp$log2fc, y = gp$neg_log10p,
-              text = paste0("<b>", gp$gene_symbol, "</b>"),
-              showarrow = TRUE, arrowhead = 2, arrowsize = 0.8,
-              font = list(size = 12, color = "#2C3E50")
-            )
-          }
-        }
+      picked <- picked_labels()
+      # ONE add_annotations call over the capped rows, not one per row otherwise each call rebuilds the
+      # whole plotly object.
+      if (length(picked$idx) > 0) {
+        lab <- df[picked$idx, , drop = FALSE]
+        p <- p |> plotly::add_annotations(
+          x = lab$log2fc, y = lab$neg_log10p,
+          text = paste0("<b>", lab$gene_symbol, "</b>"),
+          showarrow = TRUE, arrowhead = 2, arrowsize = 0.8,
+          font = list(size = 12, color = "#2C3E50")
+        )
       }
       plotly::event_register(p, "plotly_click")
       p

@@ -24,19 +24,20 @@ box::use(
   DT[DTOutput, renderDT, datatable, dataTableProxy, selectRows],
   htmlwidgets[JS],
   app/view/components/dataset_table[dataset_table_ui, dataset_table_server],
-  app/view/components/expression_heatmap[heatmap_ui, heatmap_server],
+  app/view/components/expression_heatmap[heatmap_ui, heatmap_server, heatmap_info_ui],
   app/view/components/results_table[results_ui, results_server],
   app/view/components/umap_plot[umap_ui, umap_server],
   app/view/components/violin_plot[violin_ui, violin_server],
-  app/view/components/volcano_plot[volcano_ui, volcano_server],
+  app/view/components/volcano_plot[volcano_ui, volcano_server, volcano_info_ui],
   app/view/components/feature_scatter_plot[feature_scatter_ui, feature_scatter_server],
   app/view/components/histogram_plot[histogram_ui, histogram_server],
   app/view/components/dots_plot[dots_ui, dots_server],
   app/view/components/highest_expr_plot[highest_expr_ui, highest_expr_server],
   app/view/components/signature_explorer[signature_explorer_ui, signature_explorer_server],
   app/view/components/signature_adapters/drug_panel_adapter[drug_rank_adapter],
-  app/view/components/helpers/de_helpers[build_de_category, pick_strongest],
-  app/view/components/expression_heatmap[heatmap_info_ui],
+  app/view/components/helpers/de_helpers[build_de_category, pick_strongest,
+                                        pick_label_rows, label_cap_notes],
+  app/view/components/helpers/help_tips[tool_tip, tip_text],
   app/view/pages/gene_dataset_selector[gene_selector_ui, gene_selector_server, parse_json_text],
   app/view/pages/explore_sidebar[sidebar_ui, sidebar_server],
   app/logic/api/api_client[fetch_all_datasets, fetch_datasets_for_terms, fetch_expression_table, fetch_expression_volcano,
@@ -141,7 +142,9 @@ explorer_ui <- function(id) {
                   title = "Compare",
                   icon = icon("table-columns"),
                   uiOutput(ns("compare_controls_ui")),
-                  uiOutput(ns("compare_ui"))
+                  uiOutput(ns("compare_ui")),
+                  uiOutput(ns("compare_heatmap_note")),
+                  uiOutput(ns("compare_volcano_note"))
                 ),
 
                 nav_panel(
@@ -384,6 +387,9 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
       length(unique(values)) > 1
     }
 
+    # Max gene labels drawn per searched term on the Compare volcanoes.
+    VOLCANO_LABEL_CAP <- 3L
+
     group_label <- function(col_name) {
       labels <- c(
         de_category = "Contrast / DE category",
@@ -583,20 +589,19 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
           showlegend = FALSE,
           margin = list(t = 50)
         )
-      
-      # Annotate searched gene if present
+
+      # Annotate the most significant VOLCANO_LABEL_CAP rows per searched term.
       if (length(gene) > 0 && "gene_symbol" %in% names(plot_df)) {
-        for (g in gene) {
-          match_idxs <- which(toupper(plot_df$gene_symbol) == toupper(g))[1]
-          for (idx in match_idxs) {          # one annotation per row (each cell_type etc.)
-            gp <- plot_df[idx, , drop = FALSE]
-            p  <- p |> plotly::add_annotations(
-              x = gp$log2fc, y = gp$neg_log10p,
-              text = paste0("<b>", gp$gene_symbol, "</b>"),
-              showarrow = TRUE, arrowhead = 2, arrowsize = 0.8,
-              font = list(size = 12, color = "#2C3E50")
-            )
-          }
+        picked <- pick_label_rows(plot_df$gene_symbol, gene, plot_df$neg_log10p,
+                                  cap = VOLCANO_LABEL_CAP)
+        if (length(picked$idx) > 0) {
+          lab <- plot_df[picked$idx, , drop = FALSE]
+          p <- p |> plotly::add_annotations(
+            x = lab$log2fc, y = lab$neg_log10p,
+            text = paste0("<b>", lab$gene_symbol, "</b>"),
+            showarrow = TRUE, arrowhead = 2, arrowsize = 0.8,
+            font = list(size = 12, color = "#2C3E50")
+          )
         }
       }
       p
@@ -1126,9 +1131,15 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
     # )
     selected_dataset <- reactiveVal(NULL)
 
-    # This reactiveVal tracks the current rows selected inside Dataset Listings and drives 'Expression' and 'Compare' tab
+    # This reactiveVal tracks current rows selected inside Dataset Listings and drives 'Expression' and 'Compare' tabs
     # Can also drive the aggregate value boxes.
     listing_selection <- reactiveVal(integer())
+    # Set when a new dataset list arrives (from modal reselection) and DT is told to re-select every dataset-row.
+    # The table initially reports an EMPTY selection while it re-renders, before the selectRows() proxy
+    # call lands, and treating that as a real deselection previously drove compare_source_rows() to 0 rows for ~300ms
+    # = compare_ui flickers to "select at least two" alert, destroying the plot placeholders = Compare cards
+    # is left spinning/hanging - awaiting_listing_reselect fixes that.
+    awaiting_listing_reselect <- reactiveVal(FALSE)
     last_dataset_keys <- reactiveVal(character())
 
     # Active single-dataset selection for 'Plot' tab.
@@ -1237,14 +1248,20 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
                 lab_source = row$lab_source[1],
                 study_id = row$study_id[1],
                 limit = 20000L,
-                offset = 0L
+                offset = 0L,
+                genes = selected_dataset()$genes,
+                proteins = selected_dataset()$proteins
               )
             )
           }) |>
             bindCache(
               compare_source_rows()[idx, , drop = FALSE]$lab_source[1],
               compare_source_rows()[idx, , drop = FALSE]$study_id[1],
-              sidebar_vals$plot_type()
+              sidebar_vals$plot_type(),
+              # Only the Volcano branch reads these, so the Heatmap/Violin branches are over-invalidated slightly 
+              # on a new search. Preferred over under-keying, which causes stale-plot bugs.
+              paste(selected_dataset()$genes %||% character(0), collapse = ","),
+              paste(selected_dataset()$proteins %||% character(0), collapse = ",")
             )
         }
 
@@ -1608,13 +1625,17 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
         lab_source = ds$lab_source,
         study_id = ds$study_id,
         limit = 20000L,
-        offset = 0L
+        offset = 0L,
+        genes = ds$genes,
+        proteins = ds$proteins
       )
     }) |> bindCache(
       is_plot_tab(),
       sidebar_vals$plot_type(),
       active_dataset()$lab_source %||% "",
-      active_dataset()$study_id %||% ""
+      active_dataset()$study_id %||% "",
+      paste(active_dataset()$genes %||% character(0), collapse = ","),
+      paste(active_dataset()$proteins %||% character(0), collapse = ",")
     )
 
     violin_data <- reactive({
@@ -1751,26 +1772,94 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
         )
       }
 
-      tagList(
-        tags$div(
-          style = "display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 14px;",
-          lapply(seq_len(nrow(datasets)), function(i) {
-            row <- datasets[i, , drop = FALSE]
-            card(
-              full_screen = TRUE,
-              card_header(
-                paste0(row$dataset_name[1], " · ", row$omic_type[1], " · ", row$lab_source[1])
-              ),
-              card_body(
-                plotlyOutput(session$ns(paste0("compare_plot_", i)), height = "420px") |> withSpinner(
-                  type = 1, caption = "Loading plot...", color = "#5b5b5b")
-              )
+      tags$div(
+        style = "display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 14px;",
+        lapply(seq_len(nrow(datasets)), function(i) {
+          row <- datasets[i, , drop = FALSE]
+          card(
+            full_screen = TRUE,
+            card_header(
+              paste0(row$dataset_name[1], " · ", row$omic_type[1], " · ", row$lab_source[1])
+            ),
+            card_body(
+              plotlyOutput(session$ns(paste0("compare_plot_", i)), height = "420px") |> withSpinner(
+                type = 1, caption = "Loading plot...", color = "#5b5b5b")
             )
-          })
-        ),
-        # Shared explainer, rendered once below the whole grid rather than inside each card
-        if (identical(sidebar_vals$plot_type(), "Heatmap")) heatmap_info_ui()
+          )
+        })
       )
+    })
+
+    # Per-panel label summaries for the Compare volcano tooltip note.
+    compare_label_summary <- reactive({
+      req(is_compare_tab(), identical(sidebar_vals$plot_type(), "Volcano"))
+      datasets <- compare_source_rows()
+      req(nrow(datasets) >= 2)
+
+      terms <- unique(trimws(c(selected_dataset()$genes %||% character(0),
+                               selected_dataset()$proteins %||% character(0))))
+      terms <- terms[nzchar(terms)]
+      # Returns empty rather than req()-ing so the caller can still render the explainer when
+      # nothing has been searched yet.
+      if (length(terms) == 0) return(list())
+
+      out <- lapply(seq_len(nrow(datasets)), function(i) {
+        df <- get_compare_row_data(i)()
+        if (is.null(df) || nrow(df) == 0 || !"gene_symbol" %in% names(df)) return(NULL)
+        sig <- if ("padj" %in% names(df)) df$padj else rep(NA_real_, nrow(df))
+        if ("pvalue" %in% names(df)) sig[is.na(sig)] <- df$pvalue[is.na(sig)]
+        picked <- pick_label_rows(df$gene_symbol, terms, -log10(sig), cap = VOLCANO_LABEL_CAP)
+        notes <- label_cap_notes(picked$summary)
+        if (is.null(notes)) return(NULL)
+        list(name = datasets$dataset_name[i], notes = notes)
+      })
+      out[!vapply(out, is.null, logical(1))]
+    })
+
+    output$compare_volcano_note <- renderUI({
+      req(is_compare_tab(), identical(sidebar_vals$plot_type(), "Volcano"))
+      req(nrow(compare_source_rows()) >= 2)
+      # if (length(panels) == 0) return(NULL)
+      panels <- compare_label_summary()
+      tagList(
+        # Caption only when something was actually omitted; the explainer should always show up
+        if (length(panels) > 0) volcano_label_caption(panels),
+        volcano_info_ui()
+      )
+    })
+
+    # Extracted so output$compare_volcano_note stays readable.
+    volcano_label_caption <- function(panels) {
+      tags$div(
+        style = "font-size:12px; color:#666; margin:6px 0 0 2px; display:flex; align-items:center; gap:2px;",
+        tags$span(sprintf("Labels: max %d per gene \u00b7 %d panel%s with omissions",
+                          VOLCANO_LABEL_CAP, length(panels),
+                          if (length(panels) == 1) "" else "s")),
+        tool_tip(
+          tip_text(
+            tags$div(style = "font-weight:600; margin-bottom:4px;", "Gene labels"),
+            tags$div(sprintf(paste("At most %d labels are drawn per gene per panel, chosen by",
+                                   "significance (largest -log10 p). Every matching point is still",
+                                   "plotted and hoverable - only the labels are limited."),
+                             VOLCANO_LABEL_CAP)),
+            lapply(panels, function(pn) tagList(
+              tags$div(style = "font-weight:600; margin-top:6px;", pn$name),
+              tags$ul(style = "padding-left:16px; margin:2px 0 0;",
+                      lapply(pn$notes, function(n) tags$li(n)))
+            ))
+          ),
+          placement = "top"
+        )
+      )
+    }
+
+    # Shared explainer, once below the whole grid rather than inside each card. Kept in its own
+    # output so plot_type changes never re-render the grid that holds the plot placeholders.
+    output$compare_heatmap_note <- renderUI({
+      req(is_compare_tab())
+      req(nrow(compare_source_rows()) >= 2)
+      if (!identical(sidebar_vals$plot_type(), "Heatmap")) return(NULL)
+      heatmap_info_ui()
     })
 
     # ── Compare tab renderPlotly — one per card slot, and cache output ────────────────────────
@@ -1791,7 +1880,6 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
           output_id <- paste0("compare_plot_", idx)
 
           output[[output_id]] <- renderPlotly({
-
             current_state <- selected_dataset()
             req(current_state)
 
@@ -1925,7 +2013,18 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
         "Cell types", "Conditions"
       )[seq_along(display)]
 
-      datatable(display, selection="multiple", rownames=FALSE,
+      datatable(display,
+        # Render already selected rather than relying on the selectRows() proxy call in the
+        # re-selection observer below fixes Compare hanging spinners
+        # isolate() preserves the user's own selection if the table re-renders for any other reason, defaulting to all
+        selection = list(
+          mode = "multiple",
+          selected = isolate({
+            sel <- listing_selection()
+            if (length(sel) == 0) seq_len(nrow(display)) else sel
+          })
+        ),
+        rownames=FALSE,
         class="table-sm table-hover",
         options=list(dom="t", pageLength=20, scrollX=TRUE))
 
@@ -1940,6 +2039,7 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
       dataset_keys <- dataset_key(ds$selected_datasets)
       if (!identical(dataset_keys, last_dataset_keys())) {
         last_dataset_keys(dataset_keys)
+        awaiting_listing_reselect(TRUE)
         listing_selection(seq_len(nrow(ds$selected_datasets)))
         dataTableProxy("dataset_listing_table") |> selectRows(seq_len(nrow(ds$selected_datasets)))
         active_row(1) # defaults to first row
@@ -1951,6 +2051,16 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
     observeEvent(input$dataset_listing_table_rows_selected, {
       # Determines which datasets were recently un/checked by comparing to the previous selection
       row_idx <- input$dataset_listing_table_rows_selected %||% integer(0)
+
+      # Swallow exactly ONE empty report while the table is re-selecting for a new dataset list.
+      # Clearing the flag as we swallow keeps this self-limiting: a genuine "untick everything"
+      # is the next event, propagates normally, and still shows the fewer-than-two alert.
+      if (length(row_idx) == 0 && isTRUE(isolate(awaiting_listing_reselect()))) {
+        awaiting_listing_reselect(FALSE)
+        return(invisible(NULL))
+      }
+      if (length(row_idx) > 0) awaiting_listing_reselect(FALSE)
+
       previous_idx <- isolate(listing_selection())
       if (identical(row_idx, previous_idx)) {
         return(invisible(NULL))

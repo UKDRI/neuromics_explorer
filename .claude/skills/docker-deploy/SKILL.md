@@ -84,8 +84,8 @@ Once the development version is ready and the user is satisfied with it, carry o
 ```bash
 git checkout main    # <-- Should switch branch to main, then proceed
 git pull
-DEV_TAG=1.2.1-dev    # <-- confirm with the user, if incorrect then list what was previously used, ask for correct tag and set here
-PROD_TAG=1.2.1       # <-- confirm with the user, if incorrect then list what was previously used, ask for correct tag and set here
+DEV_TAG=1.2.1-dev    # <-- confirm with the user, if incorrect or unsure then list what was previously used, ask for correct tag and set here
+PROD_TAG=1.2.1       # <-- confirm with the user, if incorrect or unsure then list what was previously used, ask for correct tag and set here
 
 docker tag shesanislandukdri/neuromics_explorer_shiny:${DEV_TAG}   shesanislandukdri/neuromics_explorer_shiny:${PROD_TAG}
 docker tag shesanislandukdri/neuromics_explorer_backend:${DEV_TAG} shesanislandukdri/neuromics_explorer_backend:${PROD_TAG}

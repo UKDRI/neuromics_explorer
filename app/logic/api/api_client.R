@@ -10,10 +10,37 @@ box::use(
 ARROW_MEDIA_TYPE <- "application/vnd.apache.arrow.stream"
 SESSION_HEADER <- "X-NEX-Session-ID"
 USER_ID_HEADER <- "X-NEX-User-ID"
+METRICS_HEADER <- "X-NEX-Metrics"
 
+
+#' Has the visitor declined first-party usage metrics?
+#'
+#' The browser records the choice in localStorage and mirrors it into the
+#' nex_metrics cookie (static/nex_consent.js). The Shiny input is checked first
+#' because HTTP_COOKIE is captured once at websocket connect and goes stale as
+#' soon as someone changes their choice from the privacy page mid-session.
+#'
+#' @noRd
+api_metrics_opt_out <- function() {
+  domain <- shiny::getDefaultReactiveDomain()
+  if (is.null(domain)) return(FALSE)
+
+  flag <- domain$input$nex_metrics_opt_out
+  if (!is.null(flag) && length(flag) == 1 && !is.na(flag)) return(isTRUE(as.logical(flag)))
+
+  cookie_header <- domain$request$HTTP_COOKIE
+  if (!is.null(cookie_header) && grepl("nex_metrics=off", cookie_header, fixed = TRUE)) {
+    return(TRUE)
+  }
+  FALSE
+}
 
 #' @noRd
 api_user_id <- function() {
+  # Opted-out visitors get no identifier at all, so the backend has nothing to
+  # key a log row on and cannot fall back to the request IP.
+  if (api_metrics_opt_out()) return(NULL)
+
   domain <- shiny::getDefaultReactiveDomain() # lifetime / session ownership management
   # Prefer a browser-provided Shiny input when available
   if (!is.null(domain)) {
@@ -172,6 +199,15 @@ build_request <- function(base_url, path, query = list(), accept_arrow = TRUE) {
     req <- do.call(
       httr2::req_headers,
       c(list(req), stats::setNames(list(user_id), USER_ID_HEADER))
+    )
+  }
+
+  # Forward the opt-out explicitly: the browser's cookie never reaches FastAPI,
+  # because the browser only ever talks to Shiny.
+  if (api_metrics_opt_out()) {
+    req <- do.call(
+      httr2::req_headers,
+      c(list(req), stats::setNames(list("off"), METRICS_HEADER))
     )
   }
 
@@ -459,19 +495,85 @@ fetch_expression_table <- function(lab_source, study_id,
   )
 }
 
+#' Fetch pre-collapsed heatmap cells for one dataset: one row per gene x group.
+#'
+#' UI connection: the heatmap draws a single log2fc per (gene, group) pair, so DuckDB does the
+#' collapse. Replaces fetching rows, which hit API 5,000 cap on wide datasets.
+#' @param group_by One of the heatmap grouping columns (see HEATMAP_GROUP_COLUMNS server-side).
+#' @export
+fetch_expression_heatmap <- function(lab_source, study_id,
+                                     genes = NULL, proteins = NULL,
+                                     group_by = "de_category",
+                                     padj_thresh = 0.05, lfc_thresh = 0,
+                                     cell_type = NULL) {
+  genes <- unique(trimws(genes %||% character(0)))
+  genes <- genes[nzchar(genes)]
+  proteins <- unique(trimws(proteins %||% character(0)))
+  proteins <- proteins[nzchar(proteins)]
+  if (length(genes) == 0 && length(proteins) == 0) return(data.frame())
+
+  perform_arrow_request(
+    sprintf("/datasets/%s/%s/expression/heatmap", lab_source, study_id),
+    query = list(
+      gene      = genes,
+      protein   = proteins,
+      group_by  = group_by,
+      padj      = padj_thresh,
+      lfc       = lfc_thresh,
+      cell_type = cell_type
+    )
+  )
+}
+
+#' Fetch distinct values for each candidate heatmap grouping column.
+#'
+#' UI connection: the X-axis dropdown used to infer its options from all fetched rows, now it infers
+#' them from the server-side fetching of distinct values.
+#' @export
+fetch_expression_grouping_options <- function(lab_source, study_id,
+                                              genes = NULL, proteins = NULL,
+                                              cell_type = NULL) {
+  genes <- unique(trimws(genes %||% character(0)))
+  genes <- genes[nzchar(genes)]
+  proteins <- unique(trimws(proteins %||% character(0)))
+  proteins <- proteins[nzchar(proteins)]
+
+  perform_arrow_request(
+    sprintf("/datasets/%s/%s/expression/grouping-options", lab_source, study_id),
+    query = list(
+      gene      = genes,
+      protein   = proteins,
+      cell_type = cell_type
+    )
+  )
+}
+
 #' Fetch the lightweight volcano payload for one dataset.
 #'
 #' @export
+#' @param genes,proteins Searched terms. When supplied, their rows are UNIONed on top of the ranked
+#'   `limit` slice (capped by `goi_limit`), ensuring the volcano can label most terms, even if repeated.
 fetch_expression_volcano <- function(lab_source, study_id,
                                      cell_type = NULL,
                                      limit = 20000L,
-                                     offset = 0L) {
+                                     offset = 0L,
+                                     genes = NULL,
+                                     proteins = NULL,
+                                     goi_limit = 150L) {
+  genes <- unique(trimws(genes %||% character(0)))
+  genes <- genes[nzchar(genes)]
+  proteins <- unique(trimws(proteins %||% character(0)))
+  proteins <- proteins[nzchar(proteins)]
+
   perform_arrow_request(
     sprintf("/datasets/%s/%s/expression/volcano", lab_source, study_id),
     query = list(
       cell_type = cell_type,
       limit = as.integer(limit),
-      offset = as.integer(offset)
+      offset = as.integer(offset),
+      gene = genes,
+      protein = proteins,
+      goi_limit = as.integer(goi_limit)
     )
   )
 }
