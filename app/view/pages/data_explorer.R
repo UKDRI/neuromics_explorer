@@ -28,7 +28,7 @@ box::use(
   app/view/components/results_table[results_ui, results_server],
   app/view/components/umap_plot[umap_ui, umap_server],
   app/view/components/violin_plot[violin_ui, violin_server],
-  app/view/components/volcano_plot[volcano_ui, volcano_server],
+  app/view/components/volcano_plot[volcano_ui, volcano_server, volcano_info_ui],
   app/view/components/feature_scatter_plot[feature_scatter_ui, feature_scatter_server],
   app/view/components/histogram_plot[histogram_ui, histogram_server],
   app/view/components/dots_plot[dots_ui, dots_server],
@@ -1799,7 +1799,9 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
       terms <- unique(trimws(c(selected_dataset()$genes %||% character(0),
                                selected_dataset()$proteins %||% character(0))))
       terms <- terms[nzchar(terms)]
-      req(length(terms) > 0)
+      # Returns empty rather than req()-ing so the caller can still render the explainer when
+      # nothing has been searched yet.
+      if (length(terms) == 0) return(list())
 
       out <- lapply(seq_len(nrow(datasets)), function(i) {
         df <- get_compare_row_data(i)()
@@ -1815,8 +1817,19 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
     })
 
     output$compare_volcano_note <- renderUI({
+      req(is_compare_tab(), identical(sidebar_vals$plot_type(), "Volcano"))
+      req(nrow(compare_source_rows()) >= 2)
+      # if (length(panels) == 0) return(NULL)
       panels <- compare_label_summary()
-      if (length(panels) == 0) return(NULL)
+      tagList(
+        # Caption only when something was actually omitted; the explainer should always show up
+        if (length(panels) > 0) volcano_label_caption(panels),
+        volcano_info_ui()
+      )
+    })
+
+    # Extracted so output$compare_volcano_note stays readable.
+    volcano_label_caption <- function(panels) {
       tags$div(
         style = "font-size:12px; color:#666; margin:6px 0 0 2px; display:flex; align-items:center; gap:2px;",
         tags$span(sprintf("Labels: max %d per gene \u00b7 %d panel%s with omissions",
@@ -1838,7 +1851,7 @@ explorer_server <- function(id, initial_link = reactive(NULL)) {
           placement = "top"
         )
       )
-    })
+    }
 
     # Shared explainer, once below the whole grid rather than inside each card. Kept in its own
     # output so plot_type changes never re-render the grid that holds the plot placeholders.

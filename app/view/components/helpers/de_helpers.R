@@ -76,33 +76,18 @@ pick_strongest <- function(x) {
   x[which.max(abs(x))]
 }
 
-#' Row indices whose gene symbol matches one searched term. If gene present, returns all matching rows
-#'
-#' Case-insensitive, and splits composite symbols so a dataset storing "GAPDH;GAPD" still
-#' matches a search for GAPDH (i.e. hong prot dataset).
-#'
-#' Prevents stray NA labels pointing at nothing  on volcano plots
-#'
-#' TODO: normalise composite gene symbols at conversion time (app/logic/conversions/*) so
-#' every layer - dataset search, gene index, and plots - sees one clean symbol per row instead
-#' of composites ie "GAPDH;GAPD". This client-side split would then be unnecessary, and the
-#' dataset-search table would stop showing matches that the plots cannot label.
-#' @param symbols character vector of gene symbols, one per row.
-#' @param term    single searched term.
-#' @export
-match_gene_symbol_rows <- function(symbols, term) {
-  if (length(symbols) == 0 || length(term) != 1 || is.na(term) || !nzchar(trimws(term))) {
-    return(integer(0))
-  }
-  target <- toupper(trimws(term))
-  parts <- strsplit(toupper(as.character(symbols)), "[;,|]")
-  which(vapply(parts, function(p) target %in% trimws(p), logical(1)))
-}
-
 #' Choose which rows to label per searched gene, and report what was left out e.g. volcano plot hover
 #' tooltip.
 #'
 #' Volcano payloads guarantees the searched terms are present, while `cap` is no. of most significant rows per term that will be visible.
+#'
+#' Matching is case-insensitive and splits composite symbols, so "GAPDH;GAPD" (hong proteomics)
+#' matches a GAPDH search. Returns integer(0), never NA, so an absent gene draws no stray label.
+#'
+#' TODO: normalise composite gene symbols at conversion time (app/logic/conversions/*) so every
+#' layer - dataset search, gene index, and plots - sees one clean symbol per row. This
+#' client-side split would then be unnecessary, and the dataset-search table would stop showing
+#' matches that the plots cannot label.
 #'
 #' @param symbols character vector of gene symbols, one per row (composite "A;B" supported).
 #' @param terms   searched terms.

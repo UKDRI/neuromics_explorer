@@ -42,6 +42,64 @@ COLS <- list(
 )
 
 # ── UI ────────────────────────────────────────────────────────────────────────
+#' Explainer for what the volcano shows and what it leaves out.
+#'
+#' Exported so the Compare tab can render the same copy once below its grid.
+#' @export
+volcano_info_ui <- function() {
+  tags$details(
+    class = "alert alert-info",
+    style = "font-size: 12px; line-height: 1.5; padding: 8px 12px; margin: 10px 0 0;",
+    tags$summary(
+      style = "cursor: pointer; font-weight: 600; font-size: 13px;",
+      "What this volcano shows"
+    ),
+    tags$div(
+      style = "margin-top: 8px;",
+
+      tags$p(
+        style = "margin: 0 0 6px;",
+        tags$b("Not every row is plotted."),
+        " The volcano draws the ", tags$b("20,000 most significant rows"),
+        " (lowest padj, ties broken by largest |log", tags$sub("2"), "FC|). Plotting everything
+         would bury the overall pattern."
+      ),
+
+      tags$p(
+        style = "margin: 0 0 6px;",
+        tags$b("Your searched genes are always included."),
+        " They are added on top of that 20,000, up to 150 rows per query, so a gene is never
+         silently missing just because it sits outside the most-significant slice."
+      ),
+
+      tags$p(
+        style = "margin: 0 0 6px; padding: 6px 8px; background: rgba(255,255,255,0.55); border-radius: 4px;",
+        tags$b("Labels are capped, points are not. "),
+        "At most ", tags$b(LABEL_CAP), " labels are drawn per gene, on its most significant rows.
+         A gene measured across many cell types, clusters or drug contrasts would otherwise bury
+         the plot under its own name. Every matching point is still plotted and hoverable — only
+         the labels are limited, and a note below the plot says what was left out."
+      ),
+
+      tags$p(
+        style = "margin: 0 0 6px;",
+        tags$b("Colour and dashed lines "), "come from the sidebar's ",
+        tags$b("Significance Filters"), ": red = significant and increased, blue = significant and
+         decreased, grey = neither. The dashed lines mark those same padj and |log",
+        tags$sub("2"), "FC| thresholds, so moving a slider moves the lines."
+      ),
+
+      tags$p(
+        style = "margin: 0;",
+        tags$b("Y axis: "), "-log", tags$sub("10"), " of padj where the lab supplied one, otherwise
+         the raw p-value — so height is not always directly comparable between datasets. Some
+         datasets also store several symbols per row (eg ", tags$code("GAPDH;GAPD"),
+        "); searching any one of them matches and labels the whole stored symbol."
+      )
+    )
+  )
+}
+
 #' @export
 volcano_ui <- function(id) {
   ns <- NS(id)
@@ -51,7 +109,8 @@ volcano_ui <- function(id) {
     # Kept OUTSIDE the plotly object so it cannot overlap points, survives zoom/pan, and stays out of PNG exports.
     uiOutput(ns("label_note")),
     uiOutput(ns("click_info")),
-    p("Volcano plot showing differentially expressed genes between selected conditions.")
+    p("Volcano plot showing differentially expressed genes between selected conditions."),
+    volcano_info_ui()
   )
 }
 
@@ -138,15 +197,7 @@ volcano_server <- function(id, de_data, padj_thresh, lfc_thresh, gene = reactive
       )
     })
 
-    # TRACE-REMOVE: why the Plot-tab volcano draws no gene labels while Compare does.
-    # Delete every line tagged TRACE-REMOVE once confirmed.
-    .vtrace <- function(...) {
-      message(sprintf("[VOLC %s] %s", format(Sys.time(), "%H:%M:%OS3"),
-                      paste0(as.character(list(...)), collapse = "")))
-    }
-
     plot_obj <- reactive({
-      .vtrace("plot_obj BODY RUN (a cache HIT would print nothing at all)")   # TRACE-REMOVE
       df   <- plot_df()
       pt   <- padj_thresh()
       lfc  <- lfc_thresh()
@@ -225,22 +276,7 @@ volcano_server <- function(id, de_data, padj_thresh, lfc_thresh, gene = reactive
       #     font = list(size = 12, color = "#2C3E50")
       #   )
       # }
-      g_terms <- gene()
       picked <- picked_labels()
-      # TRACE-REMOVE
-      .vtrace("  gene() n=", length(g_terms),
-              " values=", paste(g_terms, collapse = "/"),
-              " | df rows=", nrow(df),
-              " has gene_symbol=", "gene_symbol" %in% names(df),
-              " | study_id=", paste(unique(df$study_id)[1], collapse = ""),
-              " lab_source_in_df=", "lab_source" %in% names(df))
-      # TRACE-REMOVE: fingerprint the payload. Expected sum(log2fc) per dataset (20000-row
-      # payload): bowles 137.3959 | dion 8587.283 | ruepp 212.7862 (9746 rows) | webber 16706.8684
-      .vtrace("  PAYLOAD FINGERPRINT rows=", nrow(df),
-              " sum(log2fc)=", round(sum(df$log2fc, na.rm = TRUE), 4),
-              " first genes=", paste(utils::head(df$gene_symbol, 3), collapse = ","))
-      .vtrace("  picked ", nrow(picked$summary), " term(s) -> ", length(picked$idx),
-              " label(s); matched total=", sum(picked$summary$matched))   # TRACE-REMOVE
       # ONE add_annotations call over the capped rows, not one per row otherwise each call rebuilds the
       # whole plotly object.
       if (length(picked$idx) > 0) {
@@ -252,8 +288,6 @@ volcano_server <- function(id, de_data, padj_thresh, lfc_thresh, gene = reactive
           font = list(size = 12, color = "#2C3E50")
         )
       }
-      .vtrace("  annotations on returned object=",
-              length(plotly::plotly_build(p)$x$layout$annotations %||% list()))   # TRACE-REMOVE
       plotly::event_register(p, "plotly_click")
       p
     }) |>
