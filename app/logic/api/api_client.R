@@ -551,16 +551,29 @@ fetch_expression_grouping_options <- function(lab_source, study_id,
 #' Fetch the lightweight volcano payload for one dataset.
 #'
 #' @export
+#' @param genes,proteins Searched terms. When supplied, their rows are UNIONed on top of the ranked
+#'   `limit` slice (capped by `goi_limit`), ensuring the volcano can label most terms, even if repeated.
 fetch_expression_volcano <- function(lab_source, study_id,
                                      cell_type = NULL,
                                      limit = 20000L,
-                                     offset = 0L) {
+                                     offset = 0L,
+                                     genes = NULL,
+                                     proteins = NULL,
+                                     goi_limit = 150L) {
+  genes <- unique(trimws(genes %||% character(0)))
+  genes <- genes[nzchar(genes)]
+  proteins <- unique(trimws(proteins %||% character(0)))
+  proteins <- proteins[nzchar(proteins)]
+
   perform_arrow_request(
     sprintf("/datasets/%s/%s/expression/volcano", lab_source, study_id),
     query = list(
       cell_type = cell_type,
       limit = as.integer(limit),
-      offset = as.integer(offset)
+      offset = as.integer(offset),
+      gene = genes,
+      protein = proteins,
+      goi_limit = as.integer(goi_limit)
     )
   )
 }

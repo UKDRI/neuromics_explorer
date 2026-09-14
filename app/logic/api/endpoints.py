@@ -848,6 +848,9 @@ def expression_volcano(
     cell_type: str | None = None,
     limit: int = Query(DEFAULT_PLOT_LIMIT, ge=100, le=MAX_PLOT_LIMIT),
     offset: int = Query(0, ge=0),
+    gene: list[str] | None = Query(None),
+    protein: list[str] | None = Query(None),
+    goi_limit: int = Query(150, ge=0, le=MAX_PLOT_LIMIT),
 ):
     """
     Return the lean volcano payload for one dataset.
@@ -855,28 +858,70 @@ def expression_volcano(
     UI connection:
     the Plot-tab volcano only needs significance columns plus lightweight
     labels, so this route avoids sending abundance / percentage columns.
+
+    `limit` is a deliberate cap to prevent too many overlapping data points hides the general expression
+    pattern but this `ORDER BY padj LIMIT 20000` can drop a searched term entirely if not in the payload.
+    With `gene`/`protein` supplied, their rows are UNIONed on top of the ranked slice (capped at `goi_limit`),
+    preserving the ranked budget while guaranteeing the searched features are plotted and labelled.
     """
     view = _safe_view_name("v", lab, study_id)
+    genes = _clean_optional_terms(gene)
+    proteins = _clean_optional_terms(protein)
+
     clauses, params = _expression_filters([], [], cell_type)
     clauses.append("log2fc IS NOT NULL")
     clauses.append("(padj IS NOT NULL OR pvalue IS NOT NULL)")
     where_sql = _where_sql(clauses)
 
-    params.extend([limit, offset])
-    sql = f"""
-        SELECT
+    cols = f"""
           {SEMANTIC_GENE_EXPR} AS gene_symbol,
           human_gene, protein_id, organism,
           log2fc, pvalue, padj,
           cell_type, condition_a, condition_b,
-          study_id
-        FROM {view}
-        {where_sql}
-        ORDER BY padj ASC NULLS LAST, ABS(log2fc) DESC NULLS LAST
-        LIMIT ?
-        OFFSET ?
+          study_id"""
+
+    term_preds, term_params = _term_predicates(genes, proteins)
+
+    if not term_preds:
+        # No searched terms: unchanged single-query path
+        sql = f"""
+            SELECT {cols}
+            FROM {view}
+            {where_sql}
+            ORDER BY padj ASC NULLS LAST, ABS(log2fc) DESC NULLS LAST
+            LIMIT ?
+            OFFSET ?
+        """
+        return _query_arrow(request, sql, params + [limit, offset])
+
+    goi_sql = "(" + " OR ".join(term_preds) + ")"
+
+    # COALESCE(NOT ..., TRUE) is load-bearing: a NULL gene_symbol would make NOT(...) NULL and
+    # silently drop the row from the ranked slice.
+    sql = f"""
+        SELECT * FROM (
+          SELECT {cols}
+          FROM {view}
+          {where_sql} AND COALESCE(NOT {goi_sql}, TRUE)
+          ORDER BY padj ASC NULLS LAST, ABS(log2fc) DESC NULLS LAST
+          LIMIT ?
+          OFFSET ?
+        )
+        UNION ALL
+        SELECT * FROM (
+          SELECT {cols}
+          FROM {view}
+          {where_sql} AND {goi_sql}
+          ORDER BY padj ASC NULLS LAST
+          LIMIT ?
+        )
     """
-    return _query_arrow(request, sql, params)
+    # Placeholder order: ranked slice (filters, terms, limit, offset), then GOI slice (filters, terms, goi_limit).
+    all_params = (
+        params + term_params + [limit, offset]
+        + params + term_params + [goi_limit]
+    )
+    return _query_arrow(request, sql, all_params)
 
 
 @router.get("/datasets/{lab}/{study_id}/expression/summary")
